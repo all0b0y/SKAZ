@@ -89,6 +89,17 @@ def _v2(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS explore_area_materials_area ON explore_area_materials(area_id)"
     )
+    # A custom area of a build before EX2 was made from OpenAlex topics: those are its hidden label already.
+    has_topics = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'explore_area_topics'"
+    ).fetchone()
+    if has_topics is None:
+        return
+    connection.execute(
+        "UPDATE explore_areas SET mapping_state = 'mapped', mapped_name = name "
+        "WHERE level = 'custom' AND mapping_state = 'pending' "
+        "AND EXISTS (SELECT 1 FROM explore_area_topics t WHERE t.area_id = explore_areas.id)"
+    )
 
 
 UPGRADES: dict[int, Callable[[sqlite3.Connection], None]] = {2: _v2}

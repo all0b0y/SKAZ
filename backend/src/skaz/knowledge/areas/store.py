@@ -1,4 +1,8 @@
-"""Areas and read-marks persistence and ``AreaDirectory`` implementation (B4)."""
+"""Areas and read-marks persistence and ``AreaDirectory`` implementation (B4; EX2 own topics).
+
+EX2: the map, the directory and area CRUD work on the user's own topics (``level='custom'``, see ``topics``).
+OpenAlex rows of builds before EX2 stay readable for old findings and signals, never on the map.
+"""
 
 from __future__ import annotations
 
@@ -29,6 +33,7 @@ from ..library.layout import STUDY_KINDS
 from ..service import KnowledgeService
 from .protocols import SignalDraft
 from .signals import SignalStore
+from .topics import TopicStore
 
 if TYPE_CHECKING:
     from ..science.protocols import TaxonomyNode
@@ -101,6 +106,7 @@ class AreasStore:
         self.kb = kb
         self.db = kb.db
         self.signals = signals
+        self.topic_store = TopicStore(kb)
 
     # -- taxonomy & area rows ------------------------------------------------
 
@@ -328,7 +334,9 @@ class AreasStore:
 
         for area_id, area in areas.items():
             if area.level == "custom":
-                collected: set[str] = {area_id}
+                collected: set[str] = {area_id} | {
+                    child.id for child in areas.values() if child.parent_id == area_id
+                }
                 for tid in direct_topics.get(area_id, ()):
                     for matched_id in topic_to_taxonomy_areas.get(tid, ()):
                         collected.update(subtrees.get(matched_id, {matched_id}))
@@ -351,8 +359,17 @@ class AreasStore:
     # -- AreaDirectory Protocol ----------------------------------------------
 
     def area_for_topics(self, topic_ids: Sequence[str]) -> str | None:
+        """EX2: the own topic whose hidden label holds one of ``topic_ids`` (a subtopic before its topic);
+        else an OpenAlex row of an older build."""
         if not topic_ids:
             return None
+        own = [topic for topic in self.topic_store.topics(include_hidden=False) if topic.mapping_current]
+        own.sort(key=lambda topic: topic.parent_id is None)  # subtopics first: the narrower match
+        labels = {topic.id: set(self.topic_store.hidden_ids(topic.id)) for topic in own}
+        for tid in topic_ids:
+            for topic in own:
+                if tid in labels[topic.id]:
+                    return topic.id
         areas = self.all_area_rows()
         direct = self._topics_by_area(areas)
         topic_lookup: dict[str, list[AreaRow]] = defaultdict(list)
@@ -395,8 +412,14 @@ class AreasStore:
         if area_id not in areas:
             return ()
         area = areas[area_id]
+        if area.level == "custom":
+            # EX2: the hidden OpenAlex label of the topic and its subtopics (empty while not mapped).
+            ids: list[str] = []
+            for sub_id in self.topic_store.descendants(area_id):
+                ids += [tid for tid in self.topic_store.hidden_ids(sub_id) if tid not in ids]
+            return tuple(ids)
         direct = self._topics_by_area(areas)
-        if area.level in ("topic", "custom"):
+        if area.level == "topic":
             return tuple(direct.get(area_id, []))
         if area.taxonomy_id:
             # A domain/field/subfield is its own hierarchy id: the science query covers every topic below
@@ -409,6 +432,26 @@ class AreasStore:
                 if tid not in result:
                     result.append(tid)
         return tuple(result)
+
+    def largest_topics(self, limit: int = 8) -> Sequence[str]:
+        if limit <= 0:
+            return ()
+        labels = self.topic_store.labels()
+        wiki = set(self.topic_store.wiki_material_ids())
+        counts: dict[str, int] = defaultdict(int)
+        topics = self.topic_store.topics(include_hidden=True)
+        parent_of = {topic.id: topic.parent_id for topic in topics}
+        for mid, (aid, _origin) in labels.items():
+            if mid in wiki and aid in parent_of:
+                counts[parent_of[aid] or aid] += 1
+        visible = [t for t in topics if t.parent_id is None and not t.hidden and counts.get(t.id)]
+        visible.sort(key=lambda t: (-counts[t.id], t.name.casefold()))
+        return tuple(t.id for t in visible[:limit])
+
+    def top_concepts(self, area_id: str, limit: int = 5) -> Sequence[str]:
+        if area_id not in self.all_area_rows():
+            return ()
+        return tuple(self.topic_store.top_concepts(area_id, limit))
 
     def scope_ids(self, area_id: str) -> tuple[str, ...]:
         """The areas a tile counts: a taxonomy area and everything below it, or what a custom area collects
@@ -424,6 +467,15 @@ class AreasStore:
         areas = self.all_area_rows()
         if area_id not in areas:
             return ()
+        if areas[area_id].level == "custom":
+            # EX2: the materials labelled with the topic or one of its subtopics, in title order.
+            inside = set(self.topic_store.descendants(area_id))
+            labelled = {mid for mid, (aid, _origin) in self.topic_store.labels().items() if aid in inside}
+            records = sorted(
+                (record for record in self.kb.material_repo.list_all() if record.id in labelled),
+                key=lambda record: (record.title.casefold(), record.id),
+            )
+            return tuple(record.id for record in records)
         subtrees = self._subtree_map(areas)
         direct_topics = self._topics_by_area(areas)
         subtree_ids = subtrees.get(area_id, {area_id})
@@ -522,23 +574,15 @@ class AreasStore:
         publication_dates: Mapping[str, KbPublicationDate] | None = None,
         new_findings_by_area: Mapping[str, int] | None = None,
     ) -> KbArea:
-        name = body.name.strip()
+        """EX2: an own topic by name (a subtopic with ``parent_id``). OpenAlex ``topic_ids`` (the pre-EX2
+        custom area) become its hidden label at once; otherwise the label is made in the background."""
         topics = [t.strip() for t in dict.fromkeys(body.topic_ids) if t.strip()]
-        if not name or not topics:
-            raise ContractFailure(422, "invalid_request")
-        area_id = new_id("area")
-        with self.db.write() as conn:
-            conn.execute(
-                "INSERT INTO explore_areas("
-                "id, parent_id, taxonomy_id, level, original_name, name, hidden, pinned"
-                ") VALUES (?, NULL, NULL, 'custom', ?, ?, 0, 0)",
-                (area_id, name, name),
-            )
-            for tid in topics:
-                conn.execute(
-                    "INSERT OR IGNORE INTO explore_area_topics(area_id, topic_id) VALUES (?, ?)",
-                    (area_id, tid),
-                )
+        if topics:
+            if body.parent_id is not None:
+                raise ContractFailure(422, "invalid_request")
+            area_id = self.topic_store.create_mapped(body.name, topics)
+        else:
+            area_id = self.topic_store.create(body.name, body.parent_id)
         return self.get_area(
             area_id,
             publication_dates=publication_dates,
@@ -554,7 +598,10 @@ class AreasStore:
         new_findings_by_area: Mapping[str, int] | None = None,
     ) -> KbArea:
         current = self.get_area_row(area_id)
-        new_name = body.name.strip() if body.name is not None else current.name
+        if current.level == "custom" and body.name is not None:
+            self.topic_store.rename(area_id, body.name)  # conflicts and the stale hidden label
+            current = self.get_area_row(area_id)
+        new_name = body.name.strip() if body.name is not None and current.level != "custom" else current.name
         if not new_name:
             raise ContractFailure(422, "invalid_request")
         new_hidden = body.hidden if body.hidden is not None else current.hidden
@@ -603,8 +650,7 @@ class AreasStore:
         current = self.get_area_row(area_id)
         if current.level != "custom":
             raise ContractFailure(409, "conflict")
-        with self.db.write() as conn:
-            conn.execute("DELETE FROM explore_areas WHERE id = ?", (area_id,))
+        self.topic_store.delete(area_id)  # its subtopics too; their materials become unsorted
         return KbAcknowledged()
 
     def record_opened(self, area_id: str) -> KbAcknowledged:
@@ -820,16 +866,18 @@ class AreasStore:
         include_hidden: bool = False,
         publication_dates: Mapping[str, KbPublicationDate] | None = None,
         new_findings_by_area: Mapping[str, int] | None = None,
+        labelling: KbTopicLabelling | None = None,
     ) -> KbAreaMap:
+        """EX2: the user's own topics from stored labels (no model, no network). ``parent_id=None`` lists the
+        top-level topics; a topic's id lists its subtopics. OpenAlex rows of older builds are off the map."""
         if parent_id is not None:
             self.get_area_row(parent_id)
-        areas_by_id, total_pages, total_sources, subtrees = self._build_all_areas(
+        areas_by_id, total_pages, total_sources, _subtrees = self._build_all_areas(
             publication_dates=publication_dates or {},
             new_findings_by_area=new_findings_by_area or {},
         )
         rows_by_id = self.all_area_rows()
 
-        # Breadcrumbs from root down to parent_id
         breadcrumbs: list[KbArea] = []
         curr = parent_id
         seen: set[str] = set()
@@ -839,56 +887,45 @@ class AreasStore:
             curr = rows_by_id[curr].parent_id
         breadcrumbs.reverse()
 
-        # Direct children of parent_id
-        direct_areas = [
-            areas_by_id[row.id]
-            for row in rows_by_id.values()
-            if row.parent_id == parent_id and (include_hidden or not row.hidden)
-        ]
-
-        # Worth closing: gaps and thin areas anywhere below parent_id
-        if parent_id is None:
-            candidate_ids = [
-                rid for rid, r in rows_by_id.items() if not r.hidden and r.level != "custom"
-            ]
-        else:
-            subtree = subtrees.get(parent_id, {parent_id}) - {parent_id}
-            candidate_ids = [
-                rid
-                for rid in rows_by_id
-                if rid in subtree and not rows_by_id[rid].hidden and rows_by_id[rid].level != "custom"
-            ]
-
-        gap_areas = [
-            areas_by_id[rid]
-            for rid in candidate_ids
-            if areas_by_id[rid].gap_reason is not None
-        ]
-        # Prefer deepest gap areas so an ancestor doesn't shadow its specific topic gap
-        gap_id_set = {a.id for a in gap_areas}
-        filtered_gaps = [
-            a
-            for a in gap_areas
-            if not any(
-                other_id != a.id and other_id in subtrees.get(a.id, set())
-                for other_id in gap_id_set
-            )
-        ]
-        filtered_gaps.sort(key=lambda a: (0 if a.pages == 0 else 1, a.pages))
-
+        direct_areas = sorted(
+            (
+                areas_by_id[row.id]
+                for row in rows_by_id.values()
+                if row.parent_id == parent_id and row.level == "custom" and (include_hidden or not row.hidden)
+            ),
+            key=lambda area: (-area.materials, area.name.casefold()),
+        )
         return KbAreaMap(
             parent_id=parent_id,
             breadcrumbs=breadcrumbs,
             areas=direct_areas,
             total_pages=total_pages,
             total_sources=total_sources,
-            worth_closing=filtered_gaps,
-            # EX2 contract (step 0): X1 replaces these with the stored labelling state.
-            unsorted_materials=0,
-            labelling=KbTopicLabelling(
-                state="idle", job_id=None, done=0, total=0, reason_code=None, engine=None
+            worth_closing=[],  # EX2: removed with the OpenAlex domains map
+            unsorted_materials=len(self.topic_store.unsorted_material_ids()),
+            labelling=labelling
+            or KbTopicLabelling(
+                state="not_ready", job_id=None, done=0, total=0, reason_code="not_ready", engine=None
             ),
         )
+
+    def _custom_descendants(self, rows_by_id: Mapping[str, AreaRow]) -> dict[str, set[str]]:
+        children: dict[str, list[str]] = defaultdict(list)
+        for row in rows_by_id.values():
+            if row.parent_id is not None and row.level == "custom":
+                children[row.parent_id].append(row.id)
+        result: dict[str, set[str]] = {}
+        for aid, row in rows_by_id.items():
+            if row.level != "custom":
+                continue
+            found, stack = {aid}, [aid]
+            while stack:
+                for child in children.get(stack.pop(), ()):
+                    if child not in found:
+                        found.add(child)
+                        stack.append(child)
+            result[aid] = found
+        return result
 
     def _build_all_areas(
         self,
@@ -898,8 +935,13 @@ class AreasStore:
     ) -> tuple[dict[str, KbArea], int, int, dict[str, set[str]]]:
         rows_by_id = self.all_area_rows()
         subtrees = self._subtree_map(rows_by_id)
+        own_subtrees = self._custom_descendants(rows_by_id)
         direct_topics = self._topics_by_area(rows_by_id)
         stored_children_totals = self._children_totals()
+        labels = self.topic_store.labels()
+        labelled: dict[str, set[str]] = defaultdict(set)
+        for mid, (aid, _origin) in labels.items():
+            labelled[aid].add(mid)
 
         placeholders_study = ",".join("?" for _ in STUDY_KINDS)
         with self.db.read() as conn:
@@ -909,20 +951,8 @@ class AreasStore:
                     tuple(STUDY_KINDS),
                 ).fetchone()[0]
             )
-            total_sources = int(conn.execute("SELECT COUNT(*) FROM materials").fetchone()[0])
-
-            # Wiki pages per direct area_id
-            area_direct_pages: dict[str, set[str]] = defaultdict(set)
-            for row in conn.execute(
-                "SELECT eap.area_id, eap.page_id FROM explore_area_pages eap "
-                "JOIN pages p ON p.id = eap.page_id "
-                f"WHERE p.kind NOT IN ({placeholders_study})",
-                tuple(STUDY_KINDS),
-            ):
-                area_direct_pages[str(row["area_id"])].add(str(row["page_id"]))
-
-            # Page -> cited material_ids
-            page_materials: dict[str, set[str]] = defaultdict(set)
+            # Material -> the wiki pages citing it (a page belongs to the topics of its materials).
+            material_pages: dict[str, set[str]] = defaultdict(set)
             for row in conn.execute(
                 "SELECT ps.page_id, ps.material_id FROM page_sources ps "
                 "JOIN pages p ON p.id = ps.page_id "
@@ -930,41 +960,22 @@ class AreasStore:
                 f"WHERE p.kind NOT IN ({placeholders_study})",
                 tuple(STUDY_KINDS),
             ):
-                page_materials[str(row["page_id"])].add(str(row["material_id"]))
+                material_pages[str(row["material_id"])].add(str(row["page_id"]))
+            wiki_materials = set(material_pages)
 
-            # Materials and their origin topics/areas
+            # Origins only for OpenAlex rows of builds before EX2 (never on the map).
             all_materials: dict[str, tuple[set[str], set[str]]] = {}
-            for row in conn.execute("SELECT id, origin FROM materials"):
-                mid = str(row["id"])
-                origin_obj = json.loads(row["origin"]) if row["origin"] else None
-                all_materials[mid] = _origin_topics_and_areas(origin_obj)
+            if any(row.level != "custom" for row in rows_by_id.values()):
+                for row in conn.execute("SELECT id, origin FROM materials"):
+                    origin_obj = json.loads(row["origin"]) if row["origin"] else None
+                    all_materials[str(row["id"])] = _origin_topics_and_areas(origin_obj)
 
-            # Also count wiki pages whose cited materials carry a topic in an area
-            topic_to_area_ids: dict[str, set[str]] = defaultdict(set)
-            for aid, area_row in rows_by_id.items():
-                if area_row.taxonomy_id:
-                    topic_to_area_ids[area_row.taxonomy_id].add(aid)
-                for tid in direct_topics.get(aid, ()):
-                    topic_to_area_ids[tid].add(aid)
-            for pid, mids in page_materials.items():
-                for mid in mids:
-                    m_topics, m_areas = all_materials.get(mid, (set(), set()))
-                    for tid in m_topics:
-                        for aid in topic_to_area_ids.get(tid, ()):
-                            area_direct_pages[aid].add(pid)
-                    for aid in m_areas:
-                        if aid in rows_by_id:
-                            area_direct_pages[aid].add(pid)
-
-            # Read marks on materials
             marked_material_set: set[str] = {
                 str(r["target_id"])
                 for r in conn.execute(
                     "SELECT target_id FROM explore_read_marks WHERE target_kind = 'material'"
                 )
             }
-
-            # Latest activity per area and per material
             area_signal_time: dict[str, str] = {}
             material_signal_time: dict[str, str] = {}
             for row in conn.execute(
@@ -978,145 +989,94 @@ class AreasStore:
                 elif row["object_kind"] == "material":
                     material_signal_time[str(row["object_id"])] = str(row["latest"])
 
-        # Compute pages and materials sets per area (subtree-aggregated)
-        pages_by_area: dict[str, set[str]] = {}
         materials_by_area: dict[str, set[str]] = {}
-        for aid in rows_by_id:
-            sub_ids = subtrees.get(aid, {aid})
-            pset: set[str] = set()
-            sub_topics: set[str] = set()
-            for sid in sub_ids:
-                pset.update(area_direct_pages.get(sid, set()))
-                sub_topics.update(direct_topics.get(sid, ()))
-                srow = rows_by_id.get(sid)
-                if srow and srow.taxonomy_id:
-                    sub_topics.add(srow.taxonomy_id)
-            pages_by_area[aid] = pset
-
-            mset: set[str] = set()
-            for pid in pset:
-                mset.update(page_materials.get(pid, set()))
-            for mid, (m_topics, m_areas) in all_materials.items():
-                if (m_topics & sub_topics) or (m_areas & sub_ids):
-                    mset.add(mid)
+        scope_by_area: dict[str, set[str]] = {}
+        for aid, row in rows_by_id.items():
+            if row.level == "custom":
+                sub_ids = own_subtrees.get(aid, {aid})
+                mset = set().union(*(labelled.get(sid, set()) for sid in sub_ids))
+            else:
+                sub_ids = subtrees.get(aid, {aid})
+                sub_topics: set[str] = set()
+                for sid in sub_ids:
+                    sub_topics.update(direct_topics.get(sid, ()))
+                    srow = rows_by_id.get(sid)
+                    if srow and srow.taxonomy_id:
+                        sub_topics.add(srow.taxonomy_id)
+                mset = {
+                    mid
+                    for mid, (m_topics, m_areas) in all_materials.items()
+                    if (m_topics & sub_topics) or (m_areas & sub_ids)
+                }
             materials_by_area[aid] = mset
+            scope_by_area[aid] = sub_ids
 
-        # Direct children map
         direct_children: dict[str | None, list[AreaRow]] = defaultdict(list)
         for row in rows_by_id.values():
             direct_children[row.parent_id].append(row)
 
-        # First pass metrics
-        partial: dict[str, dict[str, Any]] = {}
+        built: dict[str, KbArea] = {}
+        total_wiki = len(wiki_materials)
         for aid, row in rows_by_id.items():
-            sub_ids = subtrees.get(aid, {aid})
-            pset = pages_by_area[aid]
+            sub_ids = scope_by_area[aid]
             mset = materials_by_area[aid]
+            in_wiki = mset & wiki_materials
+            pset: set[str] = set().union(*(material_pages.get(mid, set()) for mid in mset))
             page_count = len(pset)
-            source_count = len(mset)
-
-            years: list[int] = [
+            years = [
                 yr
                 for mid in mset
                 if mid in publication_dates and (yr := publication_dates[mid].year) is not None
             ]
-            newest_year = max(years) if years else None
-
-            activity_candidates: list[str] = [
-                area_signal_time[sid] for sid in sub_ids if sid in area_signal_time
-            ] + [
+            activity = [area_signal_time[sid] for sid in sub_ids if sid in area_signal_time] + [
                 material_signal_time[mid] for mid in mset if mid in material_signal_time
             ]
-            latest_activity_str = max(activity_candidates) if activity_candidates else None
-
-            findings_count = sum(new_findings_by_area.get(sid, 0) for sid in sub_ids)
-            marked_count = len(mset & marked_material_set)
-            wiki_share = (
-                round(min(1.0, max(0.0, page_count / total_pages)), 4)
-                if total_pages > 0
-                else 0.0
-            )
+            latest_activity = max(activity) if activity else None
             depth: Literal["empty", "thin", "medium", "dense"] = (
-                "empty"
-                if page_count == 0
-                else "thin"
-                if page_count < 10
-                else "medium"
-                if page_count < 40
+                "empty" if page_count == 0 else "thin" if page_count < 10 else "medium" if page_count < 40
                 else "dense"
             )
-
-            if row.level in ("topic", "custom"):
-                has_children = False
-                children_covered = 0
-                children_total = 0
+            if row.level == "custom":
+                visible_children = [c for c in direct_children.get(aid, []) if not c.hidden]
+                has_children = bool(visible_children)
+                children_covered = sum(1 for c in visible_children if materials_by_area.get(c.id))
+                children_total = len(visible_children)
+                topic_list: list[str] = []  # the hidden OpenAlex label never leaves the backend
+            elif row.level == "topic":
+                has_children, children_covered, children_total = False, 0, 0
+                topic_list = list(direct_topics.get(aid, []))
             else:
                 has_children = True
                 visible_children = [c for c in direct_children.get(aid, []) if not c.hidden]
-                children_covered = sum(
-                    1 for c in visible_children if len(pages_by_area.get(c.id, set())) > 0
-                )
-                children_total = max(
-                    stored_children_totals.get(aid, 0),
-                    len(visible_children),
-                )
-
-            topic_list = (
-                list(direct_topics.get(aid, []))
-                if row.level in ("topic", "custom")
-                else []
+                children_covered = sum(1 for c in visible_children if materials_by_area.get(c.id))
+                children_total = max(stored_children_totals.get(aid, 0), len(visible_children))
+                topic_list = []
+            built[aid] = KbArea.model_validate(
+                {
+                    "id": aid,
+                    "parent_id": row.parent_id,
+                    "taxonomy_id": row.taxonomy_id,
+                    "level": row.level,
+                    "name": row.name,
+                    "original_name": row.original_name,
+                    "hidden": row.hidden,
+                    "pinned": row.pinned,
+                    "topic_ids": topic_list,
+                    "has_children": has_children,
+                    "children_covered": children_covered,
+                    "children_total": children_total,
+                    "pages": page_count,
+                    "sources": len(mset),
+                    "newest_source_year": max(years) if years else None,
+                    "recent_activity_at": (
+                        datetime.fromisoformat(latest_activity) if latest_activity else None
+                    ),
+                    "new_findings": sum(new_findings_by_area.get(sid, 0) for sid in sub_ids),
+                    "marked_materials": len(mset & marked_material_set),
+                    "materials": len(in_wiki),
+                    "wiki_share": round(min(1.0, len(in_wiki) / total_wiki), 4) if total_wiki else 0.0,
+                    "depth": depth,
+                    "gap_reason": None,
+                }
             )
-
-            partial[aid] = {
-                "id": aid,
-                "parent_id": row.parent_id,
-                "taxonomy_id": row.taxonomy_id,
-                "level": row.level,
-                "name": row.name,
-                "original_name": row.original_name,
-                "hidden": row.hidden,
-                "pinned": row.pinned,
-                "topic_ids": topic_list,
-                "has_children": has_children,
-                "children_covered": children_covered,
-                "children_total": children_total,
-                "pages": page_count,
-                "sources": source_count,
-                "newest_source_year": newest_year,
-                "recent_activity_at": (
-                    datetime.fromisoformat(latest_activity_str) if latest_activity_str else None
-                ),
-                "new_findings": findings_count,
-                "marked_materials": marked_count,
-                "materials": 0,  # EX2 contract (step 0): X1 counts labelled materials
-                "wiki_share": wiki_share,
-                "depth": depth,
-                "gap_reason": None,
-            }
-
-        # Second pass: gap_reason using sibling coverage
-        for aid, row in rows_by_id.items():
-            info = partial[aid]
-            if row.level == "custom" or row.hidden:
-                continue
-            siblings = [
-                c
-                for c in direct_children.get(row.parent_id, [])
-                if c.id != aid and not c.hidden and c.level != "custom"
-            ]
-            covered_siblings = [
-                c for c in siblings if partial[c.id]["pages"] > 0
-            ]
-            if info["depth"] == "empty":
-                if covered_siblings:
-                    best = max(covered_siblings, key=lambda c: int(partial[c.id]["pages"]))
-                    info["gap_reason"] = f"Next to {best.name} · no pages yet"
-            elif info["depth"] == "thin" and (info["pages"] <= 4 or info["sources"] <= 1):
-                srcs = int(info["sources"])
-                src_word = "source" if srcs == 1 else "sources"
-                yr = info["newest_source_year"]
-                yr_suffix = f", {yr}" if yr is not None else ""
-                info["gap_reason"] = f"thin · {srcs} {src_word}{yr_suffix}"
-
-        built = {aid: KbArea.model_validate(data) for aid, data in partial.items()}
-        return built, total_pages, total_sources, subtrees
+        return built, total_pages, total_wiki, subtrees

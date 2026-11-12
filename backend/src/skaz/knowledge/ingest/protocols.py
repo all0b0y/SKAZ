@@ -9,6 +9,8 @@
   the wiki (``None`` = the default engine), or ``None`` when nothing is ready.
 * ``RecognitionCheck`` — area W2 checks speech for recognition errors before the
   Notes are written (step ``checking_recognition``), through this job's agent.
+* ``TopicLabeller`` — EX2: at the end of a material's processing the same agent gives
+  the material one of the user's topics (``knowledge/areas``); never fails the job.
 """
 from __future__ import annotations
 
@@ -68,4 +70,23 @@ class RecognitionRequest:
 class RecognitionCheck(Protocol):
     async def check(self, request: RecognitionRequest) -> int:
         """Propose and store corrections once per material; returns how many were applied."""
+        ...
+
+
+@dataclass(frozen=True)
+class TopicRequest:
+    """EX2: label one material that has just been written to the wiki, through this job's agent."""
+
+    material_id: str
+    ask: AskAgent
+    #: Appends a code-written line to the job journal.
+    log: Callable[[str], Awaitable[None]]
+    #: The wiki language: names of new topics are written in it.
+    language: str
+
+
+class TopicLabeller(Protocol):
+    async def label(self, request: TopicRequest) -> str | None:
+        """Store the material's topic; returns the topic id, ``None`` when none was set. Raises only
+        what the job's agent raised (a limit, a stop): the caller keeps the finished job either way."""
         ...
