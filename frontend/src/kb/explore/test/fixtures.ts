@@ -36,6 +36,7 @@ export function ex2Kb() {
   kb.areas.update = vi.fn(async (id, body) => ({ ...[...roots, ...children].find((a) => a.id === id)!, ...body } as KbArea));
   kb.areas.create = vi.fn(async (body) => topic('created', body.name, 0, { parent_id: body.parent_id ?? null }));
   kb.explore.jobs = vi.fn(async () => ({ jobs: [] }));
+  kb.explore.run = vi.fn(async () => runFixture());
   kb.explore.findings = vi.fn(async () => ({ ...f.KbFindings, groups: [], covered_count: 0, next_cursor: null, full_text_key_hint_count: 0 }));
   kb.explore.start = vi.fn(async () => runFixture({ state: 'running', stage: 'collect' }));
   const topics = {

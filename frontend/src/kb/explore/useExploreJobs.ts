@@ -34,6 +34,14 @@ export function useExploreJobs(clients: ExploreClients, hidden: boolean, initial
     void refresh();
   }, [refresh]);
 
+  const refreshRun = useCallback(async (runId: string) => {
+    const generation = version.current;
+    const next = await clients.explore.run(runId);
+    if (generation !== version.current || latest.current.run?.id !== runId) return;
+    version.current++; latest.current.run = next; rawSetRun(next);
+    await refresh();
+  }, [clients, refresh]);
+
   useEffect(() => {
     if (hidden) return;
     let live = true;
@@ -67,8 +75,16 @@ export function useExploreJobs(clients: ExploreClients, hidden: boolean, initial
         setIssue(null);
         if (changed) await refresh();
         if (extrasNeeded) {
-          const [settings, exploring] = await Promise.all([clients.maintenance.settings(), clients.explore.exploring()]);
+          const [settings, exploring, history] = await Promise.all([clients.maintenance.settings(), clients.explore.exploring(),
+            !nextRun && !previous.run ? clients.explore.jobs({ active: false }) : null]);
           if (!live || generation !== version.current) return;
+          const completed = history?.jobs.filter((job) => job.owner === 'explore' && ['done', 'cancelled', 'error'].includes(job.state))
+            .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+          if (completed) {
+            const restored = await clients.explore.run(completed.id);
+            if (!live || generation !== version.current) return;
+            rawSetRun(restored);
+          }
           setWeeklyDay(settings.enabled ? settings.next_due_at : null);
           setExploringItems(exploring.items);
           if (!nextWeekly) setWaiting(settings.latest_check_id && settings.candidates_waiting > 0
@@ -84,5 +100,5 @@ export function useExploreJobs(clients: ExploreClients, hidden: boolean, initial
   }, [clients, hidden, checkId, refresh]);
 
   return { run, repeatCheck, weeklyCheck, exploringItems, setExploringItems, weeklyDay, waiting, setWaiting,
-    issue, invalidate, setRun, setRepeatCheck, setWeeklyCheck };
+    issue, invalidate, setRun, refreshRun, setRepeatCheck, setWeeklyCheck };
 }

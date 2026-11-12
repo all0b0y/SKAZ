@@ -15,8 +15,8 @@ const append = (first: KbFunnelCandidate[], next: KbFunnelCandidate[]) => {
 };
 
 /** The same run funnel can be hosted by Explore or a Research task. No paid work starts on a read or override. */
-export function FunnelView({ run, client, busy = false, hidden = false, onCheckNovelty }: {
-  run: KbFunnelRun; client?: DiscoveryClient; busy?: boolean; hidden?: boolean; onCheckNovelty?: (candidateIds: string[]) => void;
+export function FunnelView({ run, client, busy = false, hidden = false, onCheckNovelty, onChanged }: {
+  run: KbFunnelRun; client?: DiscoveryClient; busy?: boolean; hidden?: boolean; onCheckNovelty?: (candidateIds: string[]) => void; onChanged?: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [outcome, setOutcome] = useState<KbFunnelCandidate['outcome'] | ''>('');
@@ -81,6 +81,7 @@ export function FunnelView({ run, client, busy = false, hidden = false, onCheckN
       writes.current.set(next.candidate_id, next);
       setSnapshot((old) => old?.key === key ? { key, data: { ...old.data, items: old.data.items.map((item) => item.candidate_id === next.candidate_id ? next : item) } } : old);
       setNotice('Marked as fitting. Novelty checks wait for your click.');
+      await onChanged?.();
     } catch (e) { if (activeKey.current === requestKey) setError(exploreIssue(e).message); }
     finally { if (activeKey.current === requestKey) { actionPending.current = false; setPending(null); } }
   };
@@ -106,11 +107,11 @@ export function FunnelView({ run, client, busy = false, hidden = false, onCheckN
         </details>
         <p className="kb-explore-cap">{LABELS[item.outcome]}</p>
         {item.reason && <p className="kb-explore-cap">{item.reason}</p>}
-        {dropped(item) && <button type="button" className="kb-explore-btn" disabled={Boolean(pending) || busy} onClick={() => void fits(item)}>{pending === item.candidate_id ? 'Saving…' : 'It fits'}</button>}
+        {dropped(item) && <button type="button" className="kb-explore-btn" disabled={Boolean(pending) || busy || loading} onClick={() => void fits(item)}>{pending === item.candidate_id ? 'Saving…' : 'It fits'}</button>}
       </article>)}
       {data?.next_cursor && <button type="button" className="kb-explore-btn" disabled={loading || Boolean(pending)} onClick={() => void more()}>Load more candidates</button>}
       {notice && <p role="status" className="kb-explore-cap">{notice}</p>}
-      {readyIds.length > 0 && onCheckNovelty && <button type="button" className="kb-explore-btn" disabled={busy || Boolean(pending)} onClick={() => onCheckNovelty(readyIds)}>Check novelty</button>}
+      {readyIds.length > 0 && onCheckNovelty && <button type="button" className="kb-explore-btn" disabled={busy || Boolean(pending) || loading} onClick={() => onCheckNovelty(readyIds.slice(0, 100))}>{readyIds.length > 100 ? `Check novelty · next 100 of ${readyIds.length}` : 'Check novelty'}</button>}
     </div>}
   </section>;
 }

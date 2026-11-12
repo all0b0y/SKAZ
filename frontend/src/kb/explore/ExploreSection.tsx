@@ -147,7 +147,12 @@ export function ExploreSection({
 
   useEffect(() => {
     if (hidden || !map || !['running', 'paused'].includes(map.labelling.state)) return;
-    const timer = window.setInterval(() => void scope.refresh(), 1000);
+    let polling = false;
+    const timer = window.setInterval(() => {
+      if (polling) return;
+      polling = true;
+      void scope.refresh().finally(() => { polling = false; });
+    }, 1000);
     return () => window.clearInterval(timer);
   }, [hidden, map?.labelling.state, scope.refresh]);
 
@@ -172,7 +177,7 @@ export function ExploreSection({
     void clients.areas.opened(area.id).catch((error) => setActionIssue(exploreIssue(error)));
     if (area.has_children && !isGapArea(area)) await scope.load(area.id);
     else await scope.load(area.parent_id, area);
-  }, [clients, map, scope.load]);
+  }, [clients, scope.load]);
 
   const breadcrumbs = useMemo<CrumbItem[]>(() => {
     const items: CrumbItem[] = [{ id: null, name: 'Explore' }];
@@ -418,7 +423,7 @@ export function ExploreSection({
           onRetry={searchPlan.retry} onChange={searchPlan.edit} disabled={busy} />}
         {map && <TopicLabelling job={map.labelling} unsorted={map.unsorted_materials} busy={busy}
           onSort={() => void handleSortTopics()} onSettings={handleOpenSettings} />}
-        {run && <FunnelView key={run.id} run={run} client={clients.discovery} hidden={hidden} busy={busy}
+        {run && <FunnelView key={run.id} run={run} client={clients.discovery} hidden={hidden} busy={busy} onChanged={() => jobs.refreshRun(run.id)}
           onCheckNovelty={(candidateIds) => void perform(async () => {
             jobs.setRun(await clients.explore.start({ candidate_ids: candidateIds, channels: [] }));
           })} />}
