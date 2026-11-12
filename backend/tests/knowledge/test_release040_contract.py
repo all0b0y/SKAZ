@@ -78,7 +78,11 @@ def test_route_delegates_to_own_service_and_fixture_is_valid(case: dict[str, Any
         return payload
 
     service = type("FixtureService", (), {})()
-    setattr(service, case["name"], handler)
+    def sync_handler(*args: Any, **kwargs: Any) -> BaseModel:
+        calls.append((args, kwargs))
+        return payload
+
+    setattr(service, case["name"], sync_handler if case["area"] == "material_activity" else handler)
     setattr(app.state, "kb_" + case["area"], service)
     url = re.sub(r"\{[^}]+\}", "fixture-1", case["path"])
     with TestClient(app) as client:
@@ -89,7 +93,9 @@ def test_route_delegates_to_own_service_and_fixture_is_valid(case: dict[str, Any
     args, _ = calls[0]
     if "{" in case["path"]:
         assert args[0] == "fixture-1"
-    if case["body"]:
+    if case["area"] == "material_activity" and case["name"] == "keep":
+        assert args == (["fixture-1"],)
+    elif case["body"]:
         assert isinstance(args[-1], BaseModel)
         assert args[-1].model_dump(mode="json", exclude_unset=True) == (
             {"key": "**********"} if case["body"] == "KbOpenAlexKeyUpdate" else case["example"]
@@ -99,7 +105,7 @@ def test_route_delegates_to_own_service_and_fixture_is_valid(case: dict[str, Any
 def test_route_manifest_covers_all_seven_routers() -> None:
     expected = {(row["method"], row["path"]) for row in CASES}
     actual: set[tuple[str, str]] = set()
-    for area in AREAS:
+    for area in (*AREAS, "material_activity"):
         router = importlib.import_module(f"skaz.knowledge.api.{area}").router
         for route in router.routes:
             actual.update((method, route.path) for method in route.methods)

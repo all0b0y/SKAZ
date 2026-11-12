@@ -1,11 +1,10 @@
 """Material usage: fail closed without a ready library; no automatic deletions."""
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from collections.abc import Sequence
+from typing import Annotated, Protocol, cast
 
 from fastapi import APIRouter, Depends, Request
 
 from ...native_io import disk_call
-if TYPE_CHECKING:
-    from ..library.activity import MaterialActivity
 from .areas import EntityPath
 from .contract_routes import ERROR_RESPONSES, ContractRoute, service_for
 from .schemas_material_activity import (
@@ -20,11 +19,18 @@ router = APIRouter(prefix="/kb", tags=["kb-materials-activity"], route_class=Con
                    responses=ERROR_RESPONSES)
 
 
-def get_service(request: Request) -> MaterialActivity:
-    return cast("MaterialActivity", service_for(request, "material_activity"))
+class MaterialActivityService(Protocol):
+    def unused(self) -> KbUnusedExploreMaterials: ...
+    def keep(self, material_ids: Sequence[str]) -> None: ...
+    def opened(self, material_id: str) -> None: ...
+    def new_topic(self, material_id: str, body: KbMaterialTopicCreate) -> KbMaterialTopic: ...
 
 
-ServiceDep = Annotated[Any, Depends(get_service)]
+def get_service(request: Request) -> MaterialActivityService:
+    return cast(MaterialActivityService, service_for(request, "material_activity"))
+
+
+ServiceDep = Annotated[MaterialActivityService, Depends(get_service)]
 
 
 @router.get("/materials-activity/explore-unused", response_model=KbUnusedExploreMaterials)
