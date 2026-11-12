@@ -129,6 +129,8 @@ class KbRunCounters(BaseModel):
     novelty_checked: KbCount
     new: KbCount
     covered: KbCount
+    #: EX3 (UX-3): works dropped because neither an open text nor a real abstract exists.
+    no_text: KbCount = 0
 
 
 class KbExploreJob(BaseModel):

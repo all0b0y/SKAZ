@@ -232,6 +232,7 @@ export interface KbArea {
   children_covered: number;
   children_total: number;
   pages: number;
+  concepts?: number;
   sources: number;
   newest_source_year: number | null;
   recent_activity_at: string | null;
@@ -267,6 +268,7 @@ export interface KbAreaMaterial {
   kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
   publication: KbPublicationDate;
   wiki_pages: number;
+  concepts?: number;
   read_mark: "useful_method" | "changed_my_view" | "already_knew" | "not_for_me" | null;
   repeat_status: "checked" | "not_checked";
   repeated_percent: number | null;
@@ -725,6 +727,11 @@ export interface KbDisagreementSide {
   text: string;
 }
 
+export interface KbDiscussion {
+  finding_id: string;
+  chat_id: string;
+}
+
 export interface KbEnginePause {
   engine: "codex" | "claude_code" | "hermes" | "opencode";
   retry_at: string | null;
@@ -880,6 +887,12 @@ export interface KbFinding {
   material_id: string | null;
   text_available: "full_text" | "abstract_only" | "unchecked";
   created_at: string;
+  state?: "new" | "seen" | "dismissed" | "materials";
+  access?: "open" | "paid" | "unchecked";
+  read_url?: string | null;
+  new_line?: string | null;
+  has_abstract?: boolean;
+  discuss_chat_id?: string | null;
 }
 
 export interface KbFindingGroup {
@@ -898,7 +911,7 @@ export interface KbFindingImported {
   finding_id: string;
   material_id: string;
   content: "full_text" | "abstract_only";
-  to_wiki?: true;
+  to_wiki?: boolean;
 }
 
 export interface KbFindings {
@@ -2139,6 +2152,7 @@ export interface KbRunCounters {
   novelty_checked: number;
   new: number;
   covered: number;
+  no_text?: number;
 }
 
 /** The analysis page "Save to wiki" wrote, and what it left out (decision 9, 2026-10-21). */
@@ -2232,6 +2246,27 @@ export interface KbScienceWork {
   access: KbPaidAccess;
 }
 
+/** EX3 (UX-12): one Explore search in the side list (a funnel run). */
+export interface KbSearch {
+  id: string;
+  name: string;
+  owner: "explore" | "weekly";
+  area_id: string | null;
+  query: string;
+  state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
+  stage: string;
+  stop_reason: string | null;
+  checkpoint_id: string | null;
+  checkpoint_revision: number | null;
+  found: number;
+  fit: number;
+  new: number;
+  no_text: number;
+  unseen: number;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Totals per ⌘K section (not the length of the returned lists). */
 export interface KbSearchCounts {
   wiki: number;
@@ -2258,6 +2293,10 @@ export interface KbSearchPlanRequest {
   all_topics?: boolean;
 }
 
+export interface KbSearchRename {
+  name: string;
+}
+
 export interface KbSearchResults {
   query: string;
   fragments: KbFragmentHit[];
@@ -2275,6 +2314,11 @@ export interface KbSearchSettings {
   only?: string[];
   prefer?: string[];
   beta?: boolean;
+}
+
+export interface KbSearches {
+  items: KbSearch[];
+  parallel_limit: number;
 }
 
 export interface KbSelectedItem {
@@ -3441,7 +3485,7 @@ export interface KbEndpoints {
   };
   "GET /kb/explore/findings": {
     path: Record<string, never>;
-    query: { area_id?: string | null; task_id?: string | null; include_covered?: boolean; cursor?: string | null; limit?: number };
+    query: { area_id?: string | null; task_id?: string | null; include_covered?: boolean; cursor?: string | null; limit?: number; run_id?: string | null; show?: "active" | "new" | "seen" | "dismissed"; free_only?: boolean; year_from?: number | null; year_to?: number | null; types?: ("preprint" | "peer_reviewed" | "review" | "other")[] | null; sort?: "for_you" | "newest" | "cited" };
     body: never;
     response: KbFindings;
     status: 200;
@@ -3453,11 +3497,32 @@ export interface KbEndpoints {
     response: KbFinding;
     status: 200;
   };
+  "POST /kb/explore/findings/{finding_id}/discuss": {
+    path: { finding_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbDiscussion;
+    status: 200;
+  };
+  "POST /kb/explore/findings/{finding_id}/dismiss": {
+    path: { finding_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFinding;
+    status: 200;
+  };
   "POST /kb/explore/findings/{finding_id}/explore": {
     path: { finding_id: string };
     query: Record<string, never>;
     body: KbExploreStart;
     response: KbExploring;
+    status: 200;
+  };
+  "POST /kb/explore/findings/{finding_id}/materials": {
+    path: { finding_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFindingImported;
     status: 200;
   };
   "PUT /kb/explore/findings/{finding_id}/read-mark": {
@@ -3472,6 +3537,20 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbReadMark;
+    status: 200;
+  };
+  "POST /kb/explore/findings/{finding_id}/restore": {
+    path: { finding_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFinding;
+    status: 200;
+  };
+  "POST /kb/explore/findings/{finding_id}/seen": {
+    path: { finding_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFinding;
     status: 200;
   };
   "POST /kb/explore/findings/{finding_id}/wiki": {
@@ -3584,6 +3663,27 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbFunnelRun;
+    status: 200;
+  };
+  "GET /kb/explore/searches": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbSearches;
+    status: 200;
+  };
+  "DELETE /kb/explore/searches/{run_id}": {
+    path: { run_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbAcknowledged;
+    status: 200;
+  };
+  "PUT /kb/explore/searches/{run_id}/name": {
+    path: { run_id: string };
+    query: Record<string, never>;
+    body: KbSearchRename;
+    response: KbSearch;
     status: 200;
   };
   "GET /kb/explore/signals": {

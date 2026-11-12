@@ -436,6 +436,15 @@ class KnowledgeService:
                                entry.created_at)
         return self._folder_record(entry.id)
 
+    def explore_folder(self) -> FolderRecord:
+        """EX3: the «From Explore» system folder (made on first use)."""
+        with self.writing():
+            library = self.require()
+            entry = library.ensure_explore_folder()
+            indexer.put_folder(self.db, entry.id, entry.name, library.relative(entry.path), entry.system,
+                               entry.created_at)
+        return self._folder_record(entry.id)
+
     def rename_folder(self, folder_id: str, name: str) -> FolderRecord:
         with self.writing():
             library = self.require()

@@ -25,7 +25,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
-from typing import Any, Literal, Protocol, TypeVar, cast
+from typing import Any, ClassVar, Literal, Protocol, TypeVar, cast
 
 from ...native_io import disk_call
 from ..agents.prompting import untrusted_block
@@ -33,25 +33,35 @@ from ..api.contract_routes import ContractFailure
 from ..api.schemas_areas import KbReadMark, KbSignalEntity
 from ..api.schemas_explore import (
     KbCandidateOutcome,
+    KbDiscussion,
     KbExploreStart,
     KbExploring,
     KbExploringList,
     KbFinding,
+    KbFindingAccess,
     KbFindingChannel,
     KbFindingGroup,
     KbFindingImport,
     KbFindingImported,
     KbFindings,
+    KbFindingsShow,
+    KbFindingsSort,
+    KbFindingState,
+    KbFindingsType,
     KbFunnelCandidate,
     KbFunnelCandidates,
     KbFunnelRun,
     KbFunnelStart,
+    KbSearch,
+    KbSearches,
     KbSearchPlan,
     KbSearchPlanItem,
     KbSearchPlanRequest,
+    KbSearchRename,
     KbThesis,
 )
 from ..api.schemas_explore_common import (
+    KbAcknowledged,
     KbContinue,
     KbDateWindow,
     KbExploreJob,
@@ -108,6 +118,8 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 BUDGET_LIMIT = 30
+#: EX3 (UX-12): searches running side by side; the rest wait as ``queued``.
+PARALLEL_LIMIT = 3
 #: Works per agent run of the novelty check ("one model call per batch").
 NOVELTY_BATCH = 5
 #: Questions per ``ask_many`` of the decision model.
@@ -204,6 +216,9 @@ class ExploreFunnel:
         self._today = today
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._gates: dict[str, asyncio.Future[bool]] = {}
+        self._slots = asyncio.Semaphore(PARALLEL_LIMIT)
+        #: Runs waiting for a free slot (shown ``queued`` in the side list).
+        self._queued: set[str] = set()
         #: B3 (wired at W4: ``runtime.kb_explore.task_chats = kb_research.chats_of``): research task id →
         #: its chat, for ``KbJobSummary.chat_id``. Blocking.
         self.task_chats: Callable[[Sequence[str]], Mapping[str, str]] | None = None
@@ -340,12 +355,72 @@ class ExploreFunnel:
         include_covered: bool = False,
         cursor: str | None = None,
         limit: int = 30,
+        *,
+        run_id: str | None = None,
+        show: KbFindingsShow = "active",
+        free_only: bool = False,
+        year_from: int | None = None,
+        year_to: int | None = None,
+        types: Sequence[KbFindingsType] = (),
+        sort: KbFindingsSort = "for_you",
     ) -> KbFindings:
         self._ensure_ready()
         offset = _offset(cursor)
+        if run_id is not None:
+            view = FindingsView(show, free_only, year_from, year_to, tuple(types), sort)
+            return await disk_call(self._search_findings, run_id, view, offset, max(1, min(limit, 100)))
         return await disk_call(
             self._findings, area_id, task_id, include_covered, offset, max(1, min(limit, 100))
         )
+
+    # -- EX3: searches and what the user does with a finding ------------------------------------------
+
+    async def searches(self) -> KbSearches:
+        self._ensure_ready()
+        return await disk_call(self._searches)
+
+    async def rename_search(self, run_id: str, body: KbSearchRename) -> KbSearch:
+        self._ensure_ready()
+        await disk_call(self._explore_job, run_id)
+        await disk_call(self.store.rename_run, run_id, body.name.strip())
+        return await disk_call(self._search_of, run_id)
+
+    async def delete_search(self, run_id: str) -> KbAcknowledged:
+        """The search and its findings go; papers already added stay in Materials."""
+        self._ensure_ready()
+        await disk_call(self._explore_job, run_id)
+        await self._halt(run_id)
+        await disk_call(self.job_store.delete, run_id)
+        return KbAcknowledged()
+
+    async def mark_seen(self, finding_id: str) -> KbFinding:
+        self._ensure_ready()
+        row = await disk_call(self._finding_row, finding_id)
+        await disk_call(self.store.mark_seen, row.work_id)
+        return await self.finding(finding_id)
+
+    async def dismiss(self, finding_id: str) -> KbFinding:
+        """«Not for me»: hidden in every search and never offered again."""
+        return await self._set_dismissed(finding_id, True)
+
+    async def restore(self, finding_id: str) -> KbFinding:
+        return await self._set_dismissed(finding_id, False)
+
+    async def _set_dismissed(self, finding_id: str, dismissed: bool) -> KbFinding:
+        self._ensure_ready()
+        row = await disk_call(self._finding_row, finding_id)
+        await disk_call(self.store.set_dismissed, row.work_id, dismissed)
+        return await self.finding(finding_id)
+
+    async def add_to_materials(self, finding_id: str) -> KbFindingImported:
+        self._ensure_ready()
+        finding = await self.finding(finding_id)
+        return await self.reading.add_to_materials(finding, self._client())
+
+    async def discuss(self, finding_id: str) -> KbDiscussion:
+        self._ensure_ready()
+        finding = await self.finding(finding_id)
+        return await self.reading.discuss(finding)
 
     async def finding(self, finding_id: str) -> KbFinding:
         self._ensure_ready()
@@ -353,8 +428,8 @@ class ExploreFunnel:
         return (await disk_call(self._findings_of, [row]))[0]
 
     def new_by_area(self) -> dict[str, int]:
-        """Blocking: findings not yet in the library, per area (B4's tile count)."""
-        return self.store.new_by_area()
+        """Blocking: findings not opened, dismissed or added, per area (the tile's «+N», EX3)."""
+        return self.store.unseen_by_area()
 
     async def explore(self, finding_id: str, body: KbExploreStart) -> KbExploring:
         self._ensure_ready()
@@ -553,7 +628,29 @@ class ExploreFunnel:
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
+    @contextlib.asynccontextmanager
+    async def _slot(self, run_id: str) -> Any:
+        """Up to ``PARALLEL_LIMIT`` runs work at once (UX-12). A run that has to wait opens its start gate
+        at once: the runs holding the slots already passed the science consent."""
+        if self._slots.locked():
+            self._queued.add(run_id)
+            gate = self._gates.get(run_id)
+            if gate is not None and not gate.done():
+                gate.set_result(True)
+        try:
+            async with self._slots:
+                self._queued.discard(run_id)
+                yield
+        finally:
+            self._queued.discard(run_id)
+
     async def _drive(
+        self, run_id: str, choice: DecisionChoice | None, *, free_steps_only: bool = False
+    ) -> None:
+        async with self._slot(run_id):
+            await self._drive_run(run_id, choice, free_steps_only=free_steps_only)
+
+    async def _drive_run(
         self, run_id: str, choice: DecisionChoice | None, *, free_steps_only: bool = False
     ) -> None:
         try:
@@ -1034,19 +1131,25 @@ class ExploreFunnel:
     # -- stage 5: ready ---------------------------------------------------------------------------------
 
     async def _enrich(self, run: RunRow) -> None:
-        """Paid works worth reading get B1's one-time check for a free copy (decision 3c″)."""
+        """Each finding gets a free check that its open copy answers with text (EX3, UX-3); a finding with
+        neither an open text nor a real abstract is dropped («no text»). Paid works worth reading also get
+        B1's one-time check for a free copy (decision 3c″)."""
         await self._progress(run, "ready")
         done = set(await disk_call(self.job_store.completed, run.id, "ready"))
         for row in await disk_call(self.store.run_findings, run.id):
-            work = KbScienceWork.model_validate(row.details["work"])
-            if row.id in done or row.label not in _USEFUL or not work.access.paid:
+            if row.id in done or row.label == "covered":
                 continue
-            access = await self._science(
-                run.id, self._client().paid_access(work, useful_because=row.reason, run_id=run.id)
-            )
-            await disk_call(
-                self.store.update_details, row.id, {"work": {**row.details["work"], "access": _dump(access)}}
-            )
+            work = KbScienceWork.model_validate(row.details["work"])
+            url = await self._science(run.id, self._client().open_text_url(work.id, run_id=run.id))
+            changes: dict[str, Any] = {"access_state": "open" if url else "paid", "read_url": url}
+            if url is None and not _real_abstract(work.abstract):
+                changes["no_text"] = True
+            if url is None and work.access.paid and row.label in _USEFUL and not changes.get("no_text"):
+                access = await self._science(
+                    run.id, self._client().paid_access(work, useful_because=row.reason, run_id=run.id)
+                )
+                changes["work"] = {**row.details["work"], "access": _dump(access)}
+            await disk_call(self.store.update_details, row.id, changes)
             await disk_call(self.job_store.complete, run.id, row.id, "ready", "{}")
 
     async def _finish(self, run: RunRow) -> None:
@@ -1186,6 +1289,7 @@ class ExploreFunnel:
             novelty_checked=len(novelty),
             new=sum(1 for verdict in novelty if verdict.get("label") not in (None, "covered")),
             covered=sum(1 for verdict in novelty if verdict.get("label") == "covered"),
+            no_text=sum(1 for row in self.store.run_findings(run_id) if row.details.get("no_text")),
         )
 
     def _progress_ids(self, run_id: str, stage: str) -> tuple[list[str], list[str]]:
@@ -1263,6 +1367,8 @@ class ExploreFunnel:
 
     def _findings_of(self, rows: Sequence[FindingRow]) -> list[KbFinding]:
         material_marks = self.directory.read_marks([row.material_id for row in rows if row.material_id])
+        states = self.store.work_states(list(dict.fromkeys(row.work_id for row in rows)))
+        added = self.store.materials_of_works(list(dict.fromkeys(row.work_id for row in rows)))
         findings = []
         for row in rows:
             mark: KbReadMarkValue | None
@@ -1289,9 +1395,10 @@ class ExploreFunnel:
                         "shared_source_count": int(details.get("shared_source_count") or 0),
                         "repeat_hint": details.get("repeat_hint"),
                         "read_mark": mark,
-                        "material_id": row.material_id,
+                        "material_id": row.material_id or added.get(row.work_id),
                         "text_available": details.get("text_available") or "unchecked",
                         "created_at": row.created_at,
+                        **_reading_facts(row, states.get(row.work_id), added.get(row.work_id)),
                     }
                 )
             )
@@ -1330,6 +1437,196 @@ class ExploreFunnel:
             checked_at=datetime.fromisoformat(checked.replace("Z", "+00:00")) if checked else None,
             full_text_key_hint_count=hint,
         )
+
+
+    # -- EX3: blocking views ---------------------------------------------------------------------------
+
+    def _explore_job(self, run_id: str) -> KbExploreJob:
+        job = self.job_store.get(run_id)
+        if job is None or job.owner not in ("explore", "weekly") or self.store.run(run_id) is None:
+            raise NotFound("This search wasn't found.")
+        return job
+
+    def _search_of(self, run_id: str) -> KbSearch:
+        return next(item for item in self._searches().items if item.id == run_id)
+
+    def _searches(self) -> KbSearches:
+        runs = self.store.explore_runs()
+        unseen = self.store.unseen_counts([run.id for run in runs])
+        items = []
+        for run in runs:
+            job = self.job_store.get(run.id)
+            if job is None:
+                continue
+            counters = self._counters(run.id)
+            state = "queued" if run.id in self._queued else job.state
+            items.append(
+                KbSearch(
+                    id=run.id,
+                    name=self.job_store.title(run.id) or "Find what's new",
+                    owner="weekly" if job.owner == "weekly" else "explore",
+                    area_id=run.area_id,
+                    query=str(run.request.get("query") or ""),
+                    state=state,
+                    stage=job.stage,
+                    stop_reason=job.stop_reason,
+                    checkpoint_id=job.checkpoint.id if job.checkpoint else None,
+                    checkpoint_revision=job.checkpoint.revision if job.checkpoint else None,
+                    found=counters.checked,
+                    fit=counters.on_topic,
+                    new=max(counters.new - counters.no_text, 0),
+                    no_text=counters.no_text,
+                    unseen=unseen.get(run.id, 0),
+                    created_at=job.created_at,
+                    updated_at=job.updated_at,
+                )
+            )
+        return KbSearches(items=items, parallel_limit=PARALLEL_LIMIT)
+
+    def _search_findings(self, run_id: str, view: FindingsView, offset: int, limit: int) -> KbFindings:
+        self._explore_job(run_id)
+        rows = [
+            row
+            for row in self.store.run_findings(run_id)
+            if row.label != "covered" and not row.details.get("no_text")
+        ]
+        findings = [finding for finding in self._findings_of(rows) if view.keeps(finding)]
+        findings.sort(key=view.order)
+        page = findings[offset : offset + limit]
+        job = self.job_store.get(run_id)
+        return KbFindings(
+            groups=[
+                KbFindingGroup(
+                    task_id=None,
+                    task_title=self.job_store.title(run_id),
+                    task_state=job.state if job is not None else None,
+                    updated_at=job.updated_at if job is not None else None,
+                    findings=page,
+                )
+            ],
+            covered_count=sum(1 for row in self.store.run_findings(run_id) if row.label == "covered"),
+            next_cursor=str(offset + limit) if offset + limit < len(findings) else None,
+            checked_at=job.updated_at if job is not None else None,
+            full_text_key_hint_count=0,
+        )
+
+
+class FindingsView:
+    """EX3 (UX-5): the filters of a search page — Show, Free only, Year, Type — and its Sort."""
+
+    _RANK: ClassVar[dict[str, int]] = {"new": 0, "contradicts": 1, "branch": 1, "extends": 2, "covered": 3}
+
+    def __init__(
+        self,
+        show: KbFindingsShow,
+        free_only: bool,
+        year_from: int | None,
+        year_to: int | None,
+        types: tuple[KbFindingsType, ...],
+        sort: KbFindingsSort,
+    ) -> None:
+        self.show, self.free_only, self.sort = show, free_only, sort
+        self.year_from, self.year_to, self.types = year_from, year_to, types
+
+    def keeps(self, finding: KbFinding) -> bool:
+        if self.show == "active":
+            if finding.state not in ("new", "seen"):
+                return False
+        elif finding.state != self.show:
+            return False
+        if self.free_only and finding.access != "open":
+            return False
+        year = finding.work.publication.year
+        if self.year_from is not None and (year is None or year < self.year_from):
+            return False
+        if self.year_to is not None and (year is None or year > self.year_to):
+            return False
+        return not self.types or type_group(finding.work.publication_type) in self.types
+
+    def order(self, finding: KbFinding) -> tuple[Any, ...]:
+        if self.sort == "newest":
+            return (_neg_date(finding.work.publication),)
+        if self.sort == "cited":
+            return (-finding.work.cited_by_count,)
+        # «For you first» = what the wiki lacks, not what is unread: opening a row never reorders the list.
+        new_points = sum(1 for thesis in finding.theses if thesis.label == "new")
+        return (self._RANK.get(finding.label, 3), -new_points)
+
+
+def type_group(publication_type: str | None) -> KbFindingsType:
+    kind = (publication_type or "").lower()
+    if kind in ("preprint", "posted-content"):
+        return "preprint"
+    if kind in ("review",):
+        return "review"
+    if kind in ("article", "journal-article", "conference-paper", "proceedings-article", "book-chapter"):
+        return "peer_reviewed"
+    return "other"
+
+
+def _neg_date(publication: KbPublicationDate) -> tuple[int, int, int]:
+    day = str(publication.date or "")
+    parts = [int(part) for part in day.split("-")[:3] if part.isdigit()] if day else []
+    year = parts[0] if parts else (publication.year or 0)
+    month = parts[1] if len(parts) > 1 else (publication.month or 0)
+    return (-year, -month, -(parts[2] if len(parts) > 2 else 0))
+
+
+#: A stub abstract some sources send in place of a real one («Research article: <title>»).
+_STUB_PREFIXES = ("research article:",)
+
+
+def _real_abstract(abstract: str | None) -> bool:
+    text = (abstract or "").strip()
+    return len(text) >= 80 and not text.lower().startswith(_STUB_PREFIXES)
+
+
+def _read_url(work: KbScienceWork, checked: str | None) -> str | None:
+    """arXiv HTML → an open copy → the publisher's page (UX-6); the funnel's checked copy wins."""
+    if checked:
+        return checked
+    for kind in ("arxiv_html", "open_page"):
+        for loc in work.locations:
+            if loc.kind == kind and (loc.open_access or kind == "arxiv_html"):
+                return loc.url
+    if work.arxiv_id:
+        return f"https://arxiv.org/abs/{work.arxiv_id}"
+    publisher = next((loc.url for loc in work.locations if loc.kind == "publisher"), None)
+    return publisher or (f"https://doi.org/{work.doi}" if work.doi else None)
+
+
+def _reading_facts(
+    row: FindingRow, state: tuple[str | None, str | None] | None, material_id: str | None
+) -> dict[str, Any]:
+    details = row.details
+    work = KbScienceWork.model_validate(details["work"])
+    seen_at, dismissed_at = state or (None, None)
+    finding_state: KbFindingState
+    if row.material_id or material_id:
+        finding_state = "materials"
+    elif dismissed_at:
+        finding_state = "dismissed"
+    elif seen_at:
+        finding_state = "seen"
+    else:
+        finding_state = "new"
+    checked = details.get("access_state")
+    access: KbFindingAccess
+    if checked in ("open", "paid"):
+        access = checked
+    else:  # a search from before EX3: OpenAlex's open-access flag is all there is
+        access = "open" if work.arxiv_id or any(loc.open_access for loc in work.locations) else "paid"
+    new_line = next(
+        (str(t.get("text")) for t in row.theses if t.get("label") == "new" and t.get("text")), None
+    )
+    return {
+        "state": finding_state,
+        "access": access,
+        "read_url": _read_url(work, details.get("read_url")),
+        "new_line": new_line,
+        "has_abstract": _real_abstract(work.abstract),
+        "discuss_chat_id": details.get("discuss_chat_id"),
+    }
 
 
 _RULE_REASONS = {

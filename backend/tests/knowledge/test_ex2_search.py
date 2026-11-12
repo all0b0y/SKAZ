@@ -387,7 +387,7 @@ async def test_research_card_keeps_requested_channels_inside_picked_topics(parts
     )
     run = await parts.funnel.settled(started.id)
     assert run.counters.new == 1
-    assert [name for name, _ in parts.science.calls] == ["resolve", "citing"]
+    assert [name for name, _ in parts.science.calls] == ["resolve", "citing", "open_text_url"]
     assert (await parts.funnel.findings()).groups[0].findings[0].area_id == "area-ai"
 
 

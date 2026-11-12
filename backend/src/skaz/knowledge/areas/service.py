@@ -308,6 +308,7 @@ class ExploreAreasService:
         )
         marks_map = await disk_call(self.store.read_marks, page_ids)
         wiki_counts = await disk_call(self.store.wiki_page_counts_for_materials, page_ids)
+        concept_counts = await disk_call(self.store.concept_counts_for_materials, page_ids)
         records_by_id = {
             r.id: r for r in await disk_call(self.kb.material_repo.list_all) if r.id in set(page_ids)
         }
@@ -330,6 +331,7 @@ class ExploreAreasService:
                     kind=cast(MaterialKind, rec.kind),
                     publication=pub_dates.get(mid, _UNKNOWN_PUBLICATION),
                     wiki_pages=wiki_counts.get(mid, 0),
+                    concepts=concept_counts.get(mid, 0),
                     read_mark=marks_map.get(mid),
                     repeat_status=repeat_status,
                     repeated_percent=repeated_percent,

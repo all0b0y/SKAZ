@@ -300,6 +300,96 @@ class ExploreStore:
                 (json.dumps(details, ensure_ascii=False), finding_id),
             )
 
+    # -- EX3: what the user did with a work, across searches ------------------------------------------
+
+    def work_states(self, work_ids: Sequence[str]) -> dict[str, tuple[str | None, str | None]]:
+        """work id → (seen_at, dismissed_at) for the works the user opened or dismissed."""
+        if not work_ids:
+            return {}
+        with self.db.read() as connection:
+            rows = connection.execute(
+                f"SELECT work_id, seen_at, dismissed_at FROM explore_work_states WHERE work_id IN"
+                f" ({_marks(work_ids)})",
+                tuple(work_ids),
+            ).fetchall()
+        return {str(row[0]): (row[1], row[2]) for row in rows}
+
+    def mark_seen(self, work_id: str) -> None:
+        with self.db.write() as connection:
+            connection.execute(
+                "INSERT INTO explore_work_states(work_id, seen_at) VALUES (?, ?) ON CONFLICT(work_id)"
+                " DO UPDATE SET seen_at = coalesce(seen_at, excluded.seen_at)",
+                (work_id, utc_now_ms()),
+            )
+
+    def set_dismissed(self, work_id: str, dismissed: bool) -> None:
+        now = utc_now_ms()
+        with self.db.write() as connection:
+            connection.execute(
+                "INSERT INTO explore_work_states(work_id, seen_at, dismissed_at) VALUES (?, ?, ?)"
+                " ON CONFLICT(work_id) DO UPDATE SET seen_at = coalesce(seen_at, excluded.seen_at),"
+                " dismissed_at = excluded.dismissed_at",
+                (work_id, now, now if dismissed else None),
+            )
+
+    def dismissed_work_ids(self, work_ids: Sequence[str]) -> set[str]:
+        return {wid for wid, (_, dismissed) in self.work_states(work_ids).items() if dismissed}
+
+    def materials_of_works(self, work_ids: Sequence[str]) -> dict[str, str]:
+        """work id → the material it became through any search (added once, «In materials» everywhere)."""
+        if not work_ids:
+            return {}
+        with self.db.read() as connection:
+            rows = connection.execute(
+                f"SELECT work_id, material_id FROM explore_findings WHERE material_id IS NOT NULL"
+                f" AND work_id IN ({_marks(work_ids)})",
+                tuple(work_ids),
+            ).fetchall()
+        return {str(row[0]): str(row[1]) for row in rows}
+
+    def explore_runs(self) -> list[RunRow]:
+        """Every Explore search (not research tasks), newest first — the side list."""
+        with self.db.read() as connection:
+            rows = connection.execute(
+                "SELECT r.* FROM explore_runs r JOIN explore_jobs j ON j.id = r.id"
+                " WHERE j.owner IN ('explore','weekly') ORDER BY j.created_at DESC, r.rowid DESC"
+            ).fetchall()
+        return [
+            RunRow(row["id"], row["area_id"], row["task_id"], json.loads(row["request_json"])) for row in rows
+        ]
+
+    def unseen_counts(self, run_ids: Sequence[str]) -> dict[str, int]:
+        """run id → its findings the user has not opened, dismissed or added (the «+N» of a search)."""
+        if not run_ids:
+            return {}
+        with self.db.read() as connection:
+            rows = connection.execute(
+                f"SELECT f.run_id, count(*) FROM explore_findings f LEFT JOIN explore_work_states s"
+                f" ON s.work_id = f.work_id WHERE f.run_id IN ({_marks(run_ids)}) AND f.label != 'covered'"
+                " AND f.material_id IS NULL AND s.seen_at IS NULL AND s.dismissed_at IS NULL"
+                " AND coalesce(json_extract(f.details_json, '$.no_text'), 0) = 0 GROUP BY f.run_id",
+                tuple(run_ids),
+            ).fetchall()
+        return {str(row[0]): int(row[1]) for row in rows}
+
+    def unseen_by_area(self) -> dict[str, int]:
+        """area id → findings not opened, dismissed or added (the «+N» on a map tile)."""
+        with self.db.read() as connection:
+            rows = connection.execute(
+                "SELECT f.area_id, count(DISTINCT f.work_id) FROM explore_findings f LEFT JOIN"
+                " explore_work_states s ON s.work_id = f.work_id WHERE f.area_id IS NOT NULL"
+                " AND f.task_id IS NULL AND f.label != 'covered' AND f.material_id IS NULL"
+                " AND s.seen_at IS NULL AND s.dismissed_at IS NULL"
+                " AND coalesce(json_extract(f.details_json, '$.no_text'), 0) = 0 GROUP BY f.area_id"
+            ).fetchall()
+        return {str(row[0]): int(row[1]) for row in rows}
+
+    def rename_run(self, run_id: str, name: str) -> None:
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE explore_jobs SET title = ?, updated_at = ? WHERE id = ?", (name, utc_now_ms(), run_id)
+            )
+
     @staticmethod
     def _scope(area_ids: Sequence[str] | None, task_id: str | None) -> tuple[str, list[str]]:
         where = "1 = 1"

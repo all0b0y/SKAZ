@@ -78,6 +78,9 @@ from .names import icloud_skips, numbered_name, validate_name
 
 INBOX_ID = "fld-inbox"
 INBOX_NAME = "Inbox"
+#: EX3 (UX-11): papers added from Explore land here, apart from the user's folders and Inbox.
+EXPLORE_FOLDER_ID = "fld-explore"
+EXPLORE_FOLDER_NAME = "From Explore"
 _RESERVED_FOLDER_NAMES = (INBOX_NAME,)
 #: ``material.json`` extra: byte length of the source Markdown as SKAZ last wrote it.
 SOURCE_SIZE_KEY = "source_size"
@@ -302,6 +305,18 @@ class Library:
                 return
             with contextlib.suppress(NameTaken):
                 self._make_folder(INBOX_NAME, INBOX_ID, system=True)
+
+    def ensure_explore_folder(self) -> FolderEntry:
+        """The «From Explore» folder, made on the first paper added from Explore. A user folder that
+        already has this name keeps it; SKAZ's own one is then «From Explore (SKAZ)»."""
+        with self._lock:
+            for entry in self.folders():
+                if entry.id == EXPLORE_FOLDER_ID:
+                    return entry
+            try:
+                return self._make_folder(EXPLORE_FOLDER_NAME, EXPLORE_FOLDER_ID, system=True)
+            except NameTaken:
+                return self._make_folder(f"{EXPLORE_FOLDER_NAME} (SKAZ)", EXPLORE_FOLDER_ID, system=True)
 
     def _make_folder(self, name: str, folder_id: str, *, system: bool) -> FolderEntry:
         self._assert_free(self.materials_dir, name)

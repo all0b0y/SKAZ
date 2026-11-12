@@ -295,6 +295,20 @@ class AreasStore:
             ).fetchall()
         return {str(r["material_id"]): int(r["cnt"]) for r in rows}
 
+    def concept_counts_for_materials(self, material_ids: Sequence[str]) -> dict[str, int]:
+        """EX3 (UX-15): concept pages each material gave the wiki (a leaf topic's tiles)."""
+        if not material_ids:
+            return {}
+        marks = ",".join("?" for _ in material_ids)
+        with self.db.read() as conn:
+            rows = conn.execute(
+                "SELECT ps.material_id, COUNT(DISTINCT p.id) AS cnt "
+                "FROM page_sources ps JOIN pages p ON p.id = ps.page_id "
+                f"WHERE ps.material_id IN ({marks}) AND p.kind = 'concept' GROUP BY ps.material_id",
+                tuple(material_ids),
+            ).fetchall()
+        return {str(r["material_id"]): int(r["cnt"]) for r in rows}
+
     # -- subtree & topic helpers ---------------------------------------------
 
     def _subtree_map(self, areas: Mapping[str, AreaRow]) -> dict[str, set[str]]:
@@ -953,14 +967,18 @@ class AreasStore:
             )
             # Material -> the wiki pages citing it (a page belongs to the topics of its materials).
             material_pages: dict[str, set[str]] = defaultdict(set)
+            #: EX3 (UX-13): the map's tile size — concept pages only (a note per material would skew it).
+            material_concepts: dict[str, set[str]] = defaultdict(set)
             for row in conn.execute(
-                "SELECT ps.page_id, ps.material_id FROM page_sources ps "
+                "SELECT ps.page_id, ps.material_id, p.kind FROM page_sources ps "
                 "JOIN pages p ON p.id = ps.page_id "
                 "JOIN materials m ON m.id = ps.material_id "
                 f"WHERE p.kind NOT IN ({placeholders_study})",
                 tuple(STUDY_KINDS),
             ):
                 material_pages[str(row["material_id"])].add(str(row["page_id"]))
+                if row["kind"] == "concept":
+                    material_concepts[str(row["material_id"])].add(str(row["page_id"]))
             wiki_materials = set(material_pages)
 
             # Origins only for OpenAlex rows of builds before EX2 (never on the map).
@@ -1023,6 +1041,7 @@ class AreasStore:
             in_wiki = mset & wiki_materials
             pset: set[str] = set().union(*(material_pages.get(mid, set()) for mid in mset))
             page_count = len(pset)
+            concept_count = len(set().union(*(material_concepts.get(mid, set()) for mid in mset)))
             years = [
                 yr
                 for mid in mset
@@ -1066,6 +1085,7 @@ class AreasStore:
                     "children_covered": children_covered,
                     "children_total": children_total,
                     "pages": page_count,
+                    "concepts": concept_count,
                     "sources": len(mset),
                     "newest_source_year": max(years) if years else None,
                     "recent_activity_at": (

@@ -115,6 +115,10 @@ class ScienceClient(Protocol):
     async def read_text(self, work_id: str, *, run_id: str | None = None) -> KbScienceText:
         """TEI (with a key) → arXiv HTML / open page → abstract only. Never downloads a PDF."""
         ...
+    async def open_text_url(self, work_id: str, *, run_id: str | None = None) -> str | None:
+        """EX3: a free copy that answered with text (the reader's page), or ``None`` — free to check."""
+        ...
+
     async def paid_access(
         self, work: KbScienceWork, *, useful_because: str | None, run_id: str | None = None
     ) -> KbPaidAccess:

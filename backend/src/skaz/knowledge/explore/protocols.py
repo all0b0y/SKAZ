@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from ..api.schemas_explore import (
         KbCandidateOutcome,
+        KbDiscussion,
         KbExploreStart,
         KbExploring,
         KbExploringList,
@@ -15,15 +16,22 @@ if TYPE_CHECKING:
         KbFindingImport,
         KbFindingImported,
         KbFindings,
+        KbFindingsShow,
+        KbFindingsSort,
+        KbFindingsType,
         KbFunnelCandidate,
         KbFunnelCandidates,
         KbFunnelRun,
         KbFunnelStart,
+        KbSearch,
+        KbSearches,
         KbSearchPlan,
         KbSearchPlanRequest,
+        KbSearchRename,
         KbThesis,
     )
     from ..api.schemas_explore_common import (
+        KbAcknowledged,
         KbCheckpoint,
         KbContinue,
         KbExploreJob,
@@ -53,8 +61,25 @@ class ExploreService(Protocol):
         include_covered: bool = False,
         cursor: str | None = None,
         limit: int = 30,
+        *,
+        run_id: str | None = None,
+        show: KbFindingsShow = "active",
+        free_only: bool = False,
+        year_from: int | None = None,
+        year_to: int | None = None,
+        types: Sequence[KbFindingsType] = (),
+        sort: KbFindingsSort = "for_you",
     ) -> KbFindings: ...
     async def finding(self, finding_id: str) -> KbFinding: ...
+    # EX3 (Explore v2): searches in the side list and what the user does with a finding.
+    async def searches(self) -> KbSearches: ...
+    async def rename_search(self, run_id: str, body: KbSearchRename) -> KbSearch: ...
+    async def delete_search(self, run_id: str) -> KbAcknowledged: ...
+    async def mark_seen(self, finding_id: str) -> KbFinding: ...
+    async def dismiss(self, finding_id: str) -> KbFinding: ...
+    async def restore(self, finding_id: str) -> KbFinding: ...
+    async def add_to_materials(self, finding_id: str) -> KbFindingImported: ...
+    async def discuss(self, finding_id: str) -> KbDiscussion: ...
     async def explore(self, finding_id: str, body: KbExploreStart) -> KbExploring: ...
     async def add_to_wiki(self, finding_id: str, body: KbFindingImport) -> KbFindingImported: ...
     async def exploring(self) -> KbExploringList: ...

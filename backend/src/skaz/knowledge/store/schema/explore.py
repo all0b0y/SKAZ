@@ -1,7 +1,16 @@
-"""0.4.0 explore storage contract. JSON shapes are the matching Kb models."""
+"""0.4.0 explore storage contract. JSON shapes are the matching Kb models.
+
+v2 (EX3, Explore v2): ``explore_work_states`` keeps what the user did with a work across searches — opened
+(Seen) or «Not for me» (Dismissed) — by its science work id, so a second search shows it as already seen.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Callable
 
 NAME = "explore"
-VERSION = 1
+VERSION = 2
 
 SQL = """
 CREATE TABLE IF NOT EXISTS explore_jobs (
@@ -69,4 +78,20 @@ CREATE TABLE IF NOT EXISTS explore_readings (
     material_id TEXT,
     started_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS explore_work_states (
+    work_id TEXT PRIMARY KEY,
+    seen_at TEXT,
+    dismissed_at TEXT
+);
 """
+
+
+def _v2(connection: sqlite3.Connection) -> None:
+    """Idempotent: the table may already exist when a start was cut before the version row (R2-02)."""
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS explore_work_states (work_id TEXT PRIMARY KEY, seen_at TEXT,"
+        " dismissed_at TEXT)"
+    )
+
+
+UPGRADES: dict[int, Callable[[sqlite3.Connection], None]] = {2: _v2}

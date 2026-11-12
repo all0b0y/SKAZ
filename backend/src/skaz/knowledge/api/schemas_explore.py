@@ -8,6 +8,7 @@ from typing import Annotated, Literal, cast
 from pydantic import BaseModel, Field
 
 from .schemas_explore_common import (
+    KbAcknowledged,  # noqa: F401 (the manifest finds each route's response model here)
     KbContractRequest,
     KbDateWindow,
     KbEntityId,
@@ -22,6 +23,13 @@ from .schemas_science import SCIENCE_TOPIC_CHARS, KbScienceWork
 
 KbFindingLabel = Literal["new", "extends", "contradicts", "branch", "covered"]
 KbFindingChannel = Literal["continues", "branches", "search"]
+#: EX3 (UX-2): New → Seen (opened) → In materials / Dismissed («Not for me»). Kept per work across searches.
+KbFindingState = Literal["new", "seen", "dismissed", "materials"]
+#: EX3 (UX-3): ``open`` — a free copy answered with text; ``paid`` — only the publisher has it.
+KbFindingAccess = Literal["open", "paid", "unchecked"]
+KbFindingsShow = Literal["active", "new", "seen", "dismissed"]
+KbFindingsSort = Literal["for_you", "newest", "cited"]
+KbFindingsType = Literal["preprint", "peer_reviewed", "review", "other"]
 
 
 class KbSearchPlanItem(BaseModel):
@@ -126,6 +134,17 @@ class KbFinding(BaseModel):
     material_id: str | None
     text_available: Literal["full_text", "abstract_only", "unchecked"]
     created_at: datetime
+    #: EX3: what the user did with this work (any search).
+    state: KbFindingState = "new"
+    access: KbFindingAccess = "unchecked"
+    #: EX3: the page the reader opens — arXiv HTML, else an open PDF, else the publisher's page.
+    read_url: str | None = None
+    #: EX3: one line «New for you: …» — the first thesis the user's wiki does not have.
+    new_line: str | None = None
+    #: EX3: the abstract is real (not empty, not a «Research article: <title>» stub).
+    has_abstract: bool = True
+    #: EX3: the «Discuss» chat of this finding, once opened.
+    discuss_chat_id: str | None = None
 
 
 class KbFindingGroup(BaseModel):
@@ -172,4 +191,44 @@ class KbFindingImported(BaseModel):
     finding_id: KbEntityId
     material_id: str
     content: Literal["full_text", "abstract_only"]
-    to_wiki: Literal[True] = True
+    #: EX3 (UX-11): Explore adds to the «From Explore» folder without the wiki; the wiki comes later.
+    to_wiki: bool = True
+
+
+class KbSearch(BaseModel):
+    """EX3 (UX-12): one Explore search in the side list (a funnel run)."""
+
+    id: KbEntityId
+    name: str
+    owner: Literal["explore", "weekly"]
+    area_id: KbEntityId | None
+    query: str
+    state: KbExploreJobState
+    stage: str
+    stop_reason: str | None
+    checkpoint_id: KbEntityId | None
+    checkpoint_revision: int | None
+    #: ``found`` → ``fit`` → ``new`` (the funnel line) and how many had no text to read.
+    found: int
+    fit: int
+    new: int
+    no_text: int
+    #: Findings not opened, dismissed or added — the «+N».
+    unseen: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class KbSearches(BaseModel):
+    items: list[KbSearch]
+    #: Searches run side by side up to this many; the rest wait (``queued``).
+    parallel_limit: int
+
+
+class KbSearchRename(KbContractRequest):
+    name: Annotated[str, Field(min_length=1, max_length=120)]
+
+
+class KbDiscussion(BaseModel):
+    finding_id: KbEntityId
+    chat_id: str

@@ -149,7 +149,14 @@
       "task_id: str | None = None",
       "include_covered: bool = False",
       "cursor: str | None = None",
-      "limit: int = 30"
+      "limit: int = 30",
+      "run_id: str | None = None",
+      "show: KbFindingsShow = 'active'",
+      "free_only: bool = False",
+      "year_from: int | None = None",
+      "year_to: int | None = None",
+      "types: list[KbFindingsType] | None = None",
+      "sort: KbFindingsSort = 'for_you'"
     ]
   },
   {
@@ -772,6 +779,88 @@
     "example": {
       "description": "Find methods for AI harness"
     },
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "GET",
+    "path": "/kb/explore/searches",
+    "name": "searches",
+    "body": null,
+    "response": "KbSearches",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "PUT",
+    "path": "/kb/explore/searches/{run_id}/name",
+    "name": "rename_search",
+    "body": "KbSearchRename",
+    "response": "KbSearch",
+    "example": {
+      "name": "MoE routing"
+    },
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "DELETE",
+    "path": "/kb/explore/searches/{run_id}",
+    "name": "delete_search",
+    "body": null,
+    "response": "KbAcknowledged",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/findings/{finding_id}/seen",
+    "name": "mark_seen",
+    "body": null,
+    "response": "KbFinding",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/findings/{finding_id}/dismiss",
+    "name": "dismiss",
+    "body": null,
+    "response": "KbFinding",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/findings/{finding_id}/restore",
+    "name": "restore",
+    "body": null,
+    "response": "KbFinding",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/findings/{finding_id}/materials",
+    "name": "add_to_materials",
+    "body": null,
+    "response": "KbFindingImported",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/findings/{finding_id}/discuss",
+    "name": "discuss",
+    "body": null,
+    "response": "KbDiscussion",
+    "example": null,
     "query": []
   }
 ]

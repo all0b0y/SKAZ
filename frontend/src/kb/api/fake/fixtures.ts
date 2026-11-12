@@ -1,6 +1,9 @@
 // Synthetic contract fixtures; no real papers, external APIs or model results.
 import type {
   KbAcknowledged,
+  KbDiscussion,
+  KbSearch,
+  KbSearches,
   KbArea,
   KbAreaMap,
   KbAreaMaterials,
@@ -41,6 +44,9 @@ import type {
 } from '../../../api/kb/types.gen';
 
 interface ContractFixtures {
+  KbSearch: KbSearch;
+  KbSearches: KbSearches;
+  KbDiscussion: KbDiscussion;
   KbTopicLabelling: KbTopicLabelling;
   KbSearchPlan: KbSearchPlan;
   KbResearchProposal: KbResearchProposal;
@@ -82,6 +88,51 @@ interface ContractFixtures {
 }
 
 export const contractFixtures = {
+  "KbSearch": {
+    "id": "run-1",
+    "name": "MoE routing",
+    "owner": "explore",
+    "area_id": "topic-rag",
+    "query": "mixture of experts routing",
+    "state": "running",
+    "stage": "novelty",
+    "stop_reason": null,
+    "checkpoint_id": null,
+    "checkpoint_revision": null,
+    "found": 50,
+    "fit": 12,
+    "new": 4,
+    "no_text": 2,
+    "unseen": 3,
+    "created_at": "2026-11-09T10:00:00Z",
+    "updated_at": "2026-11-09T10:05:00Z"
+  },
+  "KbSearches": {
+    "items": [{
+        "id": "run-1",
+        "name": "MoE routing",
+        "owner": "explore",
+        "area_id": "topic-rag",
+        "query": "mixture of experts routing",
+        "state": "running",
+        "stage": "novelty",
+        "stop_reason": null,
+        "checkpoint_id": null,
+        "checkpoint_revision": null,
+        "found": 50,
+        "fit": 12,
+        "new": 4,
+        "no_text": 2,
+        "unseen": 3,
+        "created_at": "2026-11-09T10:00:00Z",
+        "updated_at": "2026-11-09T10:05:00Z"
+      }],
+    "parallel_limit": 3
+  },
+  "KbDiscussion": {
+    "finding_id": "finding-1",
+    "chat_id": "chat-discuss-1"
+  },
   "KbScienceSettings": {
     "enabled": true,
     "consent_at": "2026-11-09T10:00:00Z",

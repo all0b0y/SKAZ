@@ -46,6 +46,9 @@ class KbArea(BaseModel):
     children_covered: int
     children_total: int
     pages: int
+    #: EX3 (UX-13): concept pages of the wiki made from this topic's materials — the tile's size. A concept
+    #: drawn from two topics counts in each.
+    concepts: int = 0
     sources: int
     newest_source_year: int | None
     recent_activity_at: datetime | None
@@ -137,6 +140,8 @@ class KbAreaMaterial(BaseModel):
     kind: MaterialKind
     publication: KbPublicationDate
     wiki_pages: int
+    #: EX3 (UX-15): concept pages this material gave the wiki — its tile's size on the last map level.
+    concepts: int = 0
     read_mark: KbReadMarkValue | None
     repeat_status: Literal["checked", "not_checked"]
     repeated_percent: Annotated[int, Field(ge=0, le=100)] | None

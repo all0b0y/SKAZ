@@ -57,6 +57,10 @@ from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.sources.service import IntakeResult
 
 TODAY = date(2026, 11, 10)
+REAL_ABSTRACT = (
+    "We study agents that plan with tools and report how routing between experts changes their accuracy "
+    "on long tasks."
+)
 UNKNOWN = KbPublicationDate(year=None, date=None, precision="unknown", origin="unknown", evidence_url=None)
 
 
@@ -113,6 +117,8 @@ class FakeScience:
         self.neighbour_works: list[KbScienceWork] = []
         self.resolved: dict[str, KbScienceWork] = {}
         self.texts: dict[str, KbScienceText] = {}
+        #: EX3: works whose open copy does not answer (every other work reads at example.org).
+        self.closed: set[str] = set()
         self.error: Exception | None = None
         self.calls: list[tuple[str, Any]] = []
 
@@ -157,6 +163,12 @@ class FakeScience:
     async def read_text(self, work_id: str, *, run_id: str | None = None) -> KbScienceText:
         self._check("read_text", work_id)
         return self.texts[work_id]
+
+    async def open_text_url(self, work_id: str, *, run_id: str | None = None) -> str | None:
+        self._check("open_text_url", work_id)
+        known = [*self.search_works, *self.citing_works, *self.neighbour_works, *self.resolved.values()]
+        paid = any(w.id == work_id and w.access.paid for w in known)
+        return None if work_id in self.closed or paid else f"https://example.org/read/{work_id}"
 
     async def paid_access(
         self, work: KbScienceWork, *, useful_because: str | None, run_id: str | None = None
@@ -682,10 +694,12 @@ async def test_covered_findings_are_hidden_and_counted(parts: SimpleNamespace) -
 
 
 async def test_paid_useful_finding_gets_its_access_check(parts: SimpleNamespace) -> None:
-    parts.science.search_works = [work(1, paid=True, topics=["T1"])]
+    # EX3: a real abstract keeps a paid work (no open copy answers) instead of dropping it as «no text».
+    parts.science.search_works = [work(1, paid=True, topics=["T1"], abstract=REAL_ABSTRACT)]
     await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
     (finding,) = [f for g in (await parts.funnel.findings()).groups for f in g.findings]
     assert parts.science.count("paid_access") == 1
+    assert finding.access == "paid"
     assert finding.work.access.alternatives_checked
     assert finding.work.access.recommendation == "New compared with your wiki."
 

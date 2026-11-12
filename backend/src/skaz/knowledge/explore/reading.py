@@ -15,6 +15,7 @@ from ...native_io import disk_call
 from ..agents.prompting import untrusted_block
 from ..api.contract_routes import ContractFailure
 from ..api.schemas_explore import (
+    KbDiscussion,
     KbExploreStart,
     KbExploring,
     KbExploringList,
@@ -170,12 +171,71 @@ class ReadingDesk:
             raise ContractFailure(409, "conflict")
         return await self._import(finding, body.content, body_text, source_url=text.source_url)
 
+    async def add_to_materials(self, finding: KbFinding, science: ScienceClient) -> KbFindingImported:
+        """EX3 (UX-11): the paper goes to «From Explore» without the wiki; full text when a free one answers,
+        else the abstract (labelled so). The wiki comes later, by the material's own «Add to wiki»."""
+        if finding.material_id is not None:
+            content: Literal["full_text", "abstract_only"] = (
+                "full_text" if finding.text_available == "full_text" else "abstract_only"
+            )
+            return KbFindingImported(
+                finding_id=finding.id, material_id=finding.material_id, content=content, to_wiki=False
+            )
+        text = await self._text(finding, science)
+        full = text.kind in FULL_TEXT_KINDS and bool(text.text.strip())
+        body_text = text.text.strip() if full else (finding.work.abstract or "").strip()
+        if not body_text:
+            raise ContractFailure(409, "conflict")
+        folder = await disk_call(self.kb.explore_folder)
+        return await self._import(
+            finding,
+            "full_text" if full else "abstract_only",
+            body_text,
+            source_url=text.source_url,
+            folder_id=folder.id,
+            to_wiki=False,
+        )
+
+    async def discuss(self, finding: KbFinding) -> KbDiscussion:
+        """EX3 (UX-7a): an ordinary chat on the paper's card — nothing is downloaded. The agent answers from
+        the card and says plainly where it ends (the full text needs «Add to materials»)."""
+        if finding.discuss_chat_id:
+            return KbDiscussion(finding_id=finding.id, chat_id=finding.discuss_chat_id)
+        view = await self.chats.create(title=finding.work.title[:120])
+        chat_id = str(view.chat.id)
+        await disk_call(self.store.update_details, finding.id, {"discuss_chat_id": chat_id})
+        await self.chats.send(chat_id, self._card_message(finding))
+        return KbDiscussion(finding_id=finding.id, chat_id=chat_id)
+
+    @staticmethod
+    def _card_message(finding: KbFinding) -> MessageInput:
+        work = finding.work
+        card = f"Title: {work.title}\nAuthors: {', '.join(work.authors[:8])}\n"
+        if work.publication.year:
+            card += f"Year: {work.publication.year}\n"
+        if work.venue:
+            card += f"Published in: {work.venue}\n"
+        if finding.read_url or work.doi:
+            card += f"Link: {finding.read_url or 'https://doi.org/' + str(work.doi)}\n"
+        if finding.new_line:
+            card += f"New for me compared with my wiki: {finding.new_line}\n"
+        card += "\nAbstract:\n" + ((work.abstract or "").strip() if finding.has_abstract else "(none)")
+        ask = (
+            "Let's discuss this paper. Start with two or three sentences on what it is about and what is new "
+            "for me. Answer only from this card; when a question needs the paper's text (methods, numbers, "
+            "tables), say so and suggest adding the paper to my materials."
+        )
+        return MessageInput(text=ask + "\n\n" + untrusted_block("paper card", card))
+
     async def _import(
         self,
         finding: KbFinding,
         content: Literal["full_text", "abstract_only"],
         text: str,
         source_url: str | None = None,
+        *,
+        folder_id: str = INBOX_ID,
+        to_wiki: bool = True,
     ) -> KbFindingImported:
         work = finding.work
         urls = work_urls(work) + ([source_url] if source_url else [])
@@ -207,12 +267,14 @@ class ReadingDesk:
             prepared = prepare_text(text, origin=origin, title=sanitize_title(title), fallback="Paper")
             if prepared.failure:
                 raise KnowledgeError(prepared.failure)
-            result = await self.sources.add_prepared(prepared, INBOX_ID, to_wiki=True)
+            result = await self.sources.add_prepared(prepared, folder_id, to_wiki=to_wiki)
             material_id = result.material_id
         await disk_call(self.store.set_material, finding.id, material_id)
         await disk_call(self.store.update_details, finding.id, {"imported_content": content})
         await disk_call(self.move_mark, finding.id, material_id)
-        return KbFindingImported(finding_id=finding.id, material_id=material_id, content=content)
+        return KbFindingImported(
+            finding_id=finding.id, material_id=material_id, content=content, to_wiki=to_wiki
+        )
 
     async def list(self) -> KbExploringList:
         rows = await disk_call(self.store.readings)

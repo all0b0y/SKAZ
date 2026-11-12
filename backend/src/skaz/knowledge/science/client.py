@@ -398,6 +398,27 @@ class ScienceGateway:
 
         return text("abstract_only", work.abstract or "", None)
 
+    async def open_text_url(self, work_id: str, *, run_id: str | None = None) -> str | None:
+        """EX3 (UX-3): the free copy the reader opens, checked by fetching it — free (no paid OpenAlex
+        content call). arXiv HTML first (an arXiv paper always has its PDF), then the open pages."""
+        await self._ready()
+        work = await self._work(work_id, run_id)
+        from_html = (split_arxiv(loc.url) for loc in work.locations if loc.kind == "arxiv_html")
+        arxiv_id = work.arxiv_id or next((found[0] for found in from_html if found), None)
+        if arxiv_id:
+            url = f"https://arxiv.org/html/{arxiv_id}"
+            fetched = await self.transport.page(
+                Call("arxiv", "full_text", url, KbSciencePayload(ids=[arxiv_id])), run_id=run_id
+            )
+            return url if fetched is not None and page_text(fetched) else f"https://arxiv.org/pdf/{arxiv_id}"
+        sent = KbSciencePayload(dois=[work.doi]) if work.doi else KbSciencePayload(ids=[work.provider_id])
+        pages = [loc.url for loc in work.locations if loc.kind == "open_page" and loc.open_access]
+        for url in list(dict.fromkeys(pages))[:OPEN_PAGE_TRIES]:
+            fetched = await self.transport.page(Call(work.provider, "full_text", url, sent), run_id=run_id)
+            if fetched is not None and page_text(fetched):
+                return url
+        return None
+
     # -- ScienceClient --------------------------------------------------------------------------------
 
     async def citing(
