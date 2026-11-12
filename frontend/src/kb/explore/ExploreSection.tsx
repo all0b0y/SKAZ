@@ -106,7 +106,6 @@ export function ExploreSection({
   const [openFinding, setOpenFinding] = useState<KbFinding | null>(initial?.finding ?? null);
   const [keyHintDismissed, setKeyHintDismissed] = useState(false);
   const [query, setQuery] = useState('');
-  const [searchOverride, setSearchOverride] = useState<KbArea | null | undefined>();
   const [topicEdit, setTopicEdit] = useState<TopicEdit | null>(null);
   const [topicMenu, setTopicMenu] = useState(false);
   const topicMenuRef = useRef<HTMLButtonElement | null>(null);
@@ -138,7 +137,7 @@ export function ExploreSection({
   const activeScopeArea = selectedTopic ?? currentMapArea;
   const scopeId = activeScopeArea?.id ?? map?.parent_id ?? null;
   const scopeName = activeScopeArea?.name ?? 'All your topics';
-  const searchArea = searchOverride === undefined ? activeScopeArea : searchOverride;
+  const searchArea = activeScopeArea;
   const searchRequest = useMemo(() => ({ area_id: searchArea?.id ?? null, query: query.trim(), all_topics: !searchArea && !query.trim() }), [searchArea?.id, query]);
   const planSource = JSON.stringify([map?.areas.map((area) => [area.id, area.name, area.materials]), searchArea?.name]);
   const searchPlan = useSearchPlan(clients.discovery, searchRequest, hidden, planSource);
@@ -164,15 +163,15 @@ export function ExploreSection({
   });
 
   const navigateToParent = useCallback(async (parentId: string | null) => {
-    setOpenFinding(null); setSearchOverride(undefined);
+    setOpenFinding(null);
     await scope.load(parentId);
   }, [scope.load]);
 
   const handleSelectAreaTile = useCallback(async (area: KbArea) => {
-    setOpenFinding(null); setSearchOverride(undefined);
+    setOpenFinding(null);
     void clients.areas.opened(area.id).catch((error) => setActionIssue(exploreIssue(error)));
     if (area.has_children && !isGapArea(area)) await scope.load(area.id);
-    else await scope.load(map?.parent_id ?? null, area);
+    else await scope.load(area.parent_id, area);
   }, [clients, map, scope.load]);
 
   const breadcrumbs = useMemo<CrumbItem[]>(() => {
@@ -385,7 +384,7 @@ export function ExploreSection({
             <>
               <form className="kb-explore-search__field" onSubmit={(e) => void handleStartSearch(e)}>
                 <Icon name="search" size={14} />
-                <ScopePicker clients={clients} value={searchArea} onChange={setSearchOverride} onQuery={setQuery} disabled={busy} />
+                <ScopePicker clients={clients} value={searchArea} onChange={(area) => { if (area) void handleSelectAreaTile(area); else void navigateToParent(null); }} onQuery={setQuery} disabled={busy} />
                 <input
                   type="text"
                   aria-label="Precise query"
@@ -475,12 +474,10 @@ export function ExploreSection({
           />}
         </div>
         {topicEdit && <TopicDialog edit={topicEdit} clients={clients} onClose={() => setTopicEdit(null)} onSaved={(area, mode) => {
-          if (mode === 'rename') { scope.saveArea(area); setSearchOverride((old) => old?.id === area.id ? area : old); searchPlan.retry(); }
+          if (mode === 'rename') { scope.saveArea(area); searchPlan.retry(); }
           else if (mode === 'merge') {
-            setSearchOverride(undefined);
             void scope.load(area.has_children ? area.id : area.parent_id, area.has_children ? undefined : area);
           } else {
-            setSearchOverride(undefined);
             void scope.load(area.parent_id, area);
           }
         }} />}

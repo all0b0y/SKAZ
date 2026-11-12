@@ -181,7 +181,7 @@ describe('EX2 exact search plan and scope', () => {
     render(<ExploreSection clients={kb} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Search scope: All your topics' }));
     fireEvent.click(await screen.findByRole('button', { name: 'AI agents' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Search scope: AI agents' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Search scope: AI agents' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Search topics or concepts' }), { target: { value: 'harness' } });
     fireEvent.click(await screen.findByRole('button', { name: /Concept: Harness evaluation/ }));
     expect(screen.getByRole('textbox', { name: 'Precise query' })).toHaveValue('Harness evaluation');
