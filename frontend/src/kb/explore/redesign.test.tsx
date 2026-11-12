@@ -122,6 +122,32 @@ describe('EX2 exact search plan and scope', () => {
     expect(kb.discovery.plan).toHaveBeenCalledTimes(1);
   });
 
+  it('refreshes an unedited all-topics preview after labelling creates the first topics', async () => {
+    vi.useFakeTimers(); const kb = ex2Kb(); let labelled = false;
+    kb.areas.map.mockImplementation(async () => labelled ? mapFixture() : mapFixture({ areas: [], unsorted_materials: 93, labelling: { ...mapFixture().labelling, done: 0 } }));
+    const originalPlan = kb.discovery.plan.getMockImplementation()!;
+    kb.discovery.plan.mockImplementation(async (request) => labelled ? originalPlan(request) : { ready: false, reason: 'Organize your topics first.', items: [] });
+    render(<ExploreSection clients={kb} />); await flush();
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    expect(screen.getByRole('button', { name: "Find what's new" })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Organize topics' })); await flush();
+    labelled = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    expect(screen.getByText(/Will search:/)).toHaveTextContent('AI agents');
+    expect(screen.getByRole('button', { name: "Find what's new" })).toBeEnabled();
+  });
+
+  it('can reset the preview after every search item was removed', async () => {
+    const kb = ex2Kb(); render(<ExploreSection clients={kb} />);
+    await waitFor(() => expect(screen.getByText(/Will search:/)).toHaveTextContent('AI agents'));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit search plan' }));
+    for (const name of ['AI agents', 'ML', 'Business communication']) fireEvent.click(screen.getByRole('button', { name: `Remove ${name} from search` }));
+    expect(screen.getByRole('button', { name: "Find what's new" })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset search plan' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: "Find what's new" })).toBeEnabled());
+    expect(kb.explore.start).not.toHaveBeenCalled();
+  });
+
   it('disables empty/all-removed plans with a reason and never starts an empty run', async () => {
     const kb = ex2Kb();
     kb.discovery.plan.mockResolvedValue({ ready: false, reason: 'Choose a topic or enter a query.', items: [] });
