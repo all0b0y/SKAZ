@@ -307,6 +307,15 @@ class NotificationRepository:
             )
             return cursor.rowcount
 
+    def mark_one_read(self, notification_id: str) -> bool:
+        """EX2: one notification is read (a finished Research task the user opened), nothing else."""
+        with self.db.write() as connection:
+            cursor = connection.execute(
+                "UPDATE notifications SET read_at = ? WHERE id = ? AND read_at IS NULL",
+                (utc_now(), notification_id),
+            )
+            return cursor.rowcount > 0
+
     def get(self, notification_id: str) -> NotificationRecord | None:
         with self.db.read() as connection:
             row = connection.execute("SELECT * FROM notifications WHERE id = ?",

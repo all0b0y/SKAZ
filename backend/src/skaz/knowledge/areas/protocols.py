@@ -13,13 +13,17 @@ if TYPE_CHECKING:
         KbAreaCreate,
         KbAreaMap,
         KbAreaMaterials,
+        KbAreaMerge,
         KbAreaUpdate,
         KbFactualSignal,
+        KbMaterialTopic,
+        KbMaterialTopicSet,
         KbReadMark,
         KbReadMarkUpdate,
         KbReadMarkValue,
         KbSignalEntity,
         KbSignals,
+        KbTopicLabelling,
     )
 
 
@@ -57,6 +61,12 @@ class AreasService(Protocol):
     async def set_finding_mark(self, finding_id: str, body: KbReadMarkUpdate) -> KbReadMark: ...
     async def remove_finding_mark(self, finding_id: str) -> KbReadMark: ...
     async def signals(self, cursor: str | None = None, limit: int = 50) -> KbSignals: ...
+    # EX2 (X1): own topics.
+    async def sort_topics(self) -> KbTopicLabelling:
+        """Start/continue labelling unsorted wiki materials (the user's click; paid on the wiki engine)."""
+        ...
+    async def merge(self, area_id: str, body: KbAreaMerge) -> KbArea: ...
+    async def set_material_topic(self, material_id: str, body: KbMaterialTopicSet) -> KbMaterialTopic: ...
 
 
 class SignalRecorder(Protocol):

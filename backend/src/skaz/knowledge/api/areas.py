@@ -14,10 +14,14 @@ from .schemas_areas import (
     KbAreaCreate,
     KbAreaMap,
     KbAreaMaterials,
+    KbAreaMerge,
     KbAreaUpdate,
+    KbMaterialTopic,
+    KbMaterialTopicSet,
     KbReadMark,
     KbReadMarkUpdate,
     KbSignals,
+    KbTopicLabelling,
 )
 
 router = APIRouter(prefix="/kb", tags=["kb-areas"], route_class=ContractRoute, responses=ERROR_RESPONSES)
@@ -96,3 +100,24 @@ async def signals(
     service: ServiceDep, cursor: str | None = None, limit: Annotated[int, Query(ge=1, le=100)] = 50
 ) -> KbSignals:
     return await service.signals(cursor=cursor, limit=limit)
+
+
+# -- EX2: own topics ---------------------------------------------------------------------------------
+
+
+@router.post("/explore/topics/sort", response_model=KbTopicLabelling)
+async def sort_topics(service: ServiceDep) -> KbTopicLabelling:
+    """Start/continue giving unsorted wiki materials their topic (the user's click)."""
+    return await service.sort_topics()
+
+
+@router.post("/explore/areas/{area_id}/merge", response_model=KbArea)
+async def merge(area_id: EntityPath, body: KbAreaMerge, service: ServiceDep) -> KbArea:
+    return await service.merge(area_id, body)
+
+
+@router.put("/materials/{material_id}/topic", response_model=KbMaterialTopic)
+async def set_material_topic(
+    material_id: EntityPath, body: KbMaterialTopicSet, service: ServiceDep
+) -> KbMaterialTopic:
+    return await service.set_material_topic(material_id, body)

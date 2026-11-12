@@ -130,3 +130,6 @@ class NotificationFeed:
 
     def mark_read(self, up_to_seq: int) -> int:
         return self.kb.notification_repo.mark_read(up_to_seq)
+
+    def mark_one_read(self, notification_id: str) -> bool:
+        return self.kb.notification_repo.mark_one_read(notification_id)

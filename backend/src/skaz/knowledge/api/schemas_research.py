@@ -18,12 +18,6 @@ from .schemas_explore_common import (
 )
 
 
-class KbResearchCreate(KbContractRequest):
-    description: Annotated[str, Field(min_length=1, max_length=4000)]
-    area_id: KbEntityId | None = None
-    dates: KbDateWindow | None = None
-
-
 class KbResearchTopic(KbContractRequest):
     """EX2: one topic on the Research task card — proposed by the chat agent, typed, or picked from the map.
 
@@ -33,6 +27,25 @@ class KbResearchTopic(KbContractRequest):
     source: Literal["proposed", "typed", "picked"]
     #: A topic picked from the map: its hidden OpenAlex label narrows the search.
     area_id: KbEntityId | None = None
+
+
+class KbResearchCreate(KbContractRequest):
+    description: Annotated[str, Field(min_length=1, max_length=4000)]
+    area_id: KbEntityId | None = None
+    dates: KbDateWindow | None = None
+    #: EX2: the card as the user left it (proposed kept/edited, typed, picked). ``None`` = the chat agent
+    #: derives the topics and the task starts with them (the in-chat tool path asks through the permission).
+    topics: list[KbResearchTopic] | None = Field(default=None, min_length=1, max_length=4)
+
+
+class KbResearchProposal(BaseModel):
+    """EX2: what "+ New research task" shows on its card before anything starts: the chat agent's title and
+    proposed topics for the description (``POST /kb/research/proposals`` with a ``KbResearchCreate`` body
+    whose ``topics`` is ``None``). Nothing leaves for science sources here; the description goes only to the
+    chat agent."""
+
+    title: str
+    topics: list[KbResearchTopic]
 
 
 class KbResearchTask(BaseModel):

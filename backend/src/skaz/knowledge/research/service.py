@@ -35,6 +35,7 @@ from ..api.schemas_research import (
     KbResearchDecide,
     KbResearchGrant,
     KbResearchPermission,
+    KbResearchProposal,
     KbResearchTask,
     KbResearchTasks,
     KbResearchToolResult,
@@ -283,6 +284,10 @@ class ResearchTasks:
         return permission_view(row, task, job)
 
     # -- ResearchService: tasks ------------------------------------------------------------------------
+
+    async def propose(self, body: KbResearchCreate) -> KbResearchProposal:
+        # EX2 step 0 — X3 implements; until then the route answers an honest 503 not_ready.
+        raise ContractFailure(503, "not_ready")
 
     async def create(self, body: KbResearchCreate) -> KbResearchTask:
         """«+» → New research task: the user's own start, so no card (the template says what is sent)."""

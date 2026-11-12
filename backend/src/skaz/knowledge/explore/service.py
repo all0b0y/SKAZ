@@ -31,6 +31,7 @@ from ..agents.prompting import untrusted_block
 from ..api.contract_routes import ContractFailure
 from ..api.schemas_areas import KbReadMark, KbSignalEntity
 from ..api.schemas_explore import (
+    KbCandidateOutcome,
     KbExploreStart,
     KbExploring,
     KbExploringList,
@@ -40,8 +41,12 @@ from ..api.schemas_explore import (
     KbFindingImport,
     KbFindingImported,
     KbFindings,
+    KbFunnelCandidate,
+    KbFunnelCandidates,
     KbFunnelRun,
     KbFunnelStart,
+    KbSearchPlan,
+    KbSearchPlanRequest,
     KbThesis,
 )
 from ..api.schemas_explore_common import (
@@ -331,6 +336,22 @@ class ExploreFunnel:
         self._ensure_ready()
         finding = await self.finding(finding_id)
         return await self.reading.add_to_wiki(finding, body, self._client())
+
+    # EX2 step 0 — X2 implements; until then the routes answer an honest 503 not_ready.
+    async def plan(self, body: KbSearchPlanRequest) -> KbSearchPlan:
+        raise ContractFailure(503, "not_ready")
+
+    async def candidates(
+        self,
+        run_id: str,
+        outcome: KbCandidateOutcome | None = None,
+        cursor: str | None = None,
+        limit: int = 30,
+    ) -> KbFunnelCandidates:
+        raise ContractFailure(503, "not_ready")
+
+    async def mark_fits(self, run_id: str, candidate_id: str) -> KbFunnelCandidate:
+        raise ContractFailure(503, "not_ready")
 
     async def exploring(self) -> KbExploringList:
         self._ensure_ready()

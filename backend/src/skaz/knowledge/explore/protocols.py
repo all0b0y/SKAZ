@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from ..api.schemas_explore import (
+        KbCandidateOutcome,
         KbExploreStart,
         KbExploring,
         KbExploringList,
@@ -14,8 +15,12 @@ if TYPE_CHECKING:
         KbFindingImport,
         KbFindingImported,
         KbFindings,
+        KbFunnelCandidate,
+        KbFunnelCandidates,
         KbFunnelRun,
         KbFunnelStart,
+        KbSearchPlan,
+        KbSearchPlanRequest,
         KbThesis,
     )
     from ..api.schemas_explore_common import (
@@ -53,6 +58,16 @@ class ExploreService(Protocol):
     async def explore(self, finding_id: str, body: KbExploreStart) -> KbExploring: ...
     async def add_to_wiki(self, finding_id: str, body: KbFindingImport) -> KbFindingImported: ...
     async def exploring(self) -> KbExploringList: ...
+    # EX2 (X2): the "Will search" plan and the funnel on view.
+    async def plan(self, body: KbSearchPlanRequest) -> KbSearchPlan: ...
+    async def candidates(
+        self,
+        run_id: str,
+        outcome: KbCandidateOutcome | None = None,
+        cursor: str | None = None,
+        limit: int = 30,
+    ) -> KbFunnelCandidates: ...
+    async def mark_fits(self, run_id: str, candidate_id: str) -> KbFunnelCandidate: ...
 
 
 class FunnelRunner(Protocol):

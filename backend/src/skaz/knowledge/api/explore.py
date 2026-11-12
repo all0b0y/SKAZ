@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from ..explore.protocols import ExploreService
 from .contract_routes import ERROR_RESPONSES, ContractRoute, service_for
 from .schemas_explore import (
+    KbCandidateOutcome,
     KbExploreStart,
     KbExploring,
     KbExploringList,
@@ -16,8 +17,12 @@ from .schemas_explore import (
     KbFindingImport,
     KbFindingImported,
     KbFindings,
+    KbFunnelCandidate,
+    KbFunnelCandidates,
     KbFunnelRun,
     KbFunnelStart,
+    KbSearchPlan,
+    KbSearchPlanRequest,
 )
 from .schemas_explore_common import KbContinue, KbJobs
 
@@ -96,3 +101,34 @@ async def add_to_wiki(
 @router.get("/explore/exploring", response_model=KbExploringList)
 async def exploring(service: ServiceDep) -> KbExploringList:
     return await service.exploring()
+
+
+# -- EX2: "Will search" plan and the funnel on view ----------------------------------------------------
+
+#: A candidate is a science work id (OpenAlex ``W…``, arXiv ``2502.13897``, a DOI-derived id).
+CandidatePath = Annotated[str, Path(min_length=1, max_length=200)]
+
+
+@router.post("/explore/plan", response_model=KbSearchPlan)
+async def plan(body: KbSearchPlanRequest, service: ServiceDep) -> KbSearchPlan:
+    """What a run would send (shown before it starts); nothing leaves the machine here."""
+    return await service.plan(body)
+
+
+@router.get("/explore/runs/{run_id}/candidates", response_model=KbFunnelCandidates)
+async def candidates(
+    run_id: EntityPath,
+    service: ServiceDep,
+    outcome: KbCandidateOutcome | None = None,
+    cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+) -> KbFunnelCandidates:
+    return await service.candidates(run_id, outcome=outcome, cursor=cursor, limit=limit)
+
+
+@router.post("/explore/runs/{run_id}/candidates/{candidate_id}/fits", response_model=KbFunnelCandidate)
+async def mark_fits(
+    run_id: EntityPath, candidate_id: CandidatePath, service: ServiceDep
+) -> KbFunnelCandidate:
+    """"It fits": a dropped work goes on (the paid novelty check still waits for a click)."""
+    return await service.mark_fits(run_id, candidate_id)

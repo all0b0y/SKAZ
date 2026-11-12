@@ -280,6 +280,11 @@ export interface KbAreaMaterials {
   next_cursor: string | null;
 }
 
+/** EX2: merge this topic into another; its materials and subtopics move there. */
+export interface KbAreaMerge {
+  into_id: string;
+}
+
 export interface KbAreaUpdate {
   name?: string | null;
   hidden?: boolean | null;
@@ -984,6 +989,20 @@ export interface KbFreshnessMarks {
   last_link_check: KbLinkObservation | null;
 }
 
+/** EX2: one work the run looked at, with where it stopped and why (the funnel on view). */
+export interface KbFunnelCandidate {
+  candidate_id: string;
+  work: KbScienceWork;
+  outcome: "dropped_by_rules" | "not_fit" | "undecided" | "covered" | "new" | "fits";
+  reason: string | null;
+  overridden: boolean;
+}
+
+export interface KbFunnelCandidates {
+  items: KbFunnelCandidate[];
+  next_cursor: string | null;
+}
+
 export interface KbFunnelRun {
   id: string;
   owner: "explore" | "research" | "links" | "weekly" | "repeats";
@@ -1498,6 +1517,17 @@ export interface KbMaterialSummary {
   folder_name: string;
 }
 
+export interface KbMaterialTopic {
+  material_id: string;
+  area_id: string | null;
+  origin: "agent" | "user" | null;
+}
+
+/** EX2: the user moves a material to one of their topics (wins over the agent's label). */
+export interface KbMaterialTopicSet {
+  area_id: string;
+}
+
 export interface KbMaterialUpdate {
   title?: string | null;
   folder_id?: string | null;
@@ -2003,6 +2033,7 @@ export interface KbResearchCreate {
   description: string;
   area_id?: string | null;
   dates?: KbDateWindow | null;
+  topics?: KbResearchTopic[] | null;
 }
 
 export interface KbResearchDecide {
@@ -2033,6 +2064,12 @@ export interface KbResearchPermission {
   task_title: string | null;
   task_state: "queued" | "running" | "paused" | "done" | "cancelled" | "error" | null;
   created_at: string;
+}
+
+/** EX2: what "+ New research task" shows on its card before anything starts: the chat agent's title and proposed topics for the description (``POST /kb/research/proposals`` with a ``KbResearchCreate`` body whose ``topics`` is ``None``). Nothing leaves for science sources here; the description goes only to the chat agent. */
+export interface KbResearchProposal {
+  title: string;
+  topics: KbResearchTopic[];
 }
 
 export interface KbResearchTask {
@@ -2201,10 +2238,23 @@ export interface KbSearchCounts {
   chats: number;
 }
 
+export interface KbSearchPlan {
+  items: KbSearchPlanItem[];
+  ready: boolean;
+  reason: string | null;
+}
+
 export interface KbSearchPlanItem {
   area_id: string | null;
   label: string;
   terms: string[];
+}
+
+/** EX2: what a run would send, shown before it starts. Empty topic + empty text is not a plan. */
+export interface KbSearchPlanRequest {
+  area_id?: string | null;
+  query?: string;
+  all_topics?: boolean;
 }
 
 export interface KbSearchResults {
@@ -3367,6 +3417,13 @@ export interface KbEndpoints {
     response: KbAreaMaterials;
     status: 200;
   };
+  "POST /kb/explore/areas/{area_id}/merge": {
+    path: { area_id: string };
+    query: Record<string, never>;
+    body: KbAreaMerge;
+    response: KbArea;
+    status: 200;
+  };
   "POST /kb/explore/areas/{area_id}/opened": {
     path: { area_id: string };
     query: Record<string, never>;
@@ -3437,6 +3494,13 @@ export interface KbEndpoints {
     response: KbAreaMap;
     status: 200;
   };
+  "POST /kb/explore/plan": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbSearchPlanRequest;
+    response: KbSearchPlan;
+    status: 200;
+  };
   "POST /kb/explore/read": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -3493,6 +3557,20 @@ export interface KbEndpoints {
     response: KbFunnelRun;
     status: 200;
   };
+  "GET /kb/explore/runs/{run_id}/candidates": {
+    path: { run_id: string };
+    query: { outcome?: "dropped_by_rules" | "not_fit" | "undecided" | "covered" | "new" | "fits" | null; cursor?: string | null; limit?: number };
+    body: never;
+    response: KbFunnelCandidates;
+    status: 200;
+  };
+  "POST /kb/explore/runs/{run_id}/candidates/{candidate_id}/fits": {
+    path: { run_id: string; candidate_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFunnelCandidate;
+    status: 200;
+  };
   "POST /kb/explore/runs/{run_id}/continue": {
     path: { run_id: string };
     query: Record<string, never>;
@@ -3512,6 +3590,13 @@ export interface KbEndpoints {
     query: { cursor?: string | null; limit?: number };
     body: never;
     response: KbSignals;
+    status: 200;
+  };
+  "POST /kb/explore/topics/sort": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbTopicLabelling;
     status: 200;
   };
   "POST /kb/export": {
@@ -3892,6 +3977,13 @@ export interface KbEndpoints {
     response: KbMaterialRepeats;
     status: 200;
   };
+  "PUT /kb/materials/{material_id}/topic": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: KbMaterialTopicSet;
+    response: KbMaterialTopic;
+    status: 200;
+  };
   "GET /kb/me": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -3983,6 +4075,13 @@ export interface KbEndpoints {
     response: KbNotification;
     status: 200;
   };
+  "POST /kb/notifications/{notification_id}/read": {
+    path: { notification_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: void;
+    status: 204;
+  };
   "POST /kb/notifications/{notification_id}/resolve": {
     path: { notification_id: string };
     query: Record<string, never>;
@@ -4065,6 +4164,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbResearchDecide;
     response: KbResearchPermission;
+    status: 200;
+  };
+  "POST /kb/research/proposals": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbResearchCreate;
+    response: KbResearchProposal;
     status: 200;
   };
   "GET /kb/research/tasks": {
