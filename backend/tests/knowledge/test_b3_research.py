@@ -343,7 +343,10 @@ async def test_a_task_from_plus_sends_only_topics_and_lives_in_its_own_chat(env:
     (task_id, title, body), = env.funnel.bodies
     assert (task_id, title) == (task["id"], "Claim verification")
     # Only the topics leave; the address, the link and the duplicate were dropped; the description stays.
-    assert body.query == "claim verification OR fact-checking knowledge bases"
+    # EX2: the topics reach the funnel as its search plan, one item each; no query is derived.
+    assert body.query == "" and [item.terms for item in body.plan or []] == [
+        ["claim verification"], ["fact-checking knowledge bases"]
+    ]
     assert body.channels == ["search"] and "Ann" not in body.model_dump_json()
     topics_turn = next(turn for turn in env.agents["codex"].turns if turn.instructions == TOPICS_INSTRUCTIONS)
     assert topics_turn.tools is None and "<untrusted-data" in topics_turn.messages[0].content
