@@ -326,21 +326,26 @@ async def test_legacy_run_without_a_plan_cannot_resume_as_empty_success(parts: S
     assert await parts.funnel.on_start() == []
     paused = await parts.funnel.run(run.id)
     with pytest.raises(ContractFailure) as caught:
-        await parts.funnel.resume(run.id, KbContinue(
-            checkpoint_id=paused.checkpoint.id, revision=paused.checkpoint.revision))
+        await parts.funnel.resume(
+            run.id, KbContinue(checkpoint_id=paused.checkpoint.id, revision=paused.checkpoint.revision)
+        )
     assert (caught.value.status, caught.value.code) == (503, "not_ready")
     assert parts.science.calls == before
 
 
-async def test_pause_keeps_plan_and_hidden_labels_and_skips_finished_search_items(parts: SimpleNamespace) -> None:
+async def test_pause_keeps_plan_and_hidden_labels_and_skips_finished_search_items(
+    parts: SimpleNamespace,
+) -> None:
     from skaz.knowledge.api.schemas_explore_common import KbContinue
     from skaz.knowledge.science.protocols import ScienceDailyLimit
     from tests.knowledge.test_b2_funnel import results
 
     topic(parts, "topic-ai", "AI", count=1, hidden_ids=["T1"])
     topic(parts, "topic-ml", "ML", count=1, hidden_ids=["T2"])
-    plan = [KbSearchPlanItem(area_id="topic-ai", label="AI", terms=["agents"]),
-            KbSearchPlanItem(area_id="topic-ml", label="ML", terms=["learning"])]
+    plan = [
+        KbSearchPlanItem(area_id="topic-ai", label="AI", terms=["agents"]),
+        KbSearchPlanItem(area_id="topic-ml", label="ML", terms=["learning"]),
+    ]
     calls: list[list[str]] = []
     limited = True
 
@@ -357,8 +362,9 @@ async def test_pause_keeps_plan_and_hidden_labels_and_skips_finished_search_item
         db.execute("UPDATE explore_areas SET name='Changed',mapping_state='pending'")
         db.execute("DELETE FROM explore_area_topics")
     limited = False
-    await parts.funnel.resume(run.id, KbContinue(
-        checkpoint_id=run.checkpoint.id, revision=run.checkpoint.revision))
+    await parts.funnel.resume(
+        run.id, KbContinue(checkpoint_id=run.checkpoint.id, revision=run.checkpoint.revision)
+    )
     done = await parts.funnel.settled(run.id)
     assert done.plan == plan and done.state == "done"
     assert calls == [["agents", "T1"], ["learning", "T2"], ["learning", "T2"]]
