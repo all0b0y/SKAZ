@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KbApiError } from '../api/client';
 import { ExploreSection } from './ExploreSection';
-import { ex2Kb, roots } from './test/fixtures';
+import { children, ex2Kb, mapFixture, roots, topic } from './test/fixtures';
 
 afterEach(cleanup);
 describe('EX2 topic editing', () => {
@@ -57,6 +57,18 @@ describe('EX2 topic editing', () => {
     await waitFor(() => expect(kb.topics.merge).toHaveBeenCalledWith('ai', 'ml'));
     await waitFor(() => expect(screen.getByRole('navigation', { name: 'Explore breadcrumbs' })).toHaveTextContent(roots[1]!.name));
     expect(screen.getByRole('navigation', { name: 'Explore breadcrumbs' })).not.toHaveTextContent('AI agents');
+  });
+
+  it('opens an empty named topic from the picker so it can still be managed', async () => {
+    const kb = ex2Kb(); const empty = topic('empty', 'Unfilled topic', 0);
+    kb.areas.map.mockImplementation(async (query = {}) => query.parent_id === 'ai'
+      ? mapFixture({ parent_id: 'ai', breadcrumbs: [roots[0]!], areas: children }) : mapFixture({ areas: [...roots, empty] }));
+    render(<ExploreSection clients={kb} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Search scope: All your topics' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unfilled topic' }));
+    await waitFor(() => expect(screen.getByRole('navigation', { name: 'Explore breadcrumbs' })).toHaveTextContent('Unfilled topic'));
+    fireEvent.click(screen.getByRole('button', { name: 'Topic actions' }));
+    expect(await screen.findByRole('menuitem', { name: 'Rename topic' })).toBeInTheDocument();
   });
 
   it('keeps a failed edit open, preserves the name and hides raw provider detail', async () => {
