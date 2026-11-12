@@ -206,6 +206,12 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/kb\/explore\/signals$/ },
   { method: 'DELETE', pattern: /^\/kb\/explore\/areas\/[^\/]+$/ },
   { method: 'POST', pattern: /^\/kb\/explore\/areas\/[^\/]+\/opened$/ },
+  // EX3 (Explore v2): the searches list (rename, delete) and the state of one finding — seen, dismissed,
+  // restored, added to Materials, discussed. Ids are one path segment; the paper's text never passes here.
+  { method: 'GET', pattern: /^\/kb\/explore\/searches$/ },
+  { method: 'PUT', pattern: /^\/kb\/explore\/searches\/[^\/]+\/name$/ },
+  { method: 'DELETE', pattern: /^\/kb\/explore\/searches\/[^\/]+$/ },
+  { method: 'POST', pattern: /^\/kb\/explore\/findings\/[^\/]+\/(?:seen|dismiss|restore|materials|discuss)$/ },
   // EX2: own topics (sort, merge, move a material), the "Will search" plan and the funnel on view.
   { method: 'POST', pattern: /^\/kb\/explore\/topics\/sort$/ },
   { method: 'POST', pattern: /^\/kb\/explore\/areas\/[^\/]+\/merge$/ },
