@@ -1,0 +1,208 @@
+"""EX2 X2: own-topic plans, card-scoped decisions, and the visible funnel; fixtures only."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Sequence
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from skaz.knowledge.api.contract_routes import ContractFailure
+from skaz.knowledge.api.schemas_explore import KbFunnelStart, KbSearchPlanItem, KbSearchPlanRequest
+from skaz.knowledge.decisions.protocol import ChoiceAnswer, ChoiceQuestion
+from skaz.knowledge.errors import KnowledgeError
+from tests.knowledge.test_b2_funnel import (
+    FakeLayer,
+    parts as parts,
+    run_to_end,
+    work,
+)
+
+
+def topic(p: SimpleNamespace, area_id: str, name: str, *, parent: str | None = None,
+          count: int = 0, hidden_ids: Sequence[str] = ()) -> None:
+    with p.kb.db.write() as db:
+        db.execute(
+            "INSERT INTO explore_areas(id,parent_id,level,name,original_name,mapping_state,mapped_name)"
+            " VALUES (?,?,'custom',?,?,'mapped',?)", (area_id, parent, name, name, name),
+        )
+        db.executemany("INSERT INTO explore_area_topics VALUES (?,?)", [(area_id, t) for t in hidden_ids])
+        folder = p.kb.folders()[0].id
+        for n in range(count):
+            mid = f"{area_id}-material-{n}"
+            db.execute(
+                "INSERT INTO materials(id,folder_id,kind,status,title,rel_dir,source_file,created_at)"
+                " VALUES (?,?,'web','ready',?,?,'source.md','2026-11-10')", (mid, folder, mid, mid),
+            )
+            db.execute("INSERT INTO explore_area_materials VALUES (?,?,'agent','now')", (mid, area_id))
+    p.directory.paths[area_id] = ([p.directory.paths[parent][-1]] if parent else []) + [name]
+    p.directory.area_topics[area_id] = list(hidden_ids)
+
+
+def concept(p: SimpleNamespace, area_id: str, title: str, n: int, *, kind: str = "concept") -> None:
+    with p.kb.db.write() as db:
+        db.execute(
+            "INSERT INTO pages(id,kind,title,rel_path,language,file_sha256,indexed_at)"
+            " VALUES (?,?,?,?,'en','fixture','now')", (f"p-{n}", kind, title, f"Wiki/{n}.md"),
+        )
+        db.execute("INSERT INTO page_sources VALUES (?,?)", (f"p-{n}", f"{area_id}-material-0"))
+
+
+async def test_all_topics_real_library_shape_is_local_bounded_and_nonempty(parts: SimpleNamespace) -> None:
+    # 93 ordinary web materials, 1124 concepts: no paper DOIs, no taxonomy roots.
+    topic(parts, "topic-agents", "AI agents", count=30)
+    topic(parts, "topic-ml", "Machine learning", count=25)
+    topic(parts, "topic-comms", "Business communication", count=10)
+    for n in range(7):
+        topic(parts, f"topic-small-{n}", f"Small topic {n}", count=4)
+    for n in range(1124):
+        concept(parts, "topic-agents", "Agent memory" if n % 2 else "Tool use", n)
+    plan = await parts.funnel.plan(KbSearchPlanRequest(all_topics=True))
+    assert plan.ready and plan.reason is None
+    assert len(plan.items) == 8
+    assert [i.area_id for i in plan.items[:3]] == ["topic-agents", "topic-ml", "topic-comms"]
+    assert plan.items[0].terms == ["AI agents", "Agent memory", "Tool use"]
+    assert parts.science.calls == [] and parts.deciders.layer().asked == 0
+    parts.science.search_works = [work(1)]
+    run = await run_to_end(parts, KbFunnelStart(all_topics=True, channels=["search"]))
+    assert run.state == "done" and run.counters.checked == 1
+    assert len([1 for name, _ in parts.science.calls if name == "search"]) == 8
+    assert run.plan == plan.items
+
+
+async def test_subtopic_query_is_precise_and_only_hidden_ids_are_added(parts: SimpleNamespace) -> None:
+    topic(parts, "topic-ai", "AI", count=1, hidden_ids=["T1"])
+    topic(parts, "topic-agents", "AI agents", parent="topic-ai", count=1, hidden_ids=["T2"])
+    concept(parts, "topic-agents", "Agent memory", 1)
+    preview = await parts.funnel.plan(KbSearchPlanRequest(area_id="topic-agents", query="harness"))
+    assert preview.items == [KbSearchPlanItem(area_id="topic-agents", label="AI agents", terms=["harness"])]
+    run = await run_to_end(parts, KbFunnelStart(area_id="topic-agents", query="harness", channels=["search"]))
+    (sent,) = [body for name, body in parts.science.calls if name == "search"]
+    assert sent.payload.topics == ["harness", "T2"]
+    assert run.plan == preview.items
+    plain = await parts.funnel.plan(KbSearchPlanRequest(query="harness"))
+    assert plain.items[0].area_id is None and plain.items[0].terms == ["harness"]
+
+
+async def test_unmapped_topic_searches_its_name_and_concepts_without_taxonomy(parts: SimpleNamespace) -> None:
+    topic(parts, "topic-comms", "Business communication", count=2)
+    concept(parts, "topic-comms", "Negotiation", 1)
+    concept(parts, "topic-comms", "Private notes body", 2, kind="note")
+    run = await run_to_end(parts, KbFunnelStart(area_id="topic-comms", channels=["search"]))
+    (sent,) = [body for name, body in parts.science.calls if name == "search"]
+    assert sent.payload.topics == ["Business communication", "Negotiation"]
+    assert run.state == "done"
+
+
+@pytest.mark.parametrize("scope", [KbSearchPlanRequest(), KbSearchPlanRequest(all_topics=True)])
+async def test_empty_scope_reports_reason_and_cannot_create_a_run(
+    parts: SimpleNamespace, scope: KbSearchPlanRequest,
+) -> None:
+    plan = await parts.funnel.plan(scope)
+    assert not plan.ready and plan.reason and plan.items == []
+    with pytest.raises(ContractFailure) as caught:
+        await parts.funnel.start(KbFunnelStart(**scope.model_dump()))
+    assert caught.value.status == 422
+    assert parts.jobs.active() == [] and parts.science.calls == []
+
+
+async def test_edited_plan_is_authoritative_and_empty_items_are_rejected(parts: SimpleNamespace) -> None:
+    topic(parts, "topic-ai", "AI", count=1)
+    topic(parts, "topic-ml", "ML", count=1)
+    plan = [KbSearchPlanItem(area_id="topic-ai", label="AI", terms=["Agent safety"])]
+    run = await run_to_end(parts, KbFunnelStart(all_topics=True, query="ignored", plan=plan, channels=["search"]))
+    assert run.plan == plan
+    (sent,) = [body for name, body in parts.science.calls if name == "search"]
+    assert sent.payload.topics == ["Agent safety"]
+    for invalid in ([], [KbSearchPlanItem(area_id=None, label="empty", terms=[])],
+                    [KbSearchPlanItem(area_id=None, label="blank", terms=["   "])]):
+        with pytest.raises(ContractFailure):
+            await parts.funnel.start(KbFunnelStart(plan=invalid))
+
+
+class CardLayer(FakeLayer):
+    def __init__(self) -> None:
+        super().__init__("local", set())
+        self.questions: list[ChoiceQuestion] = []
+
+    async def ask_many(self, questions: Sequence[ChoiceQuestion]) -> list[Any]:
+        self.questions.extend(questions)
+        return [ChoiceAnswer(option=q.options[0], probabilities={q.options[0]: .9}, confidence=.9)
+                for q in questions]
+
+
+async def test_research_50_works_use_russian_card_topics_not_own_library(parts: SimpleNamespace) -> None:
+    topic(parts, "topic-comms", "Business communication", count=1)
+    card = [KbSearchPlanItem(area_id=None, label="Память агентов", terms=["Память агентов", "harness"])]
+    layer = CardLayer()
+    parts.deciders._layer = layer
+    parts.science.search_works = [work(n, title=f"Agent memory {n}") for n in range(50)]
+    started = await parts.funnel.start_for_task("task-ru", "Исследовать память", KbFunnelStart(plan=card))
+    run = await parts.funnel.settled(started.id)
+    assert (run.counters.checked, run.counters.on_topic, run.counters.new) == (50, 50, 30)
+    assert run.stop_reason == "budget"
+    for q in layer.questions:
+        assert "Память агентов" in q.state and "harness" in q.state
+        assert "Business communication" not in q.state + q.question + str(q.options)
+        assert "areas of the user's library" not in q.question
+    assert [body.payload.topics for name, body in parts.science.calls if name == "search"] == [card[0].terms]
+
+
+async def test_changed_card_does_not_reuse_off_topic_forever(parts: SimpleNamespace) -> None:
+    parts.science.search_works = [work(1, title="Off topic")]
+    first = await run_to_end(parts, KbFunnelStart(query="communication", channels=["search"]))
+    assert first.counters.on_topic == 0
+    parts.deciders._layer = CardLayer()
+    started = await parts.funnel.start_for_task("task-new", "Agents", KbFunnelStart(query="agents"))
+    changed = await parts.funnel.settled(started.id)
+    assert changed.counters.on_topic == 1 and changed.counters.new == 1
+
+
+async def test_funnel_lists_all_outcomes_with_reasons_pagination_and_overrides(parts: SimpleNamespace) -> None:
+    parts.science.search_works = [work(1, title="Too old", year=2019), work(2, title="Off topic"),
+                                  work(3, title="Known"), work(4, title="New")]
+    parts.novelty.labels = {"Known": "covered"}
+    run = await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
+    page = await parts.funnel.candidates(run.id, limit=2)
+    assert page.next_cursor is not None
+    later = await parts.funnel.candidates(run.id, cursor=page.next_cursor, limit=2)
+    assert later.next_cursor is None
+    items = {i.candidate_id: i for i in [*page.items, *later.items]}
+    assert {cid: i.outcome for cid, i in items.items()} == {
+        "work-1": "dropped_by_rules", "work-2": "not_fit", "work-3": "covered", "work-4": "new"}
+    assert all(i.reason for i in items.values())
+    assert "date" in items["work-1"].reason.lower()
+    (dropped,) = (await parts.funnel.candidates(run.id, outcome="not_fit")).items
+    assert dropped.candidate_id == "work-2"
+    before = list(parts.novelty.checked)
+    override = await parts.funnel.fits(run.id, "work-2")
+    assert (override.outcome, override.overridden) == ("fits", True)
+    assert parts.novelty.checked == before
+    assert await parts.funnel.fits(run.id, "work-2") == override  # idempotent
+    assert "work-2" in await parts.funnel.waiting(run.id)
+    assert (await parts.funnel.run(run.id)).counters.on_topic == run.counters.on_topic + 1
+    # The explicit Check novelty click consumes the user's override rather than an old rejection.
+    check = await run_to_end(parts, KbFunnelStart(candidate_ids=["work-2"]))
+    assert check.counters.new == 1
+    with pytest.raises(KnowledgeError):
+        await parts.funnel.fits("missing-run", "work-2")
+    with pytest.raises(KnowledgeError):
+        await parts.funnel.fits(run.id, "other-work")
+    with pytest.raises(ContractFailure):
+        await parts.funnel.candidates(run.id, cursor="bad")
+
+
+async def test_rule_override_preserves_original_reason_without_spending(parts: SimpleNamespace) -> None:
+    parts.science.search_works = [work(1, year=2019)]
+    run = await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
+    override = await parts.funnel.fits(run.id, "work-1")
+    assert override.outcome == "fits" and override.overridden
+    assert "work-1" in await parts.funnel.waiting(run.id)
+    assert parts.novelty.checked == []
+    with parts.kb.db.read() as db:
+        original = json.loads(db.execute("SELECT result_json FROM explore_completed_work"
+                                        " WHERE job_id=? AND candidate_id='work-1' AND stage='rules'",
+                                        (run.id,)).fetchone()[0])
+    assert original["reason"] == "outside_dates"
