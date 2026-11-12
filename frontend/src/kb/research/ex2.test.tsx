@@ -26,7 +26,7 @@ function setup(node?: React.ReactNode, tasks: KbResearchTask[] = []) {
   fake.research.decide = vi.fn(async () => ({ ...f.KbResearchPermission, status: 'allowed' as const, task_id: task.id }));
   const base = createFakeBridge(chatWorld());
   const original = base.requestMock.getMockImplementation()!;
-  const root: KbAreaMap = { ...f.KbAreaMap, areas: [{ ...f.KbArea, id: 'agents', name: 'AI agents', level: 'custom', parent_id: null }] };
+  const root: KbAreaMap = { ...f.KbAreaMap, total_sources: 93, total_pages: 1124, areas: [{ ...f.KbArea, id: 'agents', name: 'AI agents', level: 'custom', parent_id: null }] };
   const child: KbAreaMap = { ...root, parent_id: 'agents', areas: [{ ...root.areas[0]!, id: 'evaluation', name: 'Evaluation', parent_id: 'agents' }] };
   base.requestMock.mockImplementation(async (req) => {
     if (req.path === '/kb/research/proposals') { base.calls.push(req); return { ok: true, status: 200, data: proposal }; }
@@ -215,7 +215,7 @@ describe('EX2 X5 · boundary and lifecycle checks', () => {
 
   it('renames and deletes an active research chat through the shared menu, and a stale task page cannot restore it', async () => {
     const user = userEvent.setup();
-    const { base, services, store } = setup(undefined, [task]);
+    const { base, services, store, fake } = setup(undefined, [task]);
     const chat = { ...base.world.chats[0]!, id: task.chat_id, title: task.title, research_task_id: task.id };
     base.world.chats.push(chat);
     act(() => services.chats.setState({ list: [...services.chats.getState().list, chat] }));
@@ -227,7 +227,13 @@ describe('EX2 X5 · boundary and lifecycle checks', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
     const dialog = await screen.findByRole('dialog', { name: 'Delete this chat?' });
     expect(within(dialog).getByText(/Its findings stay in Explore/)).toBeInTheDocument();
+    let finishStale!: (value: { tasks: KbResearchTask[]; next_cursor: null }) => void;
+    const stale = new Promise<{ tasks: KbResearchTask[]; next_cursor: null }>((resolve) => { finishStale = resolve; });
+    vi.mocked(fake.research.tasks).mockImplementationOnce(() => stale);
+    const readingBeforeDelete = store.getState().loadTasks();
     await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    finishStale({ tasks: [task], next_cursor: null });
+    await act(async () => { await readingBeforeDelete; });
     expect(base.requestMock).toHaveBeenCalledWith(expect.objectContaining({ method: 'DELETE', path: `/kb/chats/${task.chat_id}` }));
     await waitFor(() => expect(store.getState().tasks).toHaveLength(0));
     await act(async () => { await store.getState().loadTasks(); });
