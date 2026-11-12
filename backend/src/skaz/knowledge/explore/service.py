@@ -641,8 +641,6 @@ class ExploreFunnel:
             await self._collect_ids(run, list(request["candidate_ids"]), done)
         else:
             channels = list(request.get("channels") or ())
-            if run.task_id is not None:
-                channels = ["search"]  # The card alone defines Research; no unrelated library seeds.
             seeds: list[tuple[Seed, KbScienceWork]] = []
             if {"continues", "branches"} & set(channels):
                 seeds = await self._seeds(run, done)
@@ -898,7 +896,12 @@ class ExploreFunnel:
                 ]
                 answers = await layer.ask_many(questions)
                 for cid, answer in zip(asked, answers, strict=True):
-                    area_id = collected[cid].get("area_id") or run.area_id
+                    areas = list(run.request.get("area_options") or [])
+                    area_id = (
+                        collected[cid].get("area_id")
+                        or run.area_id
+                        or (areas[0] if len(areas) == 1 else None)
+                    )
                     if isinstance(answer, ChoiceAnswer) and answer.option == ON_TOPIC:
                         verdict = {"on_topic": True, "area_id": area_id, "reason": "decided"}
                     elif isinstance(answer, ChoiceAnswer) and answer.option == OFF_TOPIC:
