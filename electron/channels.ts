@@ -39,4 +39,10 @@ export const CHANNELS = {
   // Settings → "Closing the window quits SKAZ" (decision 3f′).
   closeQuitsGet: 'app:close-quits-get',
   closeQuitsSet: 'app:close-quits-set',
+  // EX3: Explore's paper reader, a sandboxed view of its own over the page's reader slot.
+  paperShow: 'paper:show',
+  paperBounds: 'paper:bounds',
+  paperHide: 'paper:hide',
+  paperNavigate: 'paper:navigate',
+  paperState: 'paper:state',
 } as const;

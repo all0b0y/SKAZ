@@ -17,6 +17,7 @@ import { readDeclinedForever, shouldOfferMoveToApplications, writeDeclinedForeve
 import { registerUpdates } from './updateRuntime';
 import { TrayBehavior, trayPrefsStore } from './trayBehavior';
 import { registerCloseQuitsIpc, showFirstCloseHint, startTray } from './trayRuntime';
+import { PaperReader, registerPaperReaderIpc } from './paperViewRuntime';
 import { trayStatus } from './trayStatus';
 import { BackgroundJobs } from './backgroundJobs';
 import type { BackendStatus } from '../frontend/src/api/bridge';
@@ -47,6 +48,7 @@ const CSP =
   "font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 let mainWindow: BrowserWindow | null = null;
+const paperReader = new PaperReader(() => mainWindow);
 let nativeClient: NativeLiveClient | null = null;
 // Module-level so it is never garbage collected: a collected Tray disappears from the menu bar.
 let tray: Tray | null = null;
@@ -289,6 +291,7 @@ function createWindow(): void {
 
   mainWindow.webContents.on('render-process-gone', () => { nativeClient?.abort(); rendererSave.disconnected(); });
   mainWindow.on('closed', () => {
+    paperReader.destroy();
     rendererSave.disconnected();
     nativeClient?.abort();
     mainWindow = null;
@@ -388,6 +391,11 @@ app.whenReady().then(() => {
     isMainFrame: event.senderFrame?.parent === null,
   }));
   registerCloseQuitsIpc(trayBehavior, (event) => isTrustedFrame({
+    senderId: event.sender.id,
+    expectedId: mainWindow?.webContents.id ?? null,
+    isMainFrame: event.senderFrame?.parent === null,
+  }));
+  registerPaperReaderIpc(paperReader, (event) => isTrustedFrame({
     senderId: event.sender.id,
     expectedId: mainWindow?.webContents.id ?? null,
     isMainFrame: event.senderFrame?.parent === null,

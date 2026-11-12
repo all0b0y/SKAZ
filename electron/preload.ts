@@ -125,6 +125,17 @@ const api: BridgeApi = {
     return ipcRenderer.invoke(CHANNELS.closeQuitsSet, on) as Promise<boolean>;
   },
   systemAudioSupported: systemAudioSupported(process.platform, process.getSystemVersion()),
+  paperReader: {
+    show: (url, bounds) => ipcRenderer.invoke(CHANNELS.paperShow, url, bounds) as Promise<boolean>,
+    bounds: (bounds) => ipcRenderer.invoke(CHANNELS.paperBounds, bounds) as Promise<boolean>,
+    hide: () => ipcRenderer.invoke(CHANNELS.paperHide) as Promise<boolean>,
+    navigate: (action) => ipcRenderer.invoke(CHANNELS.paperNavigate, action) as Promise<boolean>,
+    onState(listener) {
+      const handler = (_event: unknown, state: Parameters<typeof listener>[0]): void => listener(state);
+      ipcRenderer.on(CHANNELS.paperState, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.paperState, handler);
+    },
+  },
   onFullScreen(listener: (fullScreen: boolean) => void): () => void {
     const handler = (_event: unknown, on: unknown): void => listener(on === true);
     ipcRenderer.on(CHANNELS.fullScreen, handler);

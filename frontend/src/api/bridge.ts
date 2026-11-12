@@ -181,6 +181,38 @@ export interface BridgeApi {
   getCloseQuits?(): Promise<boolean>;
   /** Change it. Resolves to the state really in force, which differs from `on` if it couldn't be saved. */
   setCloseQuits?(on: boolean): Promise<boolean>;
+  /**
+   * EX3: Explore's paper reader — the paper's own page in a sandboxed view laid over `bounds` (the slot's
+   * CSS-pixel rect). Its own session keeps site logins; nothing is downloaded. Absent outside Electron.
+   */
+  paperReader?: PaperReaderApi;
+}
+
+export interface PaperRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PaperReaderState {
+  url: string | null;
+  title: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  error: string | null;
+}
+
+export interface PaperReaderApi {
+  /** Open `url` over the slot; false when the URL is not an http(s) page. */
+  show(url: string, bounds: PaperRect): Promise<boolean>;
+  /** The slot moved or resized. */
+  bounds(bounds: PaperRect): Promise<boolean>;
+  /** Leave the page loaded but out of sight (another screen, a menu over the slot). */
+  hide(): Promise<boolean>;
+  navigate(action: 'back' | 'forward' | 'reload' | 'external'): Promise<boolean>;
+  onState(listener: (state: PaperReaderState) => void): () => void;
 }
 
 declare global {
