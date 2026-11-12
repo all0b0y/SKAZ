@@ -368,3 +368,24 @@ async def test_pause_keeps_plan_and_hidden_labels_and_skips_finished_search_item
     done = await parts.funnel.settled(run.id)
     assert done.plan == plan and done.state == "done"
     assert calls == [["agents", "T1"], ["learning", "T2"], ["learning", "T2"]]
+
+
+async def test_research_card_keeps_requested_channels_inside_picked_topics(parts: SimpleNamespace) -> None:
+    from tests.knowledge.test_b2_funnel import add_material
+
+    chosen = add_material(parts.kb, "Chosen seed", "https://doi.org/10.1000/chosen")
+    with parts.kb.db.write() as db:
+        db.execute("INSERT INTO explore_area_materials VALUES (?,'area-ai','agent','now')", (chosen,))
+    parts.science.resolved["10.1000/chosen"] = work(10, title="Chosen seed", doi="10.1000/chosen")
+    parts.science.citing_works = [work(11, title="Cites chosen seed")]
+    started = await parts.funnel.start_for_task(
+        "task-picked",
+        "Agents",
+        KbFunnelStart(
+            plan=[KbSearchPlanItem(area_id="area-ai", label="AI", terms=["agents"])], channels=["continues"]
+        ),
+    )
+    run = await parts.funnel.settled(started.id)
+    assert run.counters.new == 1
+    assert [name for name, _ in parts.science.calls] == ["resolve", "citing"]
+    assert (await parts.funnel.findings()).groups[0].findings[0].area_id == "area-ai"
