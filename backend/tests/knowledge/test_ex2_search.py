@@ -389,3 +389,15 @@ async def test_research_card_keeps_requested_channels_inside_picked_topics(parts
     assert run.counters.new == 1
     assert [name for name, _ in parts.science.calls] == ["resolve", "citing"]
     assert (await parts.funnel.findings()).groups[0].findings[0].area_id == "area-ai"
+
+
+async def test_latest_user_override_keeps_its_scope_when_a_work_appears_in_several_runs(
+    parts: SimpleNamespace,
+) -> None:
+    parts.science.search_works = [work(1, title="Off topic")]
+    first = await run_to_end(parts, KbFunnelStart(query="communication", channels=["search"]))
+    await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
+    await parts.funnel.mark_fits(first.id, "work-1")
+    checked = await run_to_end(parts, KbFunnelStart(candidate_ids=["work-1"]))
+    assert checked.plan == first.plan
+    assert checked.counters.new == 1
