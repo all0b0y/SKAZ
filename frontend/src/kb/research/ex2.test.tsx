@@ -22,7 +22,7 @@ function setup(node?: React.ReactNode, tasks: KbResearchTask[] = []) {
   fake.research.tasks = vi.fn(async () => ({ tasks, next_cursor: null }));
   fake.research.task = vi.fn(async (id) => tasks.find((t) => t.id === id) ?? task);
   fake.research.create = vi.fn(async (body) => ({ ...task, topics: body.topics ?? [], description: body.description }));
-  fake.research.decide = vi.fn(async () => ({ ...f.KbResearchPermission, status: 'allowed', task_id: task.id }));
+  fake.research.decide = vi.fn(async () => ({ ...f.KbResearchPermission, status: 'allowed' as const, task_id: task.id }));
   const base = createFakeBridge(chatWorld());
   const original = base.requestMock.getMockImplementation()!;
   const root: KbAreaMap = { ...f.KbAreaMap, areas: [{ ...f.KbArea, id: 'agents', name: 'AI agents', level: 'custom', parent_id: null }] };
@@ -104,7 +104,9 @@ describe('EX2 X5 · editable research cards', () => {
   it('shows an honest proposal error and never starts a fallback run', async () => {
     const user = userEvent.setup();
     const { base, fake } = setup();
-    base.requestMock.mockImplementationOnce(async () => ({ ok: false, status: 503, detail: { code: 'not_ready' } }));
+    const request = base.requestMock.getMockImplementation()!;
+    base.requestMock.mockImplementation(async (req) => req.path === '/kb/research/proposals'
+      ? { ok: false, status: 503, detail: 'Research is not ready', code: 'not_ready' } : request(req));
     await user.click(screen.getByRole('button', { name: 'New' }));
     await user.click(screen.getByRole('menuitem', { name: 'New research task' }));
     await user.type(screen.getByRole('textbox', { name: 'Describe what you want to find or learn' }), description);

@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useStore } from 'zustand';
+import type { KbChatSummary } from '../../api/kb/types.gen';
+import type { ListSelection } from '../ui/listSelection';
 import { Icon, Popover } from '../ui';
 import { useChats, useServices } from '../state/context';
 import { getResearchStore, useResearch } from './store';
@@ -104,46 +107,31 @@ export function ChatsPlusMenu() {
 /**
  * Optional sidebar section listing active/recent research tasks when present in the store.
  */
-export function ResearchTaskListSection() {
-  const { client, ui } = useServices();
+export function ResearchTaskListSection({ rows, renderRow, gridProps }: {
+  rows: KbChatSummary[];
+  renderRow: (chat: KbChatSummary) => ReactNode;
+  gridProps: ListSelection['gridProps'];
+}) {
+  const { client, folds } = useServices();
   const research = getResearchStore(client);
-  const tasks = useResearch((s) => s.tasks);
   const mode = useResearch((s) => s.mode);
   const activeTaskId = useResearch((s) => s.activeTaskId);
-  // Tasks come from GET /kb/research/tasks; read again whenever the chat list moves (new task chat,
-  // rename, delete), which the chat list's own poll already drives.
+  const folded = useStore(folds, (s) => s.isFolded('research-sidebar', false));
   const chatList = useChats((s) => s.list);
+  useEffect(() => { void research.getState().loadTasks(); }, [research, chatList]);
+  // A newly opened task must be visible even if this block was folded last time.
   useEffect(() => {
-    void research.getState().loadTasks();
-  }, [research, chatList]);
-
-  if (tasks.length === 0) return null;
-
+    if (mode === 'task' && activeTaskId) folds.getState().setFolded('research-sidebar', false);
+  }, [mode, activeTaskId, folds]);
+  if (rows.length === 0) return null;
   return (
     <section aria-label="Research tasks">
-      <div className="kb-subhead">
+      <button type="button" className="kb-subhead kb-research-disclosure" aria-expanded={!folded}
+        onClick={() => folds.getState().setFolded('research-sidebar', !folded)}>
+        <Icon name={folded ? 'chevronRight' : 'chevronDown'} size={12} />
         <span className="kb-subhead__text">Research</span>
-      </div>
-      <div className="kb-list">
-        {tasks.map((task) => {
-          const isCurrent = mode === 'task' && activeTaskId === task.id;
-          return (
-            <button
-              key={task.id}
-              type="button"
-              className={`kb-row kb-chatrow${isCurrent ? ' is-current' : ''}`}
-              aria-current={isCurrent ? 'page' : undefined}
-              onClick={() => {
-                ui.getState().showCenter('chat');
-                research.getState().openTask(task.id);
-              }}
-            >
-              <Icon name="compass" size={14} className="kb-row__icon" />
-              <span className="kb-row__text">{task.title}</span>
-            </button>
-          );
-        })}
-      </div>
+      </button>
+      {!folded && <ul className="kb-list" {...gridProps} aria-label="Research tasks">{rows.map(renderRow)}</ul>}
     </section>
   );
 }

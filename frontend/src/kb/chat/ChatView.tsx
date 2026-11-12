@@ -1,3 +1,5 @@
+import { useFinishedTaskRead, usePageVisible } from '../research/seen';
+import { getResearchStore, useResearch } from '../research/store';
 import { useMotionLevel, useReducedMotion, useStillIndicators } from '../ui/motionLevel';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
@@ -109,7 +111,7 @@ function useFirstMessageLeave(chats: ChatsStore, reduced: boolean): LeaveState {
  * Streamed text is shown as it comes, never animated (decision 36).
  */
 export function ChatView({ hidden }: { hidden: boolean }) {
-  const { chats } = useServices();
+  const { client, chats } = useServices();
   const currentId = useChats((s) => s.currentId);
   const open = useChats((s) => (s.currentId ? s.chats[s.currentId] : undefined));
   const summary = useChats((s) => (s.currentId ? s.list.find((c) => c.id === s.currentId) : undefined));
@@ -142,9 +144,16 @@ export function ChatView({ hidden }: { hidden: boolean }) {
     return chats.getState().follow(currentId);
   }, [chats, currentId, open?.load]);
 
+  const pageVisible = usePageVisible();
+  const researchTaskId = summary?.research_task_id;
+  const researchTask = useResearch((s) => researchTaskId ? s.tasksById[researchTaskId] : undefined);
+  useFinishedTaskRead(researchTask, !hidden);
   useEffect(() => {
-    if (currentId && summary?.unread) void chats.getState().markRead(currentId);
-  }, [chats, currentId, summary?.unread]);
+    if (!hidden && pageVisible && researchTaskId) void getResearchStore(client).getState().loadTask(researchTaskId);
+  }, [client, hidden, pageVisible, researchTaskId]);
+  useEffect(() => {
+    if (!hidden && pageVisible && currentId && summary?.unread) void chats.getState().markRead(currentId);
+  }, [chats, currentId, summary?.unread, hidden, pageVisible]);
 
   // A notice or an error belongs to the chat it was about (QA D10).
   // eslint-disable-next-line react-hooks/exhaustive-deps

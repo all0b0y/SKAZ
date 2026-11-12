@@ -1,4 +1,7 @@
-import { useRef, type KeyboardEvent } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
+import type { KbResearchProposal, KbResearchTopic } from '../../api/kb/types.gen';
+import { errorText } from '../api/client';
+import { TopicEditor, topicDraft } from './TopicEditor';
 import { Button } from '../ui';
 import { useServices } from '../state/context';
 import { getResearchStore, useResearch, type ResearchStarterKey } from './store';
@@ -24,17 +27,42 @@ export interface NewResearchTaskViewProps {
  * "Start research" primary action, and 3 starter buttons.
  */
 export function NewResearchTaskView({ onStarted }: NewResearchTaskViewProps = {}) {
-  const { client } = useServices();
+  const { client, chats, folds, prefs, ui } = useServices();
   const store = getResearchStore(client);
   const draftPrompt = useResearch((s) => s.draftPrompt);
   const busy = useResearch((s) => s.busy);
   const error = useResearch((s) => s.error);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
+  const [proposal, setProposal] = useState<KbResearchProposal | null>(null);
+  const [proposalFor, setProposalFor] = useState('');
+  const [topics, setTopics] = useState<KbResearchTopic[]>([]);
+  const [pending, setPending] = useState('');
+  const [preparing, setPreparing] = useState(false);
+  const [proposalError, setProposalError] = useState<string | null>(null);
+  const { finalTopics, problem } = topicDraft(topics, pending);
+  const ready = proposal !== null && proposalFor === draftPrompt;
+  const suggest = async () => {
+    const description = draftPrompt;
+    if (!description.trim() || preparing) return;
+    setPreparing(true); setProposalError(null);
+    try {
+      const result = await client.call('POST /kb/research/proposals', { body: { description: description.trim(), area_id: store.getState().draftAreaId } });
+      if (store.getState().draftPrompt === description) {
+        setProposal(result); setProposalFor(description); setTopics(result.topics); setPending('');
+      }
+    } catch (e) { setProposalError(errorText(e)); }
+    finally { setPreparing(false); }
+  };
+
   const handleStart = async () => {
-    if (!draftPrompt.trim() || busy) return;
-    const created = await store.getState().startTask();
+    if (!draftPrompt.trim() || busy || !ready || problem) return;
+    const created = await store.getState().startTask({ description: draftPrompt.trim(), area_id: store.getState().draftAreaId, topics: finalTopics });
     if (created) {
+      folds.getState().setFolded('research-sidebar', false);
+      prefs.getState().set({ section: 'chats' });
+      ui.getState().showCenter('chat');
+      void chats.getState().loadList();
       onStarted?.(created.id);
     }
   };
@@ -42,7 +70,7 @@ export function NewResearchTaskView({ onStarted }: NewResearchTaskViewProps = {}
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
-      void handleStart();
+      if (ready) void handleStart(); else void suggest();
     }
   };
 
@@ -74,6 +102,7 @@ export function NewResearchTaskView({ onStarted }: NewResearchTaskViewProps = {}
               aria-label="Describe what you want to find or learn"
               placeholder="Describe what you want to find or learn"
               value={draftPrompt}
+              disabled={busy || preparing}
               onChange={(e) => store.getState().setDraft(e.target.value)}
               onKeyDown={handleKeyDown}
             />
@@ -83,17 +112,22 @@ export function NewResearchTaskView({ onStarted }: NewResearchTaskViewProps = {}
               </span>
               <Button
                 variant="fill"
-                disabled={!draftPrompt.trim() || busy}
-                busy={busy}
-                onClick={() => void handleStart()}
+                disabled={!draftPrompt.trim() || busy || preparing || (ready && Boolean(problem))}
+                busy={busy || preparing}
+                onClick={() => ready ? void handleStart() : void suggest()}
               >
-                Start research
+                {ready ? 'Start research' : 'Suggest topics'}
               </Button>
             </div>
           </div>
-          {error && (
+          {ready && <section className="kb-research-perm" aria-label="Research card">
+            <h3 className="kb-research-perm__title">{proposal.title}</h3>
+            <TopicEditor topics={topics} onChange={setTopics} pending={pending} onPendingChange={setPending} disabled={busy} />
+            <p className="kb-research-perm__meta">Only the topics shown above and source identifiers go to scientific databases. Your description goes only to the chat agent. Starting uses your model allowance.</p>
+          </section>}
+          {(error || proposalError) && (
             <p role="alert" className="kb-inline-error">
-              {error}
+              {proposalError ?? error}
             </p>
           )}
           <div className="kb-research-starters" role="group" aria-label="Starter prompts">
@@ -103,6 +137,7 @@ export function NewResearchTaskView({ onStarted }: NewResearchTaskViewProps = {}
                 type="button"
                 className="kb-research-starter"
                 data-starter={starter.prompt}
+                disabled={busy || preparing}
                 onClick={() => handlePickStarter(starter)}
               >
                 {starter.label}

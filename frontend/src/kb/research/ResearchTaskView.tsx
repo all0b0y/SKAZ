@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { StippleGlobe } from '../fx/stipple/StippleWork';
-import { useServices } from '../state/context';
+import { useChats, useServices }  from '../state/context';
 import { Button, Icon, Spinner } from '../ui';
 import {
   getResearchStore,
@@ -8,6 +8,8 @@ import {
   type KbResearchTask,
   type ResearchStopReason,
 } from './store';
+
+import { useFinishedTaskRead } from './seen';
 
 export const RESEARCH_POLL_MS = 1000;
 
@@ -122,6 +124,8 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
   const resolvedId = taskId ?? initialTask?.id ?? activeTaskId;
   const storedTask = useResearch((s) => (resolvedId ? s.tasksById[resolvedId] : s.tasks[0]));
   const task = storedTask ?? initialTask ?? null;
+  const chatTitle = useChats((s) => s.list.find((chat) => chat.id === task?.chat_id)?.title);
+  useFinishedTaskRead(task);
   const busy = useResearch((s) => s.busy);
   const error = useResearch((s) => s.error);
   const [followUpText, setFollowUpText] = useState('');
@@ -241,7 +245,7 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
   return (
     <>
       <header className="kb-head kb-head--chat">
-        <h1 className="kb-head__title">{task.title}</h1>
+        <h1 className="kb-head__title">{chatTitle ?? task.title}</h1>
         <div className="kb-head__spacer" />
       </header>
       <div className="kb-research-scroll" role="log" aria-label="Research task">

@@ -326,3 +326,18 @@
   line-height: 1.55;
   margin: var(--kb-sp-8) 0 0;
 }
+
+/* EX2: quiet topic editing and the same hover menu for every chat row. */
+.kb-research-topics { display: flex; flex-direction: column; gap: var(--kb-sp-10); }
+.kb-research-topics__list { list-style: none; padding: 0; margin: 0; }
+.kb-research-topics__list li, .kb-research-topics__add { display: flex; align-items: center; gap: var(--kb-sp-8); flex-wrap: wrap; }
+.kb-research-topics__list li + li { margin-top: var(--kb-sp-6); }
+.kb-research-topics input { flex: 1; min-width: 0; color: var(--kb-text); background: var(--kb-bg); border: 1px solid var(--kb-line); border-radius: var(--kb-r-sm); padding: var(--kb-sp-6) var(--kb-sp-8); font-size: var(--t-sm); }
+.kb-research-topics input:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 2px; }
+.kb-research-topics__picker { display: flex; flex-direction: column; gap: var(--kb-sp-8); }
+.kb-research-topics__preview { margin: 0; font-size: var(--t-sm); overflow-wrap: anywhere; }
+.kb-research-disclosure { width: 100%; display: flex; align-items: center; gap: var(--kb-sp-4); text-align: left; }
+.kb-chatlist-row { position: relative; }
+.kb-chatlist-row > .kb-chatrow { padding-right: var(--kb-sp-34); }
+.kb-chatlist-row > [data-sel-ignore] { position: absolute; right: var(--kb-sp-4); top: 50%; transform: translateY(-50%); opacity: 0; }
+.kb-chatlist-row:hover > [data-sel-ignore], .kb-chatlist-row:focus-within > [data-sel-ignore] { opacity: 1; }

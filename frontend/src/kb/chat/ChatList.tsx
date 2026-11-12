@@ -1,3 +1,4 @@
+import { useStore } from 'zustand';
 import { useEffect, useId, useState } from 'react';
 import type { KbChatSummary } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner, useIconPlay } from '../ui';
@@ -14,6 +15,8 @@ import { ChatMark, WaitingMark } from './ChatMark';
 import { useListEntrance } from '../fx/listEntrance';
 import { HalftoneArt } from '../fx/halftone/HalftoneArt';
 import { getResearchStore, ResearchTaskListSection, useResearch } from '../research';
+
+import { researchChat } from '../research/rows';
 
 export { WaitingMark };
 
@@ -37,7 +40,9 @@ export function useOpenChatKey(): string | null {
   const center = useUi((s) => s.center);
   const docInCenter = useUi((s) => s.right !== null && s.docExpanded);
   const researchMode = useResearch((s) => s.mode);
-  return center === 'chat' && !docInCenter && researchMode === 'closed' ? currentId ?? NEW_CHAT_KEY : null;
+  const taskChatId = useResearch((s) => s.activeTaskId ? s.tasksById[s.activeTaskId]?.chat_id : null);
+  if (center !== 'chat' || docInCenter) return null;
+  return researchMode === 'task' ? taskChatId ?? null : researchMode === 'new' ? null : currentId ?? NEW_CHAT_KEY;
 }
 
 /** Left panel → Chats: new chat, pinned, by date (a few), "All chats · N" (decision v2/v16). */
@@ -46,17 +51,23 @@ export function ChatList() {
   const load = useChats((s) => s.listLoad);
   const error = useChats((s) => s.listError);
   const center = useUi((s) => s.center);
-  const { chats } = useServices();
+  const { chats, client, ui, folds } = useServices();
+  const tasks = useResearch((s) => s.tasks);
+  const folded = useStore(folds, (s) => s.isFolded('research-sidebar', false));
   const openChat = useOpenChat();
   const showCenter = useUi((s) => s.showCenter);
-  const [newPlay, replayNew] = useIconPlay();
-
-  const { pinned, rest, groups } = sideChats(list);
-  const { sel, overlays } = useChatSelection({ chats: [...pinned, ...rest], onOpen: (id) => openChat(id) });
+  const taskChats = tasks.map((task) => researchChat(task, list.find((chat) => chat.id === task.chat_id)));
+  const taskIds = new Set(taskChats.map((chat) => chat.id));
+  const { pinned, rest, groups } = sideChats(list.filter((chat) => !chat.research_task_id && !taskIds.has(chat.id)));
+  const openRow = (id: string) => {
+    const task = tasks.find((value) => value.chat_id === id);
+    if (task) { ui.getState().showCenter('chat'); getResearchStore(client).getState().openTask(task.id); }
+    else openChat(id);
+  };
+  const { sel, overlays } = useChatSelection({ chats: [...(folded ? [] : taskChats), ...pinned, ...rest], onOpen: openRow });
   // The open chat's row runs into its window (decision 24 «Chats»): one tab for the whole list.
   // With All chats / All materials (or an expanded document) in the centre no row is open.
   const openKey = useOpenChatKey();
-  const newOpen = openKey === NEW_CHAT_KEY;
   // AnimatedList (stage 6): the rows enter once, on the first load; a chat that arrives later fades in alone.
   useListEntrance('chats', sel.listRef, load === 'ready' || load === 'error' || list.length > 0, list.map((c) => c.id));
 
@@ -64,14 +75,15 @@ export function ChatList() {
     const current = openKey === c.id;
     return (
       <li key={c.id} {...sel.rowProps(c.id)} data-entrance={c.id}>
-        <div role="gridcell">
+        <div role="gridcell" className="kb-chatlist-row">
           <button type="button" className={`kb-row kb-row--tabbed kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
-            data-tab-key={c.id} aria-current={current ? 'page' : undefined} onClick={() => openChat(c.id)}>
+            data-tab-key={c.id} aria-current={current ? 'page' : undefined} onClick={() => openRow(c.id)}>
             <SelectionCheckbox checked={sel.selected.has(c.id)} />
             {c.pinned && <Icon name="pin" size={14} className="kb-row__icon" />}
             <span className="kb-row__text">{c.title}</span>
             <ChatMark chat={c} current={current} />
           </button>
+          {c.research_task_id && <span data-sel-ignore><ChatMenu chat={c} size="sm" onNotice={(text) => ui.getState().showToast({ text })} /></span>}
         </div>
       </li>
     );
@@ -80,12 +92,7 @@ export function ChatList() {
   return (
     <div className="kb-side__scroll kb-tabhost" {...sel.listProps}>
       <ActiveTab host={sel.listRef} activeKey={openKey} variant="bridge" />
-      <button type="button" className={`kb-row kb-row--tabbed kb-row--action${newOpen ? ' is-current' : ''}`}
-        data-entrance="" data-tab-key={NEW_CHAT_KEY} aria-current={newOpen ? 'page' : undefined} onClick={() => { replayNew(); openChat(null); }}>
-        <Icon name="newChat" size={16} className="kb-row__icon" play={newPlay} />
-        <span className="kb-row__text">New chat</span>
-      </button>
-      <ResearchTaskListSection />
+      <ResearchTaskListSection rows={taskChats} renderRow={row} gridProps={sel.gridProps} />
       {load === 'loading' && list.length === 0 && <div className="kb-side__wait"><Spinner label="Loading chats" size="sm" /></div>}
       {load === 'error' && list.length === 0 && (
         <div className="kb-side__pad">
