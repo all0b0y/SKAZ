@@ -12,6 +12,7 @@ export function SearchPlan({ items, message, failed, onRetry, onChange, disabled
     {items.length > 0 && <button type="button" className="kb-explore-link" aria-expanded={editing} disabled={disabled} onClick={() => setEditing((v) => !v)}>
       {editing ? 'Done editing search plan' : 'Edit search plan'}
     </button>}
+    {editing && <button type="button" className="kb-explore-link" disabled={disabled} onClick={onRetry}>Reset search plan</button>}
     {editing && items.length > 0 && <div className="kb-search-plan__items">
       {items.map((item, index) => <fieldset key={`${index}-${item.area_id}`} disabled={disabled} className="kb-search-plan__item">
         <legend>{item.label}</legend>

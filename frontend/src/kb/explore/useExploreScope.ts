@@ -89,7 +89,7 @@ export function useExploreScope(clients: ExploreClients, initial?: ExploreInitia
     setSelectedTopic(typeof topic === 'object' ? topic : null);
     setActiveTab(topic && !(typeof topic === 'object' && isGapArea(topic)) ? 'materials' : 'new');
     current.current = { parentId, areaId: typeof topic === 'object' ? topic.id : parentId };
-    const retainedMap = typeof topic === 'object' ? mapRef.current : null;
+    const retainedMap = typeof topic === 'object' && mapRef.current?.parent_id === parentId ? mapRef.current : null;
     if (!retainedMap) setMap(null);
     try {
       const nextMap = reconcileMap(retainedMap ?? await clients.areas.map(parentId ? { parent_id: parentId } : {}), mapVersion);

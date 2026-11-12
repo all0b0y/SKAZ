@@ -140,7 +140,8 @@ export function ExploreSection({
   const scopeName = activeScopeArea?.name ?? 'All your topics';
   const searchArea = searchOverride === undefined ? activeScopeArea : searchOverride;
   const searchRequest = useMemo(() => ({ area_id: searchArea?.id ?? null, query: query.trim(), all_topics: !searchArea && !query.trim() }), [searchArea?.id, query]);
-  const searchPlan = useSearchPlan(clients.discovery, searchRequest, hidden);
+  const planSource = JSON.stringify([map?.areas.map((area) => [area.id, area.name, area.materials]), searchArea?.name]);
+  const searchPlan = useSearchPlan(clients.discovery, searchRequest, hidden, planSource);
   const isRootScope = scopeId === null;
   const scopePages = activeScopeArea?.pages ?? map?.total_pages ?? 0;
   const sourcesCount = activeScopeArea?.materials ?? map?.total_sources ?? 0;
@@ -474,11 +475,14 @@ export function ExploreSection({
           />}
         </div>
         {topicEdit && <TopicDialog edit={topicEdit} clients={clients} onClose={() => setTopicEdit(null)} onSaved={(area, mode) => {
-          if (mode === 'rename') { scope.saveArea(area); setSearchOverride((old) => old?.id === area.id ? area : old); }
+          if (mode === 'rename') { scope.saveArea(area); setSearchOverride((old) => old?.id === area.id ? area : old); searchPlan.retry(); }
           else if (mode === 'merge') {
             setSearchOverride(undefined);
             void scope.load(area.has_children ? area.id : area.parent_id, area.has_children ? undefined : area);
-          } else void scope.refresh();
+          } else {
+            setSearchOverride(undefined);
+            void scope.load(area.parent_id, area);
+          }
         }} />}
       </main>
     </FindingClientsProvider>

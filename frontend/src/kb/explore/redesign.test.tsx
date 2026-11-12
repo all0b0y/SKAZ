@@ -132,7 +132,8 @@ describe('EX2 exact search plan and scope', () => {
     expect(screen.getByRole('button', { name: "Find what's new" })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Organize topics' })); await flush();
     labelled = true;
-    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
     expect(screen.getByText(/Will search:/)).toHaveTextContent('AI agents');
     expect(screen.getByRole('button', { name: "Find what's new" })).toBeEnabled();
   });
