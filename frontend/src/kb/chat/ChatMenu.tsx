@@ -4,6 +4,7 @@ import { Button, IconButton, Menu, Modal } from '../ui';
 import { Popover } from '../ui/Popover';
 import { useServices } from '../state/context';
 import { useOpenDocument } from '../state/document';
+import { getResearchStore } from '../research/store';
 import { savedText } from './saved';
 
 /**
@@ -17,7 +18,7 @@ export function ChatMenu({ chat, onNotice, onRename, size = 'md' }: {
   onRename?: () => void;
   size?: 'sm' | 'md';
 }) {
-  const { chats, bridge } = useServices();
+  const { chats, bridge, client } = useServices();
   const open = useOpenDocument();
   const anchor = useRef<HTMLButtonElement | null>(null);
   const [menu, setMenu] = useState(false);
@@ -65,7 +66,7 @@ export function ChatMenu({ chat, onNotice, onRename, size = 'md' }: {
       )}
       <Modal open={confirm} onClose={() => setConfirm(false)} title="Delete this chat?" className="kb-confirm" testId="confirm-delete-chat">
         <div className="kb-confirm__body">
-          <p>“{chat.title}” and its answers will be deleted. Pages you saved to the wiki stay.</p>
+          <p>“{chat.title}” and its answers will be deleted. Pages you saved to the wiki stay.{chat.research_task_id && ' Deleting this chat stops the research task. Its findings stay in Explore.'}</p>
         </div>
         <footer className="kb-confirm__foot">
           <Button onClick={() => setConfirm(false)}>Cancel</Button>
@@ -74,6 +75,7 @@ export function ChatMenu({ chat, onNotice, onRename, size = 'md' }: {
             const r = await chats.getState().remove(chat.id);
             setBusy(false);
             setConfirm(false);
+            if (r.ok && chat.research_task_id) getResearchStore(client).getState().forgetChat(chat.id);
             onNotice(r.ok ? 'Chat deleted.' : `Couldn’t delete: ${r.error}`);
           }}>Delete</Button>
         </footer>

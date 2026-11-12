@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import type { KbResearchTopic } from '../../api/kb/types.gen';
+import { TopicEditor, topicDraft } from './TopicEditor';
 import { errorText } from '../api/client';
 import { useServices } from '../state/context';
 import { Button, Icon, Popover } from '../ui';
@@ -22,26 +24,44 @@ export interface ResearchPartViewProps {
  * - `denied` / `cancelled` (v4 state 08): quiet line (`Research wasn’t started…`)
  */
 export function ResearchPartView({ chatId, part, onOpenTask }: ResearchPartViewProps) {
-  const { client, chats, ui } = useServices();
+  const { client, chats, ui, prefs, folds } = useServices();
   const store = getResearchStore(client);
   const [current, setCurrent] = useState<KbResearchPermission>(part);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [topics, setTopics] = useState<KbResearchTopic[]>(() => part.topics.map((text) => ({ text, source: 'proposed', area_id: null })));
+  const [pending, setPending] = useState('');
+  const partId = useRef(part.id);
   useEffect(() => {
-    setCurrent(part);
+    setCurrent((previous) => previous.id === part.id && previous.status !== 'pending' && part.status === 'pending' ? previous : part);
+    if (partId.current !== part.id) {
+      partId.current = part.id;
+      setTopics(part.topics.map((text) => ({ text, source: 'proposed', area_id: null })));
+      setPending(''); setError(null);
+    }
   }, [part]);
+  const { finalTopics, problem } = topicDraft(topics, pending);
 
   const taskId = current.task_id;
   const storedTask = useResearch((s) => (taskId ? s.tasksById[taskId] : undefined));
 
   const decide = async (decision: KbResearchDecide['decision']) => {
+    if (busy || (decision !== 'deny' && problem)) return;
     setBusy(true);
     setError(null);
     try {
-      const updated = await store.getState().decidePermission(current.id, decision, chatId);
+      const updated = await store.getState().decidePermission(current.id, decision, chatId, finalTopics);
       setCurrent(updated);
       chats.getState().applyPart(chatId, updated);
+      if (updated.status === 'allowed' && updated.task_id) {
+        folds.getState().setFolded('research-sidebar', false);
+        prefs.getState().set({ section: 'chats' });
+        ui.getState().showCenter('chat');
+        store.getState().openTask(updated.task_id);
+        void chats.getState().loadList();
+        onOpenTask?.(updated.task_id);
+      }
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -90,11 +110,7 @@ export function ResearchPartView({ chatId, part, onOpenTask }: ResearchPartViewP
     <section className="kb-research-perm" aria-label="Research permission">
       <h3 className="kb-research-perm__title">Allow a research task?</h3>
       <p className="kb-research-perm__desc">{current.arguments.description}</p>
-      {current.topics.length > 0 && (
-        <ul className="kb-research-perm__topics" aria-label="Topics that will be searched">
-          {current.topics.map((topic) => <li key={topic}>{topic}</li>)}
-        </ul>
-      )}
+      <TopicEditor topics={topics} onChange={setTopics} pending={pending} onPendingChange={setPending} disabled={busy} />
       <p className="kb-research-perm__meta">
         Only these topics and source identifiers go to scientific databases, never your description or your materials. Up to 30 candidates are checked against your wiki with your model allowance.
       </p>
@@ -106,14 +122,14 @@ export function ResearchPartView({ chatId, part, onOpenTask }: ResearchPartViewP
       <div className="kb-research-perm__actions">
         <Button
           variant="fill"
-          disabled={busy}
+          disabled={busy || Boolean(problem)}
           busy={busy}
           onClick={() => void decide('allow')}
         >
           Allow once
         </Button>
         <Button
-          disabled={busy}
+          disabled={busy || Boolean(problem)}
           onClick={() => void decide('allow_chat')}
         >
           Allow in this chat

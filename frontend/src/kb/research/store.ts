@@ -8,6 +8,7 @@ import type {
   KbResearchGrant,
   KbResearchPermission,
   KbResearchTask,
+  KbResearchTopic,
 } from '../../api/kb/types.gen';
 import { errorText, type KbClient } from '../api/client';
 import { createExploreClient, type ExploreClient } from '../api/explore';
@@ -23,6 +24,7 @@ export type {
   KbResearchGrant,
   KbResearchPermission,
   KbResearchTask,
+  KbResearchTopic,
 };
 
 export type ResearchStopReason = KbExploreJob['stop_reason'];
@@ -56,6 +58,7 @@ export interface ResearchState {
   close: () => void;
   setDraft: (prompt: string, starter?: ResearchStarterKey | null) => void;
   upsertTask: (task: KbResearchTask) => void;
+  forgetChat: (chatId: string) => void;
   loadTasks: () => Promise<KbResearchTask[]>;
   loadTask: (taskId: string) => Promise<KbResearchTask | null>;
   pollProgress: (taskId?: string | null) => Promise<void>;
@@ -70,6 +73,7 @@ export interface ResearchState {
     requestId: string,
     decision: KbResearchDecide['decision'],
     chatId?: string,
+    topics?: KbResearchTopic[],
   ) => Promise<KbResearchPermission>;
   loadGrant: (chatId: string) => Promise<KbResearchGrant | null>;
   revokeGrant: (chatId: string) => Promise<KbResearchGrant>;
@@ -119,6 +123,7 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
   const generations = new Map<string, number>();
   const reads = new Map<string, number>();
   const actions = new Set<string>();
+  const deleted = new Set<string>();
   let listRead = 0;
   const generation = (id: string) => generations.get(id) ?? 0;
   const invalidate = (id: string) => generations.set(id, generation(id) + 1);
@@ -194,10 +199,20 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
     },
 
     upsertTask: (task) => {
-      if (isOlder(task, get().tasksById[task.id])) return;
+      if (deleted.has(task.id) || isOlder(task, get().tasksById[task.id])) return;
       set((s) => ({
         tasks: mergeTaskList(s.tasks, task),
         tasksById: { ...s.tasksById, [task.id]: task },
+      }));
+    },
+
+    forgetChat: (chatId) => {
+      const ids = get().tasks.filter((task) => task.chat_id === chatId).map((task) => task.id);
+      for (const id of ids) { deleted.add(id); invalidate(id); }
+      set((s) => ({
+        tasks: s.tasks.filter((task) => !deleted.has(task.id)),
+        tasksById: Object.fromEntries(Object.entries(s.tasksById).filter(([id]) => !deleted.has(id))),
+        ...(s.activeTaskId && deleted.has(s.activeTaskId) ? { mode: 'closed' as const, activeTaskId: null } : {}),
       }));
     },
 
@@ -218,9 +233,9 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
         if (request !== listRead) return get().tasks;
         const byId = { ...get().tasksById };
         for (const task of tasks) {
-          if (!actions.has(task.id) && (versions.get(task.id) ?? 0) === generation(task.id) && !isOlder(task, byId[task.id])) byId[task.id] = task;
+          if (!deleted.has(task.id) && !actions.has(task.id) && (versions.get(task.id) ?? 0) === generation(task.id) && !isOlder(task, byId[task.id])) byId[task.id] = task;
         }
-        const ids = [...new Set(tasks.map((task) => task.id))];
+        const ids = [...new Set(tasks.filter((task) => !deleted.has(task.id)).map((task) => task.id))];
         const listed = ids.flatMap((id) => byId[id] ? [byId[id]!] : []);
         const extras = get().tasks.filter((task) => !ids.includes(task.id));
         set({ tasks: [...extras, ...listed], tasksById: byId });
@@ -312,8 +327,8 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
       );
     },
 
-    decidePermission: async (requestId, decision, chatId) => {
-      const updated = await getApi(client).research.decide(requestId, { decision });
+    decidePermission: async (requestId, decision, chatId, topics) => {
+      const updated = await getApi(client).research.decide(requestId, { decision, ...(decision !== 'deny' && topics ? { topics } : {}) });
       if (decision === 'allow_chat' && chatId && updated.status === 'allowed') {
         set((s) => ({ chatGrants: { ...s.chatGrants, [chatId]: true } }));
       }

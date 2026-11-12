@@ -1,6 +1,6 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { StippleGlobe } from '../fx/stipple/StippleWork';
-import { useServices } from '../state/context';
+import { useChats, useServices }  from '../state/context';
 import { Button, Icon, Spinner } from '../ui';
 import {
   getResearchStore,
@@ -8,6 +8,9 @@ import {
   type KbResearchTask,
   type ResearchStopReason,
 } from './store';
+
+import { ResearchFunnel } from './ResearchFunnel';
+import { useFinishedTaskRead } from './seen';
 
 export const RESEARCH_POLL_MS = 1000;
 
@@ -122,6 +125,8 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
   const resolvedId = taskId ?? initialTask?.id ?? activeTaskId;
   const storedTask = useResearch((s) => (resolvedId ? s.tasksById[resolvedId] : s.tasks[0]));
   const task = storedTask ?? initialTask ?? null;
+  const chatTitle = useChats((s) => s.list.find((chat) => chat.id === task?.chat_id)?.title);
+  useFinishedTaskRead(task);
   const busy = useResearch((s) => s.busy);
   const error = useResearch((s) => s.error);
   const [followUpText, setFollowUpText] = useState('');
@@ -241,7 +246,7 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
   return (
     <>
       <header className="kb-head kb-head--chat">
-        <h1 className="kb-head__title">{task.title}</h1>
+        <h1 className="kb-head__title">{chatTitle ?? task.title}</h1>
         <div className="kb-head__spacer" />
       </header>
       <div className="kb-research-scroll" role="log" aria-label="Research task">
@@ -267,7 +272,7 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
             </div>
 
             <div className="kb-research-progress__funnel">
-              {`Checked ${run.counters.checked} · on topic ${run.counters.on_topic} · new ${run.counters.new}`}
+              {`${run.counters.checked} found → ${run.counters.on_topic} fit → ${run.counters.new} new`}
             </div>
 
             <div className="kb-research-progress__meta">
@@ -346,6 +351,8 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
               )}
             </div>
           </section>
+          <ResearchFunnel key={run.id} runId={run.id} taskId={task.id} updatedAt={run.updated_at} />
+          {task.topics.length > 0 && <p className="kb-research-perm__meta">Topics: {task.topics.map((topic) => topic.text).join(' · ')}</p>}
 
           {error && (
             <p role="alert" className="kb-inline-error">

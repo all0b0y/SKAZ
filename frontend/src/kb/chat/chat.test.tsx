@@ -43,11 +43,12 @@ describe('The open chat runs into its window (decisions 24–25)', () => {
     expect(tabOf()).toHaveAttribute('data-tab-for', 'c7');
   });
 
-  it('only a chat in the centre is bridged: New chat counts; All chats and an expanded document do not', async () => {
+  it('only an existing chat in the centre is bridged: All chats and an expanded document do not', async () => {
     const user = userEvent.setup();
     const { services } = renderKb({ world: chatWorld() });
     await within(side()).findByRole('button', { name: /Why is there a logarithm/ });
-    expect(tabOf()).toHaveAttribute('data-tab-for', '__new');
+    expect(tabOf()).toHaveAttribute('hidden');
+    expect(within(side()).queryByRole('button', { name: 'New chat' })).toBeNull();
     await user.click(within(side()).getByRole('button', { name: /Why is there a logarithm/ }));
     act(() => services.ui.getState().openDocument({ type: 'material', id: 'm3' }));
     expect(tabOf()).toHaveAttribute('data-tab-for', 'c1');
@@ -60,16 +61,14 @@ describe('The open chat runs into its window (decisions 24–25)', () => {
     expect(side().querySelector('.kb-chatrow.is-current')).toBeNull();
   });
 
-  it('one «open chat» condition (FIX1 R5): class, aria-current (New chat too) and the mark agree; an expanded document closes it', async () => {
+  it('one «open chat» condition (FIX1 R5): class, aria-current and the mark agree; an expanded document closes it', async () => {
     const user = userEvent.setup();
     const { services } = renderKb({ world: chatWorld() });
-    const newChat = await within(side()).findByRole('button', { name: 'New chat' });
-    expect(newChat).toHaveClass('is-current');
-    expect(newChat).toHaveAttribute('aria-current', 'page');
+    await within(side()).findByRole('button', { name: /What did I miss in lecture 8/ });
+    expect(within(side()).queryByRole('button', { name: 'New chat' })).toBeNull();
+    expect(tabOf()).toHaveAttribute('hidden');
     const working = within(side()).getByRole('button', { name: /What did I miss in lecture 8/ });
     await user.click(working);
-    expect(newChat).not.toHaveClass('is-current');
-    expect(newChat).not.toHaveAttribute('aria-current');
     expect(working).toHaveClass('is-current');
     expect(working).toHaveAttribute('aria-current', 'page');
     // The open chat shows no mark: the thread shows the work.
@@ -124,7 +123,8 @@ describe('Chats in the side panel', () => {
     renderKb({ world: chatWorld() });
     await within(side()).findByRole('button', { name: /^All chats/ });
     expect(within(side()).queryByRole('button', { name: 'Find in chats' })).toBeNull();
-    expect(within(side()).getByRole('button', { name: 'New chat' })).toBeInTheDocument();
+    expect(within(side()).queryByRole('button', { name: 'New chat' })).toBeNull();
+    expect(within(side()).getByRole('button', { name: 'New' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Search' }));
     expect(await screen.findByRole('dialog', { name: 'Search' })).toBeInTheDocument();
     await user.keyboard('{Escape}');
