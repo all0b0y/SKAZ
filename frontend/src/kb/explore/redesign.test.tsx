@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { KbSearchPlan } from '../../api/kb/types.gen';
+import type { KbJobSummary, KbSearchPlan } from '../../api/kb/types.gen';
 import { KbApiError } from '../api/client';
 import { ExploreSection } from './ExploreSection';
 import { ExploreMap } from './ExploreMap';
@@ -66,6 +66,17 @@ describe('EX2 own topics from the real-library shape', () => {
     const reads = kb.areas.map.mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(kb.areas.map).toHaveBeenCalledTimes(reads);
+  });
+
+  it('does not overlap slow stored-map reads while labelling', async () => {
+    vi.useFakeTimers(); const kb = ex2Kb();
+    const running = mapFixture({ labelling: { state: 'running', job_id: 's', done: 20, total: 93, reason_code: null, engine: 'codex' } });
+    let finish!: (map: ReturnType<typeof mapFixture>) => void;
+    kb.areas.map.mockResolvedValueOnce(running).mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<ExploreSection clients={kb} />); await flush();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(kb.areas.map).toHaveBeenCalledTimes(2);
+    await act(async () => { finish(running); });
   });
 
   it('shows missing wiki engine honestly and opens its settings', async () => {
@@ -210,6 +221,29 @@ describe('EX2 visible funnel', () => {
     await waitFor(() => expect(kb.discovery.fits).toHaveBeenCalledWith('ex2-run', 'no-fit'));
     expect(kb.explore.start).not.toHaveBeenCalled();
     expect(await screen.findByText(/Marked as fitting. Novelty checks wait for your click/)).toBeInTheDocument();
+  });
+
+  it('reattaches the latest completed Explore funnel after reopening', async () => {
+    const kb = ex2Kb(); const run = runFixture();
+    const summary: KbJobSummary = { ...run, title: 'Explore', chat_id: null };
+    vi.spyOn(kb.explore, 'jobs').mockImplementation(async (query) => ({ jobs: query?.active === false ? [summary] : [] }));
+    vi.spyOn(kb.explore, 'run').mockResolvedValue(run);
+    render(<ExploreSection clients={kb} />);
+    expect(await screen.findByText('50 found → 12 fit → 4 new')).toBeInTheDocument();
+    expect(kb.explore.start).not.toHaveBeenCalled();
+  });
+
+  it('refreshes authoritative counts after It fits and runs novelty only on a second click', async () => {
+    const kb = ex2Kb(); const run = runFixture();
+    vi.spyOn(kb.explore, 'run').mockResolvedValue(runFixture({ counters: { ...run.counters, on_topic: 13 } }));
+    render(<ExploreSection clients={kb} initial={{ run }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Show search candidates' }));
+    const row = await screen.findByRole('article', { name: 'Work no-fit' });
+    fireEvent.click(within(row).getByRole('button', { name: 'It fits' }));
+    expect(await screen.findByText('50 found → 13 fit → 4 new')).toBeInTheDocument();
+    expect(kb.explore.start).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole('region', { name: 'Search funnel' })).getByRole('button', { name: 'Check novelty' }));
+    await waitFor(() => expect(kb.explore.start).toHaveBeenCalledWith({ candidate_ids: ['no-fit'], channels: [] }));
   });
 
   it('keeps all 50 works reachable even when no finding survived and supports pagination', async () => {
