@@ -14,6 +14,7 @@ import { UnreadableText } from './UnreadableText';
 import { FailedMaterial } from './FailedMaterial';
 import { isWithoutSpeech, NoSpeech } from './NoSpeech';
 import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './MaterialDialogs';
+import { MoveTopicDialog } from './MoveTopicDialog';
 import { StatusChips } from './StatusChips';
 import { OverlapLine } from './OverlapLine';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
@@ -205,6 +206,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
                 disabled={!material} onClick={() => setMenuOpen((v) => !v)} />
               <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Material actions" items={[
                 { id: 'move', label: 'Move to folder', icon: 'folder', onSelect: () => setDialog('move') },
+                { id: 'topic', label: 'Move to topic…', icon: 'compass', onSelect: () => setDialog('topic') },
                 { id: 'rename', label: 'Rename', icon: 'pencil', onSelect: () => setDialog('rename') },
                 ...(material ? [
                   { id: 'cards', label: 'Make cards from this', icon: 'deck' as const, onSelect: () => make('cards', [{ type: 'material', id: material.id, title: material.title }]) },
@@ -299,6 +301,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
         <>
           <RenameDialog material={material} open={dialog === 'rename'} onClose={() => setDialog(null)} onDone={replace} />
           <MoveDialog material={material} open={dialog === 'move'} onClose={() => setDialog(null)} onDone={replace} />
+          {dialog === 'topic' && <MoveTopicDialog key={material.id} materialId={material.id} onClose={() => setDialog(null)} onDone={(topic) => setNote(`Moved to ${topic.path}.`)} />}
           <DeleteDialog material={material} open={dialog === 'delete'} onClose={() => setDialog(null)} />
         </>
       )}

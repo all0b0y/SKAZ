@@ -9,7 +9,7 @@ import { useLibrary, useServices, useUi } from '../state/context';
 /** A name is at most 200 bytes on disk (``library/names.py``); the field stops at 200 characters (QA B21). */
 const MAX_TITLE_CHARS = 200;
 
-export type MaterialDialog = 'rename' | 'move' | 'delete' | null;
+export type MaterialDialog = 'rename' | 'move' | 'topic' | 'delete' | null;
 
 function Footer({ children }: { children: ReactNode }) {
   return <div className="kb-modal__foot">{children}</div>;

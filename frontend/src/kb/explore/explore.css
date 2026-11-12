@@ -893,3 +893,4 @@
   .kb-explore-map { min-height: 320px; flex: none; }
   .kb-explore-col, .kb-explore-col--wide { width: auto; border-left: 0; border-top: 1px solid var(--kb-line); }
 }
+.kb-topic-destination { display: flex; flex-direction: column; gap: var(--kb-sp-8); color: var(--kb-text); font-size: var(--t-base); }

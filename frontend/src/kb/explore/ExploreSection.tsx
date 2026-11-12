@@ -8,7 +8,7 @@ import type {
 import { useServices, type KbServices } from '../state/context';
 import type { DocTarget } from '../state/document';
 import type { SettingsSection } from '../state/ui';
-import { Icon } from '../ui';
+import { Button, Icon, IconButton, Menu } from '../ui';
 import { AreaColumn } from './AreaColumn';
 import { FindingClientsProvider } from './finding';
 import { ExploreMap } from './ExploreMap';
@@ -18,6 +18,8 @@ import { SearchPlan } from './SearchPlan';
 import { useSearchPlan } from './useSearchPlan';
 import { TopicLabelling } from './TopicLabelling';
 import { FunnelView } from './FunnelView';
+import { TopicDialog, type TopicEdit } from './TopicDialog';
+import { TOPICS_CHANGED } from './topicEvents';
 import { exploreIssue, type ExploreIssue } from './errors';
 import { useExploreScope } from './useExploreScope';
 import { useExploreJobs } from './useExploreJobs';
@@ -105,6 +107,9 @@ export function ExploreSection({
   const [keyHintDismissed, setKeyHintDismissed] = useState(false);
   const [query, setQuery] = useState('');
   const [searchOverride, setSearchOverride] = useState<KbArea | null | undefined>();
+  const [topicEdit, setTopicEdit] = useState<TopicEdit | null>(null);
+  const [topicMenu, setTopicMenu] = useState(false);
+  const topicMenuRef = useRef<HTMLButtonElement | null>(null);
   const [actionIssue, setActionIssue] = useState<ExploreIssue | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -145,6 +150,12 @@ export function ExploreSection({
     const timer = window.setInterval(() => void scope.refresh(), 1000);
     return () => window.clearInterval(timer);
   }, [hidden, map?.labelling.state, scope.refresh]);
+
+  useEffect(() => {
+    const changed = () => void scope.refresh();
+    window.addEventListener(TOPICS_CHANGED, changed);
+    return () => window.removeEventListener(TOPICS_CHANGED, changed);
+  }, [scope.refresh]);
 
   const handleSortTopics = () => perform(async () => {
     if (!clients.topics) throw new KbApiError(503, '', 'not_ready');
@@ -327,14 +338,17 @@ export function ExploreSection({
               <span className="kb-explore-head__meta">
                 {formatWikiShare(activeScopeArea.wiki_share)} of your wiki
               </span>
-              <button type="button" className="kb-explore-crumbs__btn" aria-pressed={activeScopeArea.pinned}
-                aria-label={activeScopeArea.pinned ? 'Unpin topic from weekly discovery' : 'Pin topic for weekly discovery'}
-                title="Weekly discovery uses pinned topics" disabled={busy} onClick={() => void handlePin()}>
-                {activeScopeArea.pinned ? 'Unpin topic' : 'Pin topic'}
-              </button>
+              <IconButton ref={topicMenuRef} icon="more" label="Topic actions" aria-haspopup="menu" aria-expanded={topicMenu} disabled={busy} onClick={() => setTopicMenu((old) => !old)} />
+              <Menu open={topicMenu} onClose={() => setTopicMenu(false)} anchorRef={topicMenuRef} label="Topic actions" items={[
+                { id: 'rename', label: 'Rename topic', icon: 'pencil', onSelect: () => setTopicEdit({ mode: 'rename', area: activeScopeArea }) },
+                { id: 'merge', label: 'Merge into another topic…', onSelect: () => setTopicEdit({ mode: 'merge', area: activeScopeArea }) },
+                { id: 'pin', label: activeScopeArea.pinned ? 'Unpin topic' : 'Pin topic', note: 'For weekly discovery', onSelect: () => void handlePin() },
+                { id: 'subtopic', label: 'New subtopic', icon: 'plus', onSelect: () => setTopicEdit({ mode: 'create', area: null, parentId: activeScopeArea.id }) },
+              ]} />
             </>
           )}
 
+          <Button variant="quiet" size="sm" icon="plus" disabled={!map || scope.loading || busy} onClick={() => setTopicEdit({ mode: 'create', area: null })}>New topic</Button>
           <div className="kb-explore-head__spacer" />
 
           <span className="kb-explore-head__meta" title="Findings you took to explore">
@@ -459,6 +473,13 @@ export function ExploreSection({
             onOpenWiki={handleOpenWiki}
           />}
         </div>
+        {topicEdit && <TopicDialog edit={topicEdit} clients={clients} onClose={() => setTopicEdit(null)} onSaved={(area, mode) => {
+          if (mode === 'rename') { scope.saveArea(area); setSearchOverride((old) => old?.id === area.id ? area : old); }
+          else if (mode === 'merge') {
+            setSearchOverride(undefined);
+            void scope.load(area.has_children ? area.id : area.parent_id, area.has_children ? undefined : area);
+          } else void scope.refresh();
+        }} />}
       </main>
     </FindingClientsProvider>
   );

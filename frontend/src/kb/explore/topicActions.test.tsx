@@ -35,10 +35,10 @@ describe('EX2 topic editing', () => {
     render(<ExploreSection clients={kb} />);
     fireEvent.click(await screen.findByRole('button', { name: /AI agents ·/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Topic actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Pin topic' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^Pin topic/ }));
     await waitFor(() => expect(kb.areas.update).toHaveBeenCalledWith('ai', { pinned: true }));
     fireEvent.click(screen.getByRole('button', { name: 'Topic actions' }));
-    expect(await screen.findByRole('menuitem', { name: 'Unpin topic' })).toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: /^Unpin topic/ })).toBeInTheDocument();
   });
 
   it('merges into another topic, excludes itself and descendants, and opens the destination', async () => {
