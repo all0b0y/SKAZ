@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { StippleGlobe } from '../fx/stipple/StippleWork';
 import { useChats, useServices }  from '../state/context';
 import { Button, Icon, Spinner } from '../ui';
@@ -9,7 +9,7 @@ import {
   type ResearchStopReason,
 } from './store';
 
-import { ResearchFunnel } from './ResearchFunnel';
+import { createDiscoveryClient, FunnelView } from '../explore';
 import { useFinishedTaskRead } from './seen';
 
 export const RESEARCH_POLL_MS = 1000;
@@ -121,6 +121,7 @@ export interface ResearchTaskViewProps {
 export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: ResearchTaskViewProps) {
   const { client, ui, prefs, chats } = useServices();
   const store = getResearchStore(client);
+  const discovery = useMemo(() => createDiscoveryClient(client), [client]);
   const activeTaskId = useResearch((s) => s.activeTaskId);
   const resolvedId = taskId ?? initialTask?.id ?? activeTaskId;
   const storedTask = useResearch((s) => (resolvedId ? s.tasksById[resolvedId] : s.tasks[0]));
@@ -271,10 +272,6 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
               <strong>{statusHeadingFor(task)}</strong>
             </div>
 
-            <div className="kb-research-progress__funnel">
-              {`${run.counters.checked} found → ${run.counters.on_topic} fit → ${run.counters.new} new`}
-            </div>
-
             <div className="kb-research-progress__meta">
               {`${used} of ${limit} candidates compared with your wiki`}
             </div>
@@ -351,7 +348,7 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
               )}
             </div>
           </section>
-          <ResearchFunnel key={run.id} runId={run.id} taskId={task.id} updatedAt={run.updated_at} />
+          <FunnelView key={run.id} run={run} client={discovery} busy={busy} onChanged={async () => { await store.getState().loadTask(task.id); }} />
           {task.topics.length > 0 && <p className="kb-research-perm__meta">Topics: {task.topics.map((topic) => topic.text).join(' · ')}</p>}
 
           {error && (

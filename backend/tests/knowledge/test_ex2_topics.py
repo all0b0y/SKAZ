@@ -79,7 +79,9 @@ class Search:
     queries: list[str] = field(default_factory=list)
     stop: Exception | None = None
 
-    async def __call__(self, query: str) -> Sequence[TaxonomyNode]:
+    async def __call__(self, terms: Sequence[str]) -> Sequence[TaxonomyNode]:
+        assert 1 <= len(terms) <= 6 and all(0 < len(term) <= 72 for term in terms)  # search_topics' limits
+        query = " ".join(terms)
         self.queries.append(query)
         if self.stop is not None:
             raise self.stop

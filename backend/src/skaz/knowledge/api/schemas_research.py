@@ -36,6 +36,8 @@ class KbResearchCreate(KbContractRequest):
     #: EX2: the card as the user left it (proposed kept/edited, typed, picked). ``None`` = the chat agent
     #: derives the topics and the task starts with them (the in-chat tool path asks through the permission).
     topics: list[KbResearchTopic] | None = Field(default=None, min_length=1, max_length=4)
+    #: EX2: the proposal's title the «+» card showed; ``None`` = the first card topic names the task.
+    title: Annotated[str, Field(min_length=1, max_length=80)] | None = None
 
 
 class KbResearchProposal(BaseModel):

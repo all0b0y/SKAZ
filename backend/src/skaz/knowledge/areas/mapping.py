@@ -23,7 +23,8 @@ from .topics import OwnTopic, TopicStore
 
 logger = logging.getLogger(__name__)
 #: ``(query) -> OpenAlex topics``: B1's free ``/topics`` search (wired by the runtime).
-TopicSearch = Callable[[str], Awaitable[Sequence[TaxonomyNode]]]
+#: B1/X2 ``ScienceGateway.search_topics``: up to 6 terms of up to 72 characters, joined into one search.
+TopicSearch = Callable[[Sequence[str]], Awaitable[Sequence[TaxonomyNode]]]
 #: Main concept titles added to the topic name in the one search.
 SEARCH_CONCEPTS = 3
 MAX_QUERY = 200
@@ -34,14 +35,21 @@ MAX_PICKS = 3
 EXTRA_PICK = 0.25
 
 
-def search_query(name: str, concepts: Sequence[str]) -> str:
-    query = name
+#: ``search_topics`` takes each term up to this length (the science contract's per-topic limit).
+TERM_CHARS = 72
+
+
+def search_terms(name: str, concepts: Sequence[str]) -> list[str]:
+    """The topic name, then its main concepts while the joined search stays within ``MAX_QUERY``."""
+    terms = [name.strip()[:TERM_CHARS]]
     for concept in concepts[:SEARCH_CONCEPTS]:
-        longer = f"{query} {concept}"
-        if len(longer) > MAX_QUERY:
+        term = concept.strip()[:TERM_CHARS]
+        if not term or term in terms:
+            continue
+        if len(" ".join([*terms, term])) > MAX_QUERY:
             break
-        query = longer
-    return query[:MAX_QUERY]
+        terms.append(term)
+    return terms
 
 
 def picks(answer: ChoiceAnswer, options: Sequence[str]) -> list[str]:
@@ -122,7 +130,7 @@ class TopicMapper:
 
     async def _map(self, topic: OwnTopic, search: TopicSearch, decisions: DecisionLayer) -> bool:
         concepts = await disk_call(self.topics.top_concepts, topic.id, SEARCH_CONCEPTS)
-        found = await search(search_query(topic.name, concepts))
+        found = await search(search_terms(topic.name, concepts))
         candidates: dict[str, str] = {}
         for node in found:
             if node.level == "topic" and node.name and node.name not in candidates:

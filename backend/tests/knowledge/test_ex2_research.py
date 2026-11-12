@@ -105,6 +105,23 @@ async def test_a_task_starts_with_exactly_the_cards_topics_and_no_derivation(env
     assert "LLM agent harness · AI agents · claim verification at scale" in note
 
 
+async def test_the_proposals_title_names_a_task_started_from_the_card(env: Env) -> None:
+    """The «+» card sends the title it showed; without it the first topic names the task."""
+    response = await env.client.post(
+        "/kb/research/tasks",
+        json={
+            "description": RUSSIAN,
+            "topics": [topic("LLM agent harness")],
+            "title": "Methods for AI harness",
+        },
+    )
+    assert response.status_code == 200, response.text
+    task = response.json()
+    assert task["title"] == "Methods for AI harness"
+    (_, title, _), = env.funnel.bodies
+    assert title == "Methods for AI harness"
+
+
 async def test_card_topics_are_tidied_but_never_changed_or_filtered(env: Env) -> None:
     card = [topic("  graph   neural  networks "), topic("Graph neural networks", "proposed"), topic("rag")]
     request = {"description": DESCRIPTION, "topics": card}

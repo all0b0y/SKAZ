@@ -213,7 +213,14 @@ class Runtime:
             explore=lambda: getattr(self, "kb_explore", None),
             # Exact per-area counts from B2 (built below; read at call time).
             new_findings_by_area=lambda: self.kb_explore.new_by_area(),
+            # EX2 (X1): "Sort materials" runs on the wiki agent; the hidden OpenAlex label of a topic uses
+            # B1's free /topics search (built below; read at call time).
+            ingest=self.kb_ingest,
+            wiki_jobs=self.kb_wiki.jobs,
+            topic_search=lambda: self.kb_science.search_topics,
         )
+        #: EX2 (X1): the wiki agent gives each material its topic at the end of its processing.
+        self.kb_ingest.topics = self.kb_areas.labeller
 
         #: Publication dates, N7-5 library date filter and manual link checks (0.4.0 B5).
         from .knowledge.freshness import build_freshness_service

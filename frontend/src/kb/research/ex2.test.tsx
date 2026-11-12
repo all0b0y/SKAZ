@@ -70,7 +70,7 @@ describe('EX2 X5 · editable research cards', () => {
       { text: 'agent reliability', source: 'proposed', area_id: null },
       { text: 'business communication', source: 'typed', area_id: null },
       { text: 'Evaluation', source: 'picked', area_id: 'evaluation' },
-    ] });
+    ], title: 'AI agents' }); // the proposal's title names the task
     expect(store.getState()).toMatchObject({ mode: 'task', activeTaskId: task.id });
     expect(await screen.findByRole('button', { name: task.title })).toHaveAttribute('aria-current', 'page');
   });
@@ -175,7 +175,7 @@ describe('EX2 X5 · read only when finished work is seen', () => {
 });
 
 
-describe('EX2 X5 · visible research funnel', () => {
+describe('EX2 · visible research funnel (the shared Explore FunnelView)', () => {
   it('shows found → fit → new and explains dropped works; It fits never starts a paid check', async () => {
     const user = userEvent.setup();
     const { base, fake } = setup(<ResearchTaskView initialTask={done} />);
@@ -189,10 +189,10 @@ describe('EX2 X5 · visible research funnel', () => {
     });
     const c = done.run.counters;
     expect(screen.getByText(`${c.checked} found → ${c.on_topic} fit → ${c.new} new`)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Show considered works' }));
+    await user.click(screen.getByRole('button', { name: 'Show search candidates' }));
     expect(await screen.findByText(dropped.reason)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'It fits' }));
-    expect(await screen.findByText('Fits · novelty not checked', { selector: 'span' })).toBeInTheDocument();
+    expect(await screen.findByText('Marked as fitting. Novelty checks wait for your click.')).toBeInTheDocument();
     expect(fake.research.resume).not.toHaveBeenCalled();
     expect(base.requestMock).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', path: '/kb/explore/runs' }));
   });

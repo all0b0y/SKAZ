@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { KbFunnelCandidate, KbFunnelCandidates, KbFunnelRun } from '../../api/kb/types.gen';
+import type { KbExploreJob, KbFunnelCandidate, KbFunnelCandidates, KbSearchPlanItem } from '../../api/kb/types.gen';
 import { KbApiError } from '../api/client';
 import { exploreIssue } from './errors';
 import type { DiscoveryClient } from './clients';
@@ -16,7 +16,8 @@ const append = (first: KbFunnelCandidate[], next: KbFunnelCandidate[]) => {
 
 /** The same run funnel can be hosted by Explore or a Research task. No paid work starts on a read or override. */
 export function FunnelView({ run, client, busy = false, hidden = false, onCheckNovelty, onChanged }: {
-  run: KbFunnelRun; client?: DiscoveryClient; busy?: boolean; hidden?: boolean; onCheckNovelty?: (candidateIds: string[]) => void; onChanged?: () => Promise<void>;
+  /** An Explore run, or a Research task's run (its topics show on the task, so no plan here). */
+  run: KbExploreJob & { plan?: KbSearchPlanItem[] }; client?: DiscoveryClient; busy?: boolean; hidden?: boolean; onCheckNovelty?: (candidateIds: string[]) => void; onChanged?: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [outcome, setOutcome] = useState<KbFunnelCandidate['outcome'] | ''>('');
@@ -92,7 +93,7 @@ export function FunnelView({ run, client, busy = false, hidden = false, onCheckN
       <button type="button" className="kb-explore-link" aria-expanded={open} onClick={() => setOpen((v) => !v)}>{open ? 'Hide search candidates' : 'Show search candidates'}</button>
     </div>
     {open && <div className="kb-funnel__body">
-      {run.plan.length > 0 && <p className="kb-explore-cap">{['running', 'queued', 'paused'].includes(run.state) ? 'Searching' : 'Searched'}: {run.plan.flatMap((item) => item.terms).join(' · ')}</p>}
+      {(run.plan?.length ?? 0) > 0 && <p className="kb-explore-cap">{['running', 'queued', 'paused'].includes(run.state) ? 'Searching' : 'Searched'}: {(run.plan ?? []).flatMap((item) => item.terms).join(' · ')}</p>}
       <label className="kb-explore-cap">Candidate outcome <select value={outcome} disabled={Boolean(pending)} onChange={(e) => setOutcome(e.target.value as typeof outcome)}>
         <option value="">All outcomes</option>
         {Object.entries(LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}

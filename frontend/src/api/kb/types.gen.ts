@@ -2034,6 +2034,7 @@ export interface KbResearchCreate {
   area_id?: string | null;
   dates?: KbDateWindow | null;
   topics?: KbResearchTopic[] | null;
+  title?: string | null;
 }
 
 export interface KbResearchDecide {

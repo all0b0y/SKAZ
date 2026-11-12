@@ -312,7 +312,7 @@ class ResearchTasks:
         self._ensure_ready()
         if body.topics is not None:
             card = final_card(body.topics)
-            row = await self._start(body, card_title(card), card, origin=None)
+            row = await self._start(body, (body.title or "").strip() or card_title(card), card, origin=None)
         else:
             derived = await self._derive(body.description, engine=None, model=None)
             row = await self._start(body, derived.title, _proposed(derived.topics), origin=None)
@@ -762,7 +762,7 @@ def _capital(text: str) -> str:
 
 
 def card_title(card: Sequence[CardTopic]) -> str:
-    """A task started from the «+» card: its first topic names it (the card carries no title)."""
+    """A task started from the «+» card without the proposal's title: its first topic names it."""
     return _capital(card[0].text)
 
 

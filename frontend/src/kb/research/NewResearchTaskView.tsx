@@ -57,7 +57,7 @@ export function NewResearchTaskView({ onStarted }: NewResearchTaskViewProps = {}
 
   const handleStart = async () => {
     if (!draftPrompt.trim() || busy || !ready || problem) return;
-    const created = await store.getState().startTask({ description: draftPrompt.trim(), area_id: store.getState().draftAreaId, topics: finalTopics });
+    const created = await store.getState().startTask({ description: draftPrompt.trim(), area_id: store.getState().draftAreaId, topics: finalTopics, ...(proposal?.title.trim() ? { title: proposal.title.trim().slice(0, 80) } : {}) });
     if (created) {
       folds.getState().setFolded('research-sidebar', false);
       prefs.getState().set({ section: 'chats' });
