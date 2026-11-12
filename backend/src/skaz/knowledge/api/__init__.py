@@ -19,6 +19,7 @@ from . import (
     library,
     maintenance,
     materials,
+    material_activity,
     me,
     mentions,
     notifications,
@@ -72,4 +73,5 @@ ROUTERS: tuple[APIRouter, ...] = (
     maintenance.router,
     repeats.router,
     study_library.router,
+    material_activity.router,
 )
