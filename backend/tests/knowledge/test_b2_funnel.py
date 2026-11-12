@@ -318,8 +318,10 @@ def parts(ready: KnowledgeService) -> SimpleNamespace:
     register_notifications(ready)
     # EX2: this fixture is an own topic with a stored hidden label, not a taxonomy tile.
     with ready.db.write() as db:
-        db.execute("INSERT INTO explore_areas(id,level,name,original_name,mapping_state,mapped_name)"
-                   " VALUES ('area-ai','custom','AI','AI','mapped','AI')")
+        db.execute(
+            "INSERT INTO explore_areas(id,level,name,original_name,mapping_state,mapped_name)"
+            " VALUES ('area-ai','custom','AI','AI','mapped','AI')"
+        )
         db.execute("INSERT INTO explore_area_topics VALUES ('area-ai','T1')")
     science = FakeScience()
     directory = FakeDirectory()
@@ -472,6 +474,8 @@ async def test_search_runs_every_stage_and_notifies(parts: SimpleNamespace) -> N
 async def test_continues_and_branches_start_from_library_sources(parts: SimpleNamespace) -> None:
     mine = add_material(parts.kb, "Reflexion", "https://doi.org/10.1000/reflexion")
     parts.directory.area_materials["area-ai"] = [mine]
+    with parts.kb.db.write() as db:
+        db.execute("INSERT INTO explore_area_materials VALUES (?,'area-ai','agent','now')", (mine,))
     seed = work(10, title="Reflexion", doi="10.1000/reflexion", refs=["W99"], topics=["T1"])
     parts.science.resolved["10.1000/reflexion"] = seed
     parts.science.citing_works = [work(11, title="Cites it", refs=["W10"], topics=["T1"], cited=5)]
@@ -665,7 +669,7 @@ async def test_covered_findings_are_hidden_and_counted(parts: SimpleNamespace) -
         work(1, title="Old news", topics=["T1"]),
         work(2, title="Against", topics=["T1"]),
     ]
-    await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
+    await run_to_end(parts, KbFunnelStart(area_id="area-ai", query="agents", channels=["search"]))
     shown = await parts.funnel.findings()
     assert shown.covered_count == 1
     assert [f.work.title for g in shown.groups for f in g.findings] == ["Against"]
@@ -915,16 +919,10 @@ async def test_a_too_long_search_line_is_rejected_before_a_run_exists(kb_app: An
 
 
 async def test_add_to_wiki_keeps_the_known_area_and_topics(parts: SimpleNamespace) -> None:
-    """Review R1-09: the material is in its area at once, before (or without) any wiki model run."""
-    from skaz.knowledge.areas.signals import SignalStore
-    from skaz.knowledge.areas.store import AreasStore
-    from skaz.knowledge.science.protocols import TaxonomyNode
-
-    areas = AreasStore(parts.kb, SignalStore(parts.kb.db))
-    areas.sync_taxonomy_nodes(None, [TaxonomyNode("area-ai", None, "subfield", "AI", 1)])
-    areas.sync_taxonomy_nodes(None, [TaxonomyNode("subfields-9", None, "subfield", "Other", 1)])
-    areas.sync_taxonomy_nodes("subfields-9", [TaxonomyNode("T1", "subfields-9", "topic", "Agents", 0)])
-    finding = await _one_finding(parts)
+    """EX2: retain the chosen own topic as intake metadata for the ingest labelling hook."""
+    parts.science.search_works = [work(1, topics=["T1"], doi="10.1000/new")]
+    await run_to_end(parts, KbFunnelStart(area_id="area-ai", query="agents", channels=["search"]))
+    finding = next(f for g in (await parts.funnel.findings()).groups for f in g.findings)
     assert finding.area_id == "area-ai"
     parts.science.texts["work-1"] = KbScienceText(
         work_id="work-1", kind="abstract_only", text="", source_url=None, access=finding.work.access
@@ -933,27 +931,23 @@ async def test_add_to_wiki_keeps_the_known_area_and_topics(parts: SimpleNamespac
     ((prepared, _folder, _to_wiki),) = parts.sources.prepared
     origin = prepared.origin.model_dump()
     assert (origin["area_id"], origin["topic_ids"]) == ("area-ai", ["T1"])
-    assert imported.material_id in areas.materials("area-ai")  # the area the run placed it in
-    assert imported.material_id in areas.materials("subfields-9")  # and where its own topic is
+    assert imported.material_id is not None
 
 
-async def test_a_parent_or_custom_area_lists_the_findings_its_tile_counts(parts: SimpleNamespace) -> None:
-    """Review R1-06: the findings list of a scope is the set the map counts (descendants / collected)."""
-    from skaz.knowledge.api.schemas_areas import KbAreaCreate
-    from skaz.knowledge.areas.signals import SignalStore
-    from skaz.knowledge.areas.store import AreasStore
-    from skaz.knowledge.science.protocols import TaxonomyNode
-
-    areas = AreasStore(parts.kb, SignalStore(parts.kb.db))
-    areas.sync_taxonomy_nodes(None, [TaxonomyNode("domains-1", None, "domain", "Sciences", 1)])
-    areas.sync_taxonomy_nodes("domains-1", [TaxonomyNode("area-ai", "domains-1", "subfield", "AI", 0)])
-    custom = areas.create_custom(KbAreaCreate(name="Mine", topic_ids=["area-ai"]))
-    parts.funnel.area_scope = areas.scope_ids
+async def test_an_own_parent_topic_lists_the_findings_its_tile_counts(parts: SimpleNamespace) -> None:
+    """The injected area scope applies to own-topic descendants, independent of hidden taxonomy ids."""
+    with parts.kb.db.write() as db:
+        db.execute(
+            "INSERT INTO explore_areas(id,level,name,original_name)"
+            " VALUES ('own-parent','custom','AI tools','AI tools')"
+        )
+        db.execute("UPDATE explore_areas SET parent_id='own-parent' WHERE id='area-ai'")
+    parts.funnel.area_scope = parts.funnel.planner.scope
     parts.novelty.labels = {"Old news": "covered"}
     parts.science.search_works = [work(1, topics=["T1"]), work(2, title="Old news", topics=["T1"])]
-    await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
+    await run_to_end(parts, KbFunnelStart(area_id="area-ai", query="agents", channels=["search"]))
     assert parts.funnel.new_by_area() == {"area-ai": 1}
-    for scope in ("domains-1", custom.id, "area-ai"):
+    for scope in ("own-parent", "area-ai"):
         shown = await parts.funnel.findings(area_id=scope)
         assert [f.work.id for g in shown.groups for f in g.findings] == ["work-1"], scope
         assert shown.covered_count == 1, scope

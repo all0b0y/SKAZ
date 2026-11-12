@@ -242,7 +242,9 @@ async def test_rule_override_preserves_original_reason_without_spending(parts: S
     assert original["reason"] == "outside_dates"
 
 
-async def test_precise_and_edited_scopes_never_resolve_unselected_library_sources(parts: SimpleNamespace) -> None:
+async def test_precise_and_edited_scopes_never_resolve_unselected_library_sources(
+    parts: SimpleNamespace,
+) -> None:
     from tests.knowledge.test_b2_funnel import add_material
 
     add_material(parts.kb, "Unrelated paper", "https://doi.org/10.1000/unrelated")
@@ -250,8 +252,13 @@ async def test_precise_and_edited_scopes_never_resolve_unselected_library_source
     await run_to_end(parts, KbFunnelStart(query="harness"))
     assert [name for name, _ in parts.science.calls] == ["search"]
     parts.science.calls.clear()
-    await run_to_end(parts, KbFunnelStart(all_topics=True, plan=[
-        KbSearchPlanItem(area_id="topic-agents", label="AI agents", terms=["Agent memory"])]))
+    await run_to_end(
+        parts,
+        KbFunnelStart(
+            all_topics=True,
+            plan=[KbSearchPlanItem(area_id="topic-agents", label="AI agents", terms=["Agent memory"])],
+        ),
+    )
     assert [name for name, _ in parts.science.calls] == ["search"]
 
 
@@ -299,3 +306,59 @@ async def test_funnel_routes_use_the_contract_and_validate_inputs(parts: SimpleN
         assert (await client.get(base, params={"cursor": "bad"})).status_code == 422
         assert (await client.post(base + "/missing/fits")).status_code == 404
         assert (await client.get("/kb/explore/runs/missing/candidates")).status_code == 404
+
+
+async def test_legacy_run_without_a_plan_cannot_resume_as_empty_success(parts: SimpleNamespace) -> None:
+    from skaz.knowledge.api.schemas_explore_common import KbContinue
+    from skaz.knowledge.science.protocols import ScienceDailyLimit
+
+    parts.science.error = ScienceDailyLimit()
+    run = await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
+    with parts.kb.db.write() as db:
+        row = db.execute("SELECT request_json FROM explore_runs WHERE id=?", (run.id,)).fetchone()
+        old_request = json.loads(row[0])
+        old_request.pop("plan")
+        old_request.pop("hidden_scopes")
+        db.execute("UPDATE explore_runs SET request_json=? WHERE id=?", (json.dumps(old_request), run.id))
+    parts.jobs.stop(run.id, "app_exit")
+    parts.science.error = None
+    before = list(parts.science.calls)
+    assert await parts.funnel.on_start() == []
+    paused = await parts.funnel.run(run.id)
+    with pytest.raises(ContractFailure) as caught:
+        await parts.funnel.resume(run.id, KbContinue(
+            checkpoint_id=paused.checkpoint.id, revision=paused.checkpoint.revision))
+    assert (caught.value.status, caught.value.code) == (503, "not_ready")
+    assert parts.science.calls == before
+
+
+async def test_pause_keeps_plan_and_hidden_labels_and_skips_finished_search_items(parts: SimpleNamespace) -> None:
+    from skaz.knowledge.api.schemas_explore_common import KbContinue
+    from skaz.knowledge.science.protocols import ScienceDailyLimit
+    from tests.knowledge.test_b2_funnel import results
+
+    topic(parts, "topic-ai", "AI", count=1, hidden_ids=["T1"])
+    topic(parts, "topic-ml", "ML", count=1, hidden_ids=["T2"])
+    plan = [KbSearchPlanItem(area_id="topic-ai", label="AI", terms=["agents"]),
+            KbSearchPlanItem(area_id="topic-ml", label="ML", terms=["learning"])]
+    calls: list[list[str]] = []
+    limited = True
+
+    async def search(body: Any, *, run_id: str | None = None) -> Any:
+        calls.append(body.payload.topics)
+        if body.payload.topics[0] == "learning" and limited:
+            raise ScienceDailyLimit()
+        return results([])
+
+    parts.science.search = search
+    run = await run_to_end(parts, KbFunnelStart(plan=plan, channels=["search"]))
+    assert run.stop_reason == "openalex_daily_limit"
+    with parts.kb.db.write() as db:
+        db.execute("UPDATE explore_areas SET name='Changed',mapping_state='pending'")
+        db.execute("DELETE FROM explore_area_topics")
+    limited = False
+    await parts.funnel.resume(run.id, KbContinue(
+        checkpoint_id=run.checkpoint.id, revision=run.checkpoint.revision))
+    done = await parts.funnel.settled(run.id)
+    assert done.plan == plan and done.state == "done"
+    assert calls == [["agents", "T1"], ["learning", "T2"], ["learning", "T2"]]
