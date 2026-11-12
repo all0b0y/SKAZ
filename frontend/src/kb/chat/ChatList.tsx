@@ -73,8 +73,11 @@ export function ChatList() {
 
   const row = (c: KbChatSummary) => {
     const current = openKey === c.id;
+    const selection = sel.rowProps(c.id);
     return (
-      <li key={c.id} {...sel.rowProps(c.id)} data-entrance={c.id}>
+      <li key={c.id} {...selection} data-entrance={c.id}
+        onPointerDownCapture={(event) => { if (event.currentTarget.contains(event.target as Node)) selection.onPointerDownCapture(event); }}
+        onClickCapture={(event) => { if (event.currentTarget.contains(event.target as Node)) selection.onClickCapture(event); }}>
         <div role="gridcell" className={`kb-chatlist-row${c.research_task_id ? ' has-menu' : ''}`}>
           <button type="button" className={`kb-row kb-row--tabbed kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
             data-tab-key={c.id} aria-current={current ? 'page' : undefined} onClick={() => openRow(c.id)}>

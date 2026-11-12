@@ -228,6 +228,7 @@ describe('EX2 X5 · boundary and lifecycle checks', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Delete this chat?' });
     expect(within(dialog).getByText(/Its findings stay in Explore/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    expect(base.requestMock).toHaveBeenCalledWith(expect.objectContaining({ method: 'DELETE', path: `/kb/chats/${task.chat_id}` }));
     await waitFor(() => expect(store.getState().tasks).toHaveLength(0));
     await act(async () => { await store.getState().loadTasks(); });
     expect(store.getState().tasks).toHaveLength(0);

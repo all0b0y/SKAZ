@@ -24,7 +24,7 @@ export interface ResearchPartViewProps {
  * - `denied` / `cancelled` (v4 state 08): quiet line (`Research wasn’t started…`)
  */
 export function ResearchPartView({ chatId, part, onOpenTask }: ResearchPartViewProps) {
-  const { client, chats, ui } = useServices();
+  const { client, chats, ui, prefs, folds } = useServices();
   const store = getResearchStore(client);
   const [current, setCurrent] = useState<KbResearchPermission>(part);
   const [busy, setBusy] = useState(false);
@@ -34,7 +34,7 @@ export function ResearchPartView({ chatId, part, onOpenTask }: ResearchPartViewP
   const [pending, setPending] = useState('');
   const partId = useRef(part.id);
   useEffect(() => {
-    setCurrent(part);
+    setCurrent((previous) => previous.id === part.id && previous.status !== 'pending' && part.status === 'pending' ? previous : part);
     if (partId.current !== part.id) {
       partId.current = part.id;
       setTopics(part.topics.map((text) => ({ text, source: 'proposed', area_id: null })));
@@ -54,6 +54,14 @@ export function ResearchPartView({ chatId, part, onOpenTask }: ResearchPartViewP
       const updated = await store.getState().decidePermission(current.id, decision, chatId, finalTopics);
       setCurrent(updated);
       chats.getState().applyPart(chatId, updated);
+      if (updated.status === 'allowed' && updated.task_id) {
+        folds.getState().setFolded('research-sidebar', false);
+        prefs.getState().set({ section: 'chats' });
+        ui.getState().showCenter('chat');
+        store.getState().openTask(updated.task_id);
+        void chats.getState().loadList();
+        onOpenTask?.(updated.task_id);
+      }
     } catch (err) {
       setError(errorText(err));
     } finally {
