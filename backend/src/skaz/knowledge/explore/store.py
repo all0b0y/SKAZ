@@ -135,6 +135,52 @@ class ExploreStore:
             row = connection.execute(sql, params).fetchone()
         return None if row is None or row[0] is None else str(row[0])
 
+    def overrides(self, run_id: str) -> dict[str, dict[str, Any]]:
+        """User fits decisions are separate from immutable model/rule results (no schema change)."""
+        with self.db.read() as db:
+            rows = db.execute(
+                "SELECT candidate_id,result_json FROM explore_completed_work"
+                " WHERE job_id=? AND stage='fit_override'",
+                (run_id,),
+            ).fetchall()
+        return {str(row[0]): json.loads(row[1]) for row in rows}
+
+    def mark_fits(self, run_id: str, candidate_id: str, area_id: str | None) -> None:
+        with self.db.write() as db:
+            db.execute(
+                "INSERT INTO explore_completed_work"
+                " (job_id,candidate_id,stage,result_json,completed_at) VALUES (?,?,'fit_override',?,?)"
+                " ON CONFLICT(job_id,candidate_id,stage) DO UPDATE SET completed_at=excluded.completed_at",
+                (
+                    run_id,
+                    candidate_id,
+                    json.dumps(
+                        {"on_topic": True, "area_id": area_id, "reason": "user_override", "overridden": True}
+                    ),
+                    utc_now_ms(),
+                ),
+            )
+
+    def collected_source(self, candidate_id: str, exclude_run: str | None = None) -> dict[str, Any] | None:
+        """A Check novelty click carries the source plan and explicit override, never unrelated verdicts."""
+        with self.db.read() as db:
+            row = db.execute(
+                "SELECT w.result_json,r.request_json,o.result_json AS override_json"
+                " FROM explore_completed_work w JOIN explore_runs r ON r.id=w.job_id"
+                " LEFT JOIN explore_completed_work o ON o.job_id=w.job_id AND o.candidate_id=w.candidate_id"
+                " AND o.stage='fit_override' WHERE w.candidate_id=? AND w.stage='collect'"
+                " AND w.job_id IS NOT ?"
+                " ORDER BY coalesce(o.completed_at,w.completed_at) DESC,w.rowid DESC LIMIT 1",
+                (candidate_id, exclude_run),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "collected": json.loads(row["result_json"]),
+            "plan": json.loads(row["request_json"]).get("plan") or [],
+            "override": json.loads(row["override_json"]) if row["override_json"] else None,
+        }
+
     # -- findings -----------------------------------------------------------------------------------
 
     def add_finding(

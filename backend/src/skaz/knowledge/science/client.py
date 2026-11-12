@@ -660,6 +660,31 @@ class ScienceGateway:
                         )
         return list(found.values())
 
+    async def search_topics(
+        self, terms: Sequence[str], *, run_id: str | None = None
+    ) -> Sequence[TaxonomyNode]:
+        """One free /topics search for X1's hidden label. No model or mapping work happens here."""
+        await self._ready()
+        words = list(dict.fromkeys(term.strip() for term in terms if term.strip()))
+        if not words:
+            return []
+        if len(words) > 6 or any(len(word) > 72 for word in words):
+            raise ContractFailure(422, "invalid_request")
+        data = await self._json(
+            Call(
+                "openalex",
+                "taxonomy",
+                f"{openalex.API}/topics",
+                KbSciencePayload(topics=words),
+                params={"search": " ".join(words), "per-page": "30"},
+                cost=openalex.COST_SINGLE,
+            ),
+            run_id,
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            raise ScienceUnavailable()
+        return openalex.taxonomy_nodes(data, None, "topic")[:30]
+
     async def taxonomy(self, parent_id: str | None = None) -> Sequence[TaxonomyNode]:
         """One level of the OpenAlex taxonomy; kept 30 days, since it changes rarely and B4 asks per view."""
         now = self.now()
