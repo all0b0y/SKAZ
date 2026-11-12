@@ -8,6 +8,7 @@ import { contractFixtures as f } from '../api/fake/fixtures';
 import { createServices, KbServicesProvider } from '../state/context';
 import { createFakeBridge } from '../test/fakeBridge';
 import { chatWorld } from '../test/fixtures';
+import { topicDraft } from './TopicEditor';
 import { SidePanel } from '../shell/SidePanel';
 import { ChatCenter } from '../shell/ChatCenter';
 import { ChatView } from '../chat/ChatView';
@@ -194,5 +195,71 @@ describe('EX2 X5 · visible research funnel', () => {
     expect(await screen.findByText('Fits · novelty not checked', { selector: 'span' })).toBeInTheDocument();
     expect(fake.research.resume).not.toHaveBeenCalled();
     expect(base.requestMock).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', path: '/kb/explore/runs' }));
+  });
+});
+
+
+describe('EX2 X5 · boundary and lifecycle checks', () => {
+  it('opens the newly allowed task in Research and keeps Deny available with no topics', async () => {
+    const user = userEvent.setup();
+    const part = { ...f.KbResearchPermission, status: 'pending' as const, topics: ['AI agents'] };
+    const { store, services } = setup(<ResearchPartView chatId="c1" part={part} />);
+    await user.click(screen.getByRole('button', { name: 'Remove topic 1' }));
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeEnabled();
+    await user.type(screen.getByRole('textbox', { name: 'Add your own topic' }), 'agent testing');
+    await user.click(screen.getByRole('button', { name: 'Allow once' }));
+    expect(store.getState()).toMatchObject({ mode: 'task', activeTaskId: task.id });
+    expect(services.prefs.getState().section).toBe('chats');
+  });
+
+  it('renames and deletes an active research chat through the shared menu, and a stale task page cannot restore it', async () => {
+    const user = userEvent.setup();
+    const { base, services, store } = setup(undefined, [task]);
+    const chat = { ...base.world.chats[0]!, id: task.chat_id, title: task.title, research_task_id: task.id };
+    base.world.chats.push(chat);
+    act(() => services.chats.setState({ list: [...services.chats.getState().list, chat] }));
+    await user.click(await screen.findByRole('button', { name: `More for “${task.title}”` }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Rename' }));
+    const name = await screen.findByRole('textbox', { name: 'Chat name' });
+    await user.clear(name); await user.type(name, 'Renamed research{Enter}');
+    await user.click(await screen.findByRole('button', { name: 'More for “Renamed research”' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete this chat?' });
+    expect(within(dialog).getByText(/Its findings stay in Explore/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(store.getState().tasks).toHaveLength(0));
+    await act(async () => { await store.getState().loadTasks(); });
+    expect(store.getState().tasks).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /^Renamed research/ })).toBeNull();
+    expect(base.requestMock).toHaveBeenCalledWith(expect.objectContaining({ method: 'DELETE', path: `/kb/chats/${task.chat_id}` }));
+  });
+
+  it('waits for the finished task to become visible when the window was hidden', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    const { base, services } = setup(<ResearchTaskView initialTask={done} />);
+    act(() => services.notifications.setState({ items: [finishedNotification('hidden-finished', done.id)], unread: 1 }));
+    expect(base.requestMock).not.toHaveBeenCalledWith(expect.objectContaining({ path: '/kb/notifications/hidden-finished/read' }));
+    visibility.mockReturnValue('visible');
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => expect(base.requestMock).toHaveBeenCalledWith(expect.objectContaining({ path: '/kb/notifications/hidden-finished/read' })));
+  });
+
+  it('shows the unread dot for a finished task outside the current view', async () => {
+    const { services } = setup(undefined, [done]);
+    act(() => services.chats.setState({ list: [...services.chats.getState().list, { ...services.chats.getState().list[0]!, id: done.chat_id, title: done.title, research_task_id: done.id, unread: true, state: 'idle' }] }));
+    const section = await screen.findByRole('region', { name: 'Research tasks' });
+    expect(within(section).getByRole('img', { name: 'new answer' })).toBeInTheDocument();
+  });
+
+  it('limits final topics by count, unicode length, blanks, and duplicates', () => {
+    const typed = (text: string) => ({ text, source: 'typed' as const, area_id: null });
+    expect(topicDraft([], '').problem).not.toBeNull();
+    expect(topicDraft([typed('a'), typed('b'), typed('c'), typed('d')], '').problem).toBeNull();
+    expect(topicDraft([typed('a'), typed('b'), typed('c'), typed('d')], 'e').problem).toBe('Keep up to 4 topics.');
+    expect(topicDraft([typed('')], '').problem).not.toBeNull();
+    expect(topicDraft([typed('agent'), typed(' Agent ')], '').problem).toBe('Remove duplicate topics.');
+    expect(topicDraft([typed('я'.repeat(73))], '').problem).not.toBeNull();
+    expect(topicDraft([typed('🚀'.repeat(72))], '').problem).toBeNull();
   });
 });
