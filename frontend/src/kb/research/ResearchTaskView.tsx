@@ -9,6 +9,7 @@ import {
   type ResearchStopReason,
 } from './store';
 
+import { ResearchFunnel } from './ResearchFunnel';
 import { useFinishedTaskRead } from './seen';
 
 export const RESEARCH_POLL_MS = 1000;
@@ -271,7 +272,7 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
             </div>
 
             <div className="kb-research-progress__funnel">
-              {`Checked ${run.counters.checked} · on topic ${run.counters.on_topic} · new ${run.counters.new}`}
+              {`${run.counters.checked} found → ${run.counters.on_topic} fit → ${run.counters.new} new`}
             </div>
 
             <div className="kb-research-progress__meta">
@@ -350,6 +351,8 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
               )}
             </div>
           </section>
+          <ResearchFunnel key={run.id} runId={run.id} taskId={task.id} updatedAt={run.updated_at} />
+          {task.topics.length > 0 && <p className="kb-research-perm__meta">Topics: {task.topics.map((topic) => topic.text).join(' · ')}</p>}
 
           {error && (
             <p role="alert" className="kb-inline-error">

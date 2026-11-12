@@ -338,6 +338,11 @@
 .kb-research-topics__preview { margin: 0; font-size: var(--t-sm); overflow-wrap: anywhere; }
 .kb-research-disclosure { width: 100%; display: flex; align-items: center; gap: var(--kb-sp-4); text-align: left; }
 .kb-chatlist-row { position: relative; }
-.kb-chatlist-row > .kb-chatrow { padding-right: var(--kb-sp-34); }
+.kb-chatlist-row.has-menu > .kb-chatrow { padding-right: var(--kb-sp-34); }
 .kb-chatlist-row > [data-sel-ignore] { position: absolute; right: var(--kb-sp-4); top: 50%; transform: translateY(-50%); opacity: 0; }
 .kb-chatlist-row:hover > [data-sel-ignore], .kb-chatlist-row:focus-within > [data-sel-ignore] { opacity: 1; }
+
+.kb-research-funnel { margin-bottom: var(--kb-sp-16); }
+.kb-research-funnel__details { display: flex; flex-direction: column; gap: var(--kb-sp-10); margin-top: var(--kb-sp-10); }
+.kb-research-topics__list li.kb-research-funnel__work { align-items: flex-start; flex-direction: column; padding: var(--kb-sp-10) 0; border-bottom: 1px solid var(--kb-line); overflow-wrap: anywhere; }
+.kb-research-funnel__work p { margin: 0; font-size: var(--t-sm); color: var(--kb-muted); }

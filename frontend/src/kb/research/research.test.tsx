@@ -215,7 +215,7 @@ describe('F2 · 03–05 · Research task states: running, paused, budget, done, 
     expect(await screen.findByRole('heading', { name: 'Evidence for reliable RAG' })).toBeInTheDocument();
     expect(screen.getByText('Find recent work on evaluating RAG answers. Look for evidence that adds to Lecture 7.')).toBeInTheDocument();
     expect(screen.getByText('Checking against your wiki')).toBeInTheDocument();
-    expect(screen.getByText('Checked 240 · on topic 38 · new 6')).toBeInTheDocument();
+    expect(screen.getByText('240 found → 38 fit → 6 new')).toBeInTheDocument();
     expect(screen.getByText('18 of 30 candidates compared with your wiki')).toBeInTheDocument();
     expect(screen.getByText('Budget: 30 candidate checks per batch')).toBeInTheDocument();
     expect(screen.getByText('You can leave this chat. Findings appear in Explore as they are ready.')).toBeInTheDocument();
@@ -337,7 +337,7 @@ describe('F2 · 03–05 · Research task states: running, paused, budget, done, 
     renderResearchOnly(fake, <ResearchTaskView taskId="task-rag" />);
 
     expect(await screen.findByText('Paused · batch complete')).toBeInTheDocument();
-    expect(screen.getByText('Checked 240 · on topic 38 · new 9')).toBeInTheDocument();
+    expect(screen.getByText('240 found → 38 fit → 9 new')).toBeInTheDocument();
     expect(screen.getByText('30 of 30 candidates compared with your wiki')).toBeInTheDocument();
     expect(document.querySelectorAll('.kb-research-dots i.done')).toHaveLength(30);
     expect(screen.getByText('A new batch uses your model allowance.')).toBeInTheDocument();

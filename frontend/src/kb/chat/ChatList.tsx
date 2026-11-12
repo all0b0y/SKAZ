@@ -75,7 +75,7 @@ export function ChatList() {
     const current = openKey === c.id;
     return (
       <li key={c.id} {...sel.rowProps(c.id)} data-entrance={c.id}>
-        <div role="gridcell" className="kb-chatlist-row">
+        <div role="gridcell" className={`kb-chatlist-row${c.research_task_id ? ' has-menu' : ''}`}>
           <button type="button" className={`kb-row kb-row--tabbed kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
             data-tab-key={c.id} aria-current={current ? 'page' : undefined} onClick={() => openRow(c.id)}>
             <SelectionCheckbox checked={sel.selected.has(c.id)} />

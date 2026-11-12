@@ -191,7 +191,7 @@ describe('EX2 X5 · visible research funnel', () => {
     await user.click(screen.getByRole('button', { name: 'Show considered works' }));
     expect(await screen.findByText(dropped.reason)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'It fits' }));
-    expect(await screen.findByText('Fits · novelty not checked')).toBeInTheDocument();
+    expect(await screen.findByText('Fits · novelty not checked', { selector: 'span' })).toBeInTheDocument();
     expect(fake.research.resume).not.toHaveBeenCalled();
     expect(base.requestMock).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', path: '/kb/explore/runs' }));
   });
