@@ -316,6 +316,11 @@ class FakeSources:
 @pytest.fixture
 def parts(ready: KnowledgeService) -> SimpleNamespace:
     register_notifications(ready)
+    # EX2: this fixture is an own topic with a stored hidden label, not a taxonomy tile.
+    with ready.db.write() as db:
+        db.execute("INSERT INTO explore_areas(id,level,name,original_name,mapping_state,mapped_name)"
+                   " VALUES ('area-ai','custom','AI','AI','mapped','AI')")
+        db.execute("INSERT INTO explore_area_topics VALUES ('area-ai','T1')")
     science = FakeScience()
     directory = FakeDirectory()
     recorder = FakeRecorder()
@@ -447,15 +452,15 @@ async def test_search_runs_every_stage_and_notifies(parts: SimpleNamespace) -> N
     assert (counters.checked, counters.after_rules, counters.decided, counters.on_topic) == (4, 2, 2, 1)
     assert (counters.novelty_checked, counters.new, counters.covered) == (1, 1, 0)
     assert run.decision_provider == "local"
-    assert run.active_area_ids == ["area-ai"]
+    assert run.active_area_ids == []  # precise unscoped text does not search the library topics
     search = next(arg for name, arg in parts.science.calls if name == "search")
     assert search.payload.topics == ["llm agents"]  # the search line leaves as a topic (C0-1)
     assert search.payload.dois == [] and search.payload.ids == []
     findings = await parts.funnel.findings()
     (group,) = findings.groups
     (finding,) = group.findings
-    assert (finding.label, finding.channel, finding.area_id) == ("new", "search", "area-ai")
-    assert finding.area_path == ["Computer science", "AI"]
+    assert (finding.label, finding.channel, finding.area_id) == ("new", "search", None)
+    assert finding.area_path == []
     assert finding.reason == "New compared with your wiki."
     assert finding.text_available == "unchecked"
     (note,) = [n for n in parts.kb.notifications() if n.kind == "explore_finished"]

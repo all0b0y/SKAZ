@@ -8,22 +8,39 @@ from skaz.knowledge.science.client import ScienceGateway
 from skaz.knowledge.science.protocols import ScienceConsentRequired, ScienceDailyLimit, ScienceUnavailable
 from tests.knowledge.test_b1_science import (
     Bases,
-    bases as bases,
     enable,
-    gateway as gateway,
     ok_json,
-    secrets as secrets,
-    sleeps as sleeps,
     status,
+)
+from tests.knowledge.test_b1_science import (
+    bases as bases,
+)
+from tests.knowledge.test_b1_science import (
+    gateway as gateway,
+)
+from tests.knowledge.test_b1_science import (
+    secrets as secrets,
+)
+from tests.knowledge.test_b1_science import (
+    sleeps as sleeps,
 )
 
 
 async def test_topic_search_is_bounded_free_and_journalled(gateway: ScienceGateway, bases: Bases) -> None:
     await enable(gateway)
-    bases.on("api.openalex.org", "/topics", ok_json({"results": [
-        {"id": "https://openalex.org/T1", "display_name": "Agent memory"},
-        {"id": "https://openalex.org/T2", "display_name": "Tool use"},
-        {"id": "bad", "display_name": "Ignore me"}]}))
+    bases.on(
+        "api.openalex.org",
+        "/topics",
+        ok_json(
+            {
+                "results": [
+                    {"id": "https://openalex.org/T1", "display_name": "Agent memory"},
+                    {"id": "https://openalex.org/T2", "display_name": "Tool use"},
+                    {"id": "bad", "display_name": "Ignore me"},
+                ]
+            }
+        ),
+    )
     found = await gateway.search_topics(["AI agents", "Memory"], run_id=None)
     assert [(n.taxonomy_id, n.name) for n in found] == [("T1", "Agent memory"), ("T2", "Tool use")]
     (sent,) = bases.requests
@@ -47,7 +64,10 @@ async def test_topic_search_no_match_empty_terms_and_consent(gateway: ScienceGat
 
 @pytest.mark.parametrize("code,error", [(429, ScienceDailyLimit), (503, ScienceUnavailable)])
 async def test_topic_search_never_switches_provider_on_failure(
-    gateway: ScienceGateway, bases: Bases, code: int, error: type[Exception],
+    gateway: ScienceGateway,
+    bases: Bases,
+    code: int,
+    error: type[Exception],
 ) -> None:
     await enable(gateway)
     bases.on("api.openalex.org", "/topics", status(code, **{"retry-after": "3600"}))
