@@ -1,0 +1,21 @@
+.kb-add-to-wiki {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-sp-4);
+}
+
+.kb-list [role='gridcell']:has(> .kb-add-to-wiki) {
+  display: flex;
+  align-items: center;
+}
+
+.kb-list [role='gridcell']:has(> .kb-add-to-wiki) > .kb-row {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (hover: hover) {
+  .kb-add-to-wiki > .kb-btn { opacity: 0; }
+  :is(li, tr):hover .kb-add-to-wiki > .kb-btn,
+  :is(li, tr):focus-within .kb-add-to-wiki > .kb-btn { opacity: 1; }
+}
