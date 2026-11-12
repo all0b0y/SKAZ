@@ -32,9 +32,21 @@ import type {
   KbSignals,
   KbWeeklyCheck,
   KbWeeklySettings,
+  KbFunnelCandidate,
+  KbFunnelCandidates,
+  KbMaterialTopic,
+  KbResearchProposal,
+  KbSearchPlan,
+  KbTopicLabelling,
 } from '../../../api/kb/types.gen';
 
 interface ContractFixtures {
+  KbTopicLabelling: KbTopicLabelling;
+  KbSearchPlan: KbSearchPlan;
+  KbResearchProposal: KbResearchProposal;
+  KbMaterialTopic: KbMaterialTopic;
+  KbFunnelCandidates: KbFunnelCandidates;
+  KbFunnelCandidate: KbFunnelCandidate;
   KbAcknowledged: KbAcknowledged;
   KbArea: KbArea;
   KbAreaMap: KbAreaMap;
@@ -489,7 +501,14 @@ export const contractFixtures = {
     "total_pages": 320,
     "worth_closing": [],
     "unsorted_materials": 0,
-    "labelling": { "state": "idle", "job_id": null, "done": 0, "total": 0, "reason_code": null, "engine": null },
+    "labelling": {
+      "state": "idle",
+      "job_id": null,
+      "done": 0,
+      "total": 0,
+      "reason_code": null,
+      "engine": null
+    },
     "total_sources": 131
   },
   "KbArea": {
@@ -579,7 +598,13 @@ export const contractFixtures = {
     "chat_id": "chat-research-1",
     "origin_chat_id": null,
     "area_id": "area-ai",
-    "topics": [{ "text": "LLM agents", "source": "proposed", "area_id": null }],
+    "topics": [
+      {
+        "text": "LLM agents",
+        "source": "proposed",
+        "area_id": null
+      }
+    ],
     "run": {
       "id": "run-1",
       "state": "running",
@@ -636,7 +661,13 @@ export const contractFixtures = {
         "chat_id": "chat-research-1",
         "origin_chat_id": null,
         "area_id": "area-ai",
-        "topics": [{ "text": "LLM agents", "source": "proposed", "area_id": null }],
+        "topics": [
+          {
+            "text": "LLM agents",
+            "source": "proposed",
+            "area_id": null
+          }
+        ],
         "run": {
           "id": "run-1",
           "state": "running",
@@ -747,7 +778,14 @@ export const contractFixtures = {
       "total_pages": 320,
       "worth_closing": [],
       "unsorted_materials": 0,
-      "labelling": { "state": "idle", "job_id": null, "done": 0, "total": 0, "reason_code": null, "engine": null },
+      "labelling": {
+        "state": "idle",
+        "job_id": null,
+        "done": 0,
+        "total": 0,
+        "reason_code": null,
+        "engine": null
+      },
       "total_sources": 131
     },
     "findings": {
@@ -874,7 +912,13 @@ export const contractFixtures = {
           "chat_id": "chat-research-1",
           "origin_chat_id": null,
           "area_id": "area-ai",
-          "topics": [{ "text": "LLM agents", "source": "proposed", "area_id": null }],
+          "topics": [
+            {
+              "text": "LLM agents",
+              "source": "proposed",
+              "area_id": null
+            }
+          ],
           "run": {
             "id": "run-1",
             "state": "running",
@@ -1274,6 +1318,146 @@ export const contractFixtures = {
         "chat_id": "chat-research-1",
         "area_id": "area-ai",
         "updated_at": "2026-11-09T10:00:00Z"
+      }
+    ]
+  },
+  "KbTopicLabelling": {
+    "state": "running",
+    "job_id": "job-topics-1",
+    "done": 12,
+    "total": 93,
+    "reason_code": null,
+    "engine": "codex"
+  },
+  "KbMaterialTopic": {
+    "material_id": "mat-1",
+    "area_id": "area-ai",
+    "origin": "user"
+  },
+  "KbSearchPlan": {
+    "items": [
+      {
+        "area_id": "area-ai",
+        "label": "AI agents",
+        "terms": [
+          "AI agent evaluation",
+          "agent harness"
+        ]
+      }
+    ],
+    "ready": true,
+    "reason": null
+  },
+  "KbFunnelCandidate": {
+    "candidate_id": "work-1",
+    "work": {
+      "id": "work-1",
+      "provider": "openalex",
+      "provider_id": "W-fixture-1",
+      "doi": "10.1234/fixture",
+      "arxiv_id": null,
+      "title": "Fixture: claim-level grounding for agent memory",
+      "authors": [
+        "Sample Author"
+      ],
+      "publication": {
+        "year": 2026,
+        "date": "2026-10-15",
+        "precision": "day",
+        "origin": "crossref",
+        "evidence_url": "https://example.org/fixture-paper"
+      },
+      "venue": "Fixture Journal",
+      "abstract": "Synthetic sample: check each stored claim against its cited evidence.",
+      "topic_ids": [
+        "T-fixture-rag"
+      ],
+      "referenced_ids": [
+        "W-fixture-root"
+      ],
+      "cited_by_count": 12,
+      "locations": [
+        {
+          "url": "https://example.org/fixture-paper",
+          "kind": "open_page",
+          "open_access": true
+        }
+      ],
+      "access": {
+        "paid": false,
+        "alternatives_checked": true,
+        "free_alternative_ids": [],
+        "suggestion_shown_at": null,
+        "recommendation": null,
+        "publisher_url": null
+      },
+      "publication_type": "article"
+    },
+    "outcome": "not_fit",
+    "reason": "Doesn't fit: AI agent evaluation",
+    "overridden": false
+  },
+  "KbFunnelCandidates": {
+    "items": [
+      {
+        "candidate_id": "work-1",
+        "work": {
+          "id": "work-1",
+          "provider": "openalex",
+          "provider_id": "W-fixture-1",
+          "doi": "10.1234/fixture",
+          "arxiv_id": null,
+          "title": "Fixture: claim-level grounding for agent memory",
+          "authors": [
+            "Sample Author"
+          ],
+          "publication": {
+            "year": 2026,
+            "date": "2026-10-15",
+            "precision": "day",
+            "origin": "crossref",
+            "evidence_url": "https://example.org/fixture-paper"
+          },
+          "venue": "Fixture Journal",
+          "abstract": "Synthetic sample: check each stored claim against its cited evidence.",
+          "topic_ids": [
+            "T-fixture-rag"
+          ],
+          "referenced_ids": [
+            "W-fixture-root"
+          ],
+          "cited_by_count": 12,
+          "locations": [
+            {
+              "url": "https://example.org/fixture-paper",
+              "kind": "open_page",
+              "open_access": true
+            }
+          ],
+          "access": {
+            "paid": false,
+            "alternatives_checked": true,
+            "free_alternative_ids": [],
+            "suggestion_shown_at": null,
+            "recommendation": null,
+            "publisher_url": null
+          },
+          "publication_type": "article"
+        },
+        "outcome": "not_fit",
+        "reason": "Doesn't fit: AI agent evaluation",
+        "overridden": false
+      }
+    ],
+    "next_cursor": null
+  },
+  "KbResearchProposal": {
+    "title": "Methods for AI harness",
+    "topics": [
+      {
+        "text": "AI agent evaluation harness",
+        "source": "proposed",
+        "area_id": null
       }
     ]
   }

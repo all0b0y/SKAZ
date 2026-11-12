@@ -14,6 +14,7 @@ if TYPE_CHECKING:
         KbResearchDecide,
         KbResearchGrant,
         KbResearchPermission,
+        KbResearchProposal,
         KbResearchTask,
         KbResearchTasks,
         KbResearchToolResult,
@@ -23,6 +24,9 @@ if TYPE_CHECKING:
 
 class ResearchService(Protocol):
     async def create(self, body: KbResearchCreate) -> KbResearchTask: ...
+    async def propose(self, body: KbResearchCreate) -> KbResearchProposal:
+        """EX2 (X3): the card of "+ New research task" before anything starts (chat agent only)."""
+        ...
     async def tasks(self, cursor: str | None = None, limit: int = 30) -> KbResearchTasks: ...
     async def task(self, task_id: str) -> KbResearchTask: ...
     async def pause(self, task_id: str) -> KbResearchTask: ...

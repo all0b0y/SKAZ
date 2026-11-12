@@ -16,11 +16,15 @@ from ..api.schemas_areas import (
     KbAreaMap,
     KbAreaMaterial,
     KbAreaMaterials,
+    KbAreaMerge,
     KbAreaUpdate,
     KbFactualSignal,
+    KbMaterialTopic,
+    KbMaterialTopicSet,
     KbReadMark,
     KbReadMarkUpdate,
     KbSignals,
+    KbTopicLabelling,
 )
 from ..api.schemas_explore_common import KbAcknowledged, KbPublicationDate, KbReadMarkValue
 from ..decisions.protocol import ChoiceAnswer, ChoiceQuestion, DecisionLayer, Undecided
@@ -450,6 +454,16 @@ class ExploreAreasService:
             finding_id,
             require_existing_mark=not has_provider,
         )
+
+    # EX2 step 0 — X1 implements; until then the routes answer an honest 503 not_ready.
+    async def sort_topics(self) -> KbTopicLabelling:
+        raise ContractFailure(503, "not_ready")
+
+    async def merge(self, area_id: str, body: KbAreaMerge) -> KbArea:
+        raise ContractFailure(503, "not_ready")
+
+    async def set_material_topic(self, material_id: str, body: KbMaterialTopicSet) -> KbMaterialTopic:
+        raise ContractFailure(503, "not_ready")
 
     async def signals(self, cursor: str | None = None, limit: int = 50) -> KbSignals:
         self._ensure_ready()

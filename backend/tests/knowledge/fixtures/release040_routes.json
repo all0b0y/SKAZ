@@ -691,5 +691,87 @@
     "response": "KbFreshnessMarks",
     "example": null,
     "query": []
+  },
+  {
+    "area": "areas",
+    "method": "POST",
+    "path": "/kb/explore/topics/sort",
+    "name": "sort_topics",
+    "body": null,
+    "response": "KbTopicLabelling",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "POST",
+    "path": "/kb/explore/areas/{area_id}/merge",
+    "name": "merge",
+    "body": "KbAreaMerge",
+    "response": "KbArea",
+    "example": {
+      "into_id": "area-ai"
+    },
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "PUT",
+    "path": "/kb/materials/{material_id}/topic",
+    "name": "set_material_topic",
+    "body": "KbMaterialTopicSet",
+    "response": "KbMaterialTopic",
+    "example": {
+      "area_id": "area-ai"
+    },
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/plan",
+    "name": "plan",
+    "body": "KbSearchPlanRequest",
+    "response": "KbSearchPlan",
+    "example": {
+      "query": "harness"
+    },
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "GET",
+    "path": "/kb/explore/runs/{run_id}/candidates",
+    "name": "candidates",
+    "body": null,
+    "response": "KbFunnelCandidates",
+    "example": null,
+    "query": [
+      "outcome: KbCandidateOutcome | None = None",
+      "cursor: str | None = None",
+      "limit: int = 30"
+    ]
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/runs/{run_id}/candidates/{candidate_id}/fits",
+    "name": "mark_fits",
+    "body": null,
+    "response": "KbFunnelCandidate",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "research",
+    "method": "POST",
+    "path": "/kb/research/proposals",
+    "name": "propose",
+    "body": "KbResearchCreate",
+    "response": "KbResearchProposal",
+    "example": {
+      "description": "Find methods for AI harness"
+    },
+    "query": []
   }
 ]

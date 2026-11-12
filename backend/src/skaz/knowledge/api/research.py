@@ -16,6 +16,7 @@ from .schemas_research import (
     KbResearchDecide,
     KbResearchGrant,
     KbResearchPermission,
+    KbResearchProposal,
     KbResearchTask,
     KbResearchTasks,
 )
@@ -29,6 +30,12 @@ def get_service(request: Request) -> ResearchService:
 
 ServiceDep = Annotated[ResearchService, Depends(get_service)]
 EntityPath = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")]
+
+
+@router.post("/research/proposals", response_model=KbResearchProposal)
+async def propose(body: KbResearchCreate, service: ServiceDep) -> KbResearchProposal:
+    """EX2: the card of "+ New research task" — title and proposed topics; nothing starts."""
+    return await service.propose(body)
 
 
 @router.post("/research/tasks", response_model=KbResearchTask)

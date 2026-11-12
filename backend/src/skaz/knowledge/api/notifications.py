@@ -85,6 +85,13 @@ async def mark_read(body: KbNotificationsRead, feed: FeedDep) -> Response:
     return Response(status_code=204)
 
 
+@router.post("/{notification_id}/read", status_code=204)
+async def mark_one_read(notification_id: str, feed: FeedDep) -> Response:
+    """EX2: only this notification is read (e.g. the finished Research task the user just opened)."""
+    await kb_call(feed.mark_one_read, notification_id)
+    return Response(status_code=204)
+
+
 @router.post("/{notification_id}/resolve")
 async def resolve_notification(notification_id: str, body: KbResolve, feed: FeedDep) -> KbNotification:
     """Carry out one action; 409 when already resolved, 422 for an action this notification doesn't offer."""

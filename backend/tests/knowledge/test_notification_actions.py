@@ -1,6 +1,7 @@
 """The notification action registry shared by the areas (API-B2 §1.1)."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -44,3 +45,21 @@ def test_a_kind_is_registered_once() -> None:
     registry.register("discrepancy", lambda n: (), handle)
     with pytest.raises(ValueError):
         registry.register("discrepancy", lambda n: (), handle)
+
+
+def test_one_notification_can_be_read_without_reading_the_others(tmp_path: Path) -> None:
+    """EX2: opening a finished Research task reads its own notification only (the bell keeps the rest)."""
+    from skaz.knowledge.store.database import KnowledgeDatabase
+    from skaz.knowledge.store.repositories import NotificationRepository
+
+    db = KnowledgeDatabase(tmp_path / "k.sqlite3")
+    try:
+        repo = NotificationRepository(db)
+        first = repo.add("research_finished", "Task", body="0 new")
+        second = repo.add("explore_finished", "Search", body="0 new")
+        assert repo.mark_one_read(first.id) is True
+        assert repo.mark_one_read(first.id) is False
+        assert repo.get(first.id).read_at is not None  # type: ignore[union-attr]
+        assert repo.get(second.id).read_at is None  # type: ignore[union-attr]
+    finally:
+        db.close()
