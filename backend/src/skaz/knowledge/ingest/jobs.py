@@ -30,18 +30,23 @@ STEP_STARTED = "step_started_ms"
 
 JOB_KIND = "ingest"
 IngestScope = Literal["full", "notes"]
-JobKind = Literal["ingest", "refresh", "recheck", "connections", "folder_overview", "corrections", "export"]
+JobKind = Literal["ingest", "refresh", "recheck", "connections", "folder_overview", "corrections", "export",
+                  "topics"]
 #: Every kind run by ingest (W1) and the wiki (W2); ``refresh`` re-ingests after a correction changed.
+#: ``topics`` (EX2): the wiki agent sorts unsorted wiki materials into the user's topics, started by a click;
+#: it is shown on the Explore map (``KbTopicLabelling``), never in the wiki job list.
 JOB_KINDS: tuple[JobKind, ...] = (
-    "ingest", "refresh", "recheck", "connections", "folder_overview", "corrections", "export",
+    "ingest", "refresh", "recheck", "connections", "folder_overview", "corrections", "export", "topics",
 )
+#: Kinds the wiki job list (``KbJobKind``) does not carry.
+UNLISTED_KINDS: tuple[JobKind, ...] = ("topics",)
 #: Kinds about one material (``target_id`` is the material id).
 MATERIAL_JOB_KINDS: tuple[JobKind, ...] = ("ingest", "refresh", "corrections")
 #: ``paused``: the material's wiki budget (C1-d) or its engine's quota; Continue keeps its checkpoint.
 JobState = Literal["queued", "running", "done", "failed", "cancelled", "interrupted", "paused"]
 JobStep = Literal["reading", "checking_recognition", "writing_notes", "concepts", "saving", "done",
                   "checking_discrepancies", "finding_connections", "rechecking", "writing_overview",
-                  "exporting"]
+                  "exporting", "sorting_topics"]
 FINISHED: tuple[JobState, ...] = ("done", "failed", "cancelled", "interrupted", "paused")
 INTERRUPTED_REASON = "SKAZ was closed while this material was being added to the wiki. Retry to start again."
 WIKI_INTERRUPTED_REASON = "SKAZ was closed while this wiki job was running. Start it again when needed."
@@ -150,7 +155,8 @@ class JobRecord:
                     "checking_discrepancies": "Checking for disagreements",
                     "finding_connections": "Finding connections", "rechecking": "Rechecking",
                     "writing_overview": "Writing the folder overview",
-                    "exporting": "Exporting"}.get(self.step or "reading", "Reading")
+                    "exporting": "Exporting",
+                    "sorting_topics": "Sorting materials into topics"}.get(self.step or "reading", "Reading")
         if self.state == "paused" and self.error_code == ENGINE_LIMIT:
             return "Paused · usage limit reached"
         return {"done": "Done", "failed": "Failed", "cancelled": "Cancelled",

@@ -60,7 +60,15 @@ from .model import (
     parse_answer,
 )
 from .pages import match_key
-from .protocols import ConceptUpdateHook, InstructionDetector, RecognitionCheck, RecognitionRequest, TextLayer
+from .protocols import (
+    ConceptUpdateHook,
+    InstructionDetector,
+    RecognitionCheck,
+    RecognitionRequest,
+    TextLayer,
+    TopicLabeller,
+    TopicRequest,
+)
 from .repetition import AnswerRun, LoopDetector, Looping
 from .sources import DEFAULT_PART_BUDGET, ExclusionsUnreadable, IngestSource, load_source, split_parts
 from .stream import ItemStream
@@ -252,6 +260,7 @@ class IngestRun:
                  engine: AgentEngine, detector: InstructionDetector, decisions: DecisionLayer | None,
                  text_layer: TextLayer, writer: WikiWriter, hook: ConceptUpdateHook | None, language: str,
                  limits: Limits, recognition: RecognitionCheck | None = None,
+                 topics: TopicLabeller | None = None,
                  model: str | None = None,
                  effort: str | None = None, scope: IngestScope = "full",
                  write_notes_automatically: bool = False) -> None:
@@ -268,6 +277,7 @@ class IngestRun:
         self.language = language
         self.limits = limits
         self.recognition = recognition
+        self.topics = topics
         self.model = model
         self.effort = effort
         self.scope = scope
@@ -826,6 +836,7 @@ class IngestRun:
                           concepts_updated=len(result.updated))
         await self._log(self._summary(result))
         await self._run_hooks(result)
+        await self._label_topic()
         return self.report
 
     def _summary(self, result: WriteResult) -> str:
@@ -842,6 +853,21 @@ class IngestRun:
             line += (f" Repeats merged into statements already kept: {self._duplicates} (their sources were "
                      "added to the kept ones).")
         return line
+
+    async def _label_topic(self) -> None:
+        """EX2: the material gets one of the user's topics from the same agent, after its pages are
+        saved. Whatever happens here, the material's wiki work stays done; a material left without a
+        topic is sorted later by "Sort materials" on the Explore map."""
+        if self.topics is None or self.scope == "notes":
+            return
+        request = TopicRequest(self.material_id, self._ask, self._log, self.language)
+        try:
+            await self.topics.label(request)
+        except (asyncio.CancelledError, IngestCancelled):
+            raise
+        except Exception as error:  # a limit, a stop, a broken answer: the pages are saved already
+            await self._log(f"No topic was set for this material ({type(error).__name__}); "
+                            "Sort materials on the Explore map sorts it later.")
 
     async def _run_hooks(self, result: WriteResult) -> None:
         if self.hook is None:

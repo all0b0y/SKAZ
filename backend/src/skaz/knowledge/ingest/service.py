@@ -33,6 +33,7 @@ from .jobs import (
     ENGINE_LIMIT,
     INTERRUPTED_REASON,
     QUEUED_KINDS,
+    UNLISTED_KINDS,
     EngineLimited,
     IngestScope,
     JobKind,
@@ -48,6 +49,7 @@ from .protocols import (
     InstructionDetector,
     RecognitionCheck,
     TextLayer,
+    TopicLabeller,
 )
 from .runner import BLOCKED_KIND, IngestCancelled, IngestFailed, IngestRun, Limits
 from .settings import WikiSettings, read_settings, update_settings
@@ -131,6 +133,8 @@ class IngestService:
         self.hook = hook
         #: Area W2: the recognition check before the notes (speech only); ``None`` skips the step.
         self.recognition: RecognitionCheck | None = None
+        #: EX2: the material's topic at the end of its processing (``knowledge/areas``); ``None`` skips it.
+        self.topics: TopicLabeller | None = None
         #: Called with ``(material_id, job)`` after a job finished ``done`` (W2: overview, connections).
         self.finished_listeners: list[Callable[[str, JobRecord], None]] = []
         #: C1-d Continue of a material whose follow-up work paused at its budget: runs those job kinds
@@ -196,7 +200,8 @@ class IngestService:
     def list_jobs(self, *, material_id: str | None = None) -> list[JobRecord]:
         # Polling after wake checks the wall deadline even if the monotonic alarm was asleep.
         self._queue_changed()
-        return self.jobs.list_all(material_id=material_id)
+        # EX2: topic sorting is shown on the Explore map, not in the wiki job list (``KbJobKind``).
+        return [job for job in self.jobs.list_all(material_id=material_id) if job.kind not in UNLISTED_KINDS]
 
     async def request_ingest(self, material_id: str, *, kind: JobKind = "ingest",
                              scope: IngestScope = "full") -> JobRecord:
@@ -534,7 +539,7 @@ class IngestService:
                 kb=self.kb, jobs=self.jobs, job_id=job_id, material_id=active.material_id, engine=engine,
                 detector=self.detector, decisions=self.decisions, text_layer=self.text_layer,
                 writer=self._writer, hook=self.hook, language=settings.language, limits=self.limits,
-                recognition=self.recognition,
+                recognition=self.recognition, topics=self.topics,
                 model=settings.model, effort=settings.effort,
                 scope=(await disk_call(self.job, job_id)).scope,
                 write_notes_automatically=settings.write_notes_automatically,
