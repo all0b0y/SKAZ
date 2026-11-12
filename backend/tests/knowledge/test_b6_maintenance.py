@@ -129,6 +129,7 @@ def _run(run_id: str, area_id: str | None, state: str, stop_reason: str | None =
             "query": "",
             "channels": ["continues", "branches", "search"],
             "active_area_ids": [],
+            "plan": [],
         }
     )
 

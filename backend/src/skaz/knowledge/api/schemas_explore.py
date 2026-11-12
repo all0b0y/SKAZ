@@ -24,6 +24,15 @@ KbFindingLabel = Literal["new", "extends", "contradicts", "branch", "covered"]
 KbFindingChannel = Literal["continues", "branches", "search"]
 
 
+class KbSearchPlanItem(BaseModel):
+    #: The own topic this item searches in (its hidden OpenAlex label applies), or ``None`` for plain text.
+    area_id: KbEntityId | None
+    #: What the user sees: the topic name or the typed text.
+    label: str
+    #: Exactly the words that leave the machine for this item.
+    terms: list[Annotated[str, Field(min_length=1, max_length=72)]] = Field(max_length=6)
+
+
 class KbFunnelStart(KbContractRequest):
     area_id: KbEntityId | None = None
     #: The search line leaves as one science topic (C0-1): the same limit, checked before a run exists
@@ -34,10 +43,52 @@ class KbFunnelStart(KbContractRequest):
         default_factory=lambda: cast(list[KbFindingChannel], ["continues", "branches", "search"])
     )
     candidate_ids: list[KbEntityId] = Field(default_factory=list, max_length=100)
+    #: EX2: "All your topics" — each of the largest top-level topics searches by its plan item.
+    all_topics: bool = False
+    #: EX2: the "Will search: …" line as the user left it (items removed/edited);
+    #: ``None`` = the plan as built.
+    plan: list[KbSearchPlanItem] | None = Field(default=None, max_length=8)
+
+
+class KbSearchPlanRequest(KbContractRequest):
+    """EX2: what a run would send, shown before it starts. Empty topic + empty text is not a plan."""
+
+    area_id: KbEntityId | None = None
+    query: Annotated[str, Field(max_length=SCIENCE_TOPIC_CHARS)] = ""
+    all_topics: bool = False
+
+
+class KbSearchPlan(BaseModel):
+    items: list[KbSearchPlanItem]
+    #: ``False`` with ``reason`` when there is nothing to search from (no topics yet, empty scope).
+    ready: bool
+    reason: str | None
+
+
+KbCandidateOutcome = Literal["dropped_by_rules", "not_fit", "undecided", "covered", "new", "fits"]
+
+
+class KbFunnelCandidate(BaseModel):
+    """EX2: one work the run looked at, with where it stopped and why (the funnel on view)."""
+
+    candidate_id: str
+    work: KbScienceWork
+    outcome: KbCandidateOutcome
+    #: Plain words: the rule that dropped it, "Doesn't fit: …", "Already in your wiki: <page>".
+    reason: str | None
+    #: The user said "It fits" (it goes on; the paid novelty check still waits for a click).
+    overridden: bool
+
+
+class KbFunnelCandidates(BaseModel):
+    items: list[KbFunnelCandidate]
+    next_cursor: str | None
 
 
 class KbFunnelRun(KbExploreJob):
     area_id: KbEntityId | None
+    #: EX2: the plan the run used (what left the machine).
+    plan: list[KbSearchPlanItem]
     task_id: KbEntityId | None
     query: str
     channels: list[KbFindingChannel]

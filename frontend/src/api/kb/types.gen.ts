@@ -237,14 +237,17 @@ export interface KbArea {
   recent_activity_at: string | null;
   new_findings: number;
   marked_materials: number;
+  materials: number;
   wiki_share: number;
   depth: "empty" | "thin" | "medium" | "dense";
   gap_reason: string | null;
 }
 
+/** EX2: the user creates an own topic by name (a subtopic with ``parent_id``). */
 export interface KbAreaCreate {
   name: string;
-  topic_ids: string[];
+  parent_id?: string | null;
+  topic_ids?: string[];
 }
 
 export interface KbAreaMap {
@@ -254,6 +257,8 @@ export interface KbAreaMap {
   total_pages: number;
   total_sources: number;
   worth_closing: KbArea[];
+  unsorted_materials: number;
+  labelling: KbTopicLabelling;
 }
 
 export interface KbAreaMaterial {
@@ -994,6 +999,7 @@ export interface KbFunnelRun {
   decision_provider: "local" | "openrouter_jev" | null;
   retry_at: string | null;
   area_id: string | null;
+  plan: KbSearchPlanItem[];
   task_id: string | null;
   query: string;
   channels: ("continues" | "branches" | "search")[];
@@ -1006,6 +1012,8 @@ export interface KbFunnelStart {
   dates?: KbDateWindow | null;
   channels?: ("continues" | "branches" | "search")[];
   candidate_ids?: string[];
+  all_topics?: boolean;
+  plan?: KbSearchPlanItem[] | null;
 }
 
 export interface KbGlossaryBlock {
@@ -1999,6 +2007,7 @@ export interface KbResearchCreate {
 
 export interface KbResearchDecide {
   decision: "allow" | "allow_chat" | "deny";
+  topics?: KbResearchTopic[] | null;
 }
 
 export interface KbResearchGrant {
@@ -2033,6 +2042,7 @@ export interface KbResearchTask {
   chat_id: string;
   origin_chat_id: string | null;
   area_id: string | null;
+  topics: KbResearchTopic[];
   run: KbExploreJob;
   finding_count: number;
   created_at: string;
@@ -2042,6 +2052,13 @@ export interface KbResearchTask {
 export interface KbResearchTasks {
   tasks: KbResearchTask[];
   next_cursor: string | null;
+}
+
+/** EX2: one topic on the Research task card — proposed by the chat agent, typed, or picked from the map. Search and the fit decision use exactly the card's topics, never the user's areas. */
+export interface KbResearchTopic {
+  text: string;
+  source: "proposed" | "typed" | "picked";
+  area_id?: string | null;
 }
 
 export interface KbResolve {
@@ -2182,6 +2199,12 @@ export interface KbSearchCounts {
   wiki: number;
   materials: number;
   chats: number;
+}
+
+export interface KbSearchPlanItem {
+  area_id: string | null;
+  label: string;
+  terms: string[];
 }
 
 export interface KbSearchResults {
@@ -2663,6 +2686,16 @@ export interface KbToolPart {
 export interface KbToolTarget {
   type: "material" | "page";
   id: string;
+}
+
+/** The background job that gives wiki materials their topic (EX2). ``not_ready``: no wiki engine to ask. */
+export interface KbTopicLabelling {
+  state: "idle" | "running" | "paused" | "not_ready";
+  job_id: string | null;
+  done: number;
+  total: number;
+  reason_code: string | null;
+  engine: string | null;
 }
 
 export interface KbTranslation {

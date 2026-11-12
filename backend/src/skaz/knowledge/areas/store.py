@@ -20,6 +20,7 @@ from ..api.schemas_areas import (
     KbReadMark,
     KbReadMarkUpdate,
     KbSignalEntity,
+    KbTopicLabelling,
 )
 from ..api.schemas_explore_common import KbAcknowledged, KbPublicationDate, KbReadMarkValue
 from ..errors import NotFound
@@ -882,6 +883,11 @@ class AreasStore:
             total_pages=total_pages,
             total_sources=total_sources,
             worth_closing=filtered_gaps,
+            # EX2 contract (step 0): X1 replaces these with the stored labelling state.
+            unsorted_materials=0,
+            labelling=KbTopicLabelling(
+                state="idle", job_id=None, done=0, total=0, reason_code=None, engine=None
+            ),
         )
 
     def _build_all_areas(
@@ -1082,6 +1088,7 @@ class AreasStore:
                 ),
                 "new_findings": findings_count,
                 "marked_materials": marked_count,
+                "materials": 0,  # EX2 contract (step 0): X1 counts labelled materials
                 "wiki_share": wiki_share,
                 "depth": depth,
                 "gap_reason": None,

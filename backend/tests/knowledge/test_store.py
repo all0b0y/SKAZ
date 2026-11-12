@@ -168,3 +168,34 @@ def test_core_v1_database_upgrades_to_quoted_citations_and_rescans_pages(tmp_pat
     assert "quote" in columns
     assert connection.execute("SELECT file_sha256 FROM pages").fetchone()[0] == ""  # re-read on next scan
     connection.close()
+
+
+def test_areas_v2_adds_own_topic_columns_and_material_topics_idempotently(tmp_path: Path) -> None:
+    """EX2 step 0: an areas v1 database gains the own-topic storage; re-running the step is safe."""
+    import sqlite3
+
+    from skaz.knowledge.store.schema import areas
+
+    path = tmp_path / "knowledge.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        "CREATE TABLE explore_areas (id TEXT PRIMARY KEY, parent_id TEXT REFERENCES explore_areas(id),"
+        " taxonomy_id TEXT, level TEXT NOT NULL, original_name TEXT NOT NULL, name TEXT NOT NULL,"
+        " hidden INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0);"
+        "INSERT INTO explore_areas(id, level, original_name, name) VALUES ('domains-2','domain','S','S');"
+    )
+    step = areas.UPGRADES[2]
+    step(connection)
+    step(connection)
+    row = connection.execute("SELECT mapping_state, mapped_name FROM explore_areas").fetchone()
+    assert row == ("pending", None)
+    connection.execute(
+        "INSERT INTO explore_area_materials(material_id, area_id, origin, labelled_at)"
+        " VALUES ('m1','domains-2','agent','t')"
+    )
+    connection.close()
+    db = KnowledgeDatabase(path)
+    try:
+        assert db.schema_versions()["areas"] == areas.VERSION == 2
+    finally:
+        db.close()

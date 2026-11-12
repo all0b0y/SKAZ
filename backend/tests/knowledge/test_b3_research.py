@@ -30,7 +30,7 @@ from skaz.knowledge.agents.engine import (
 from skaz.knowledge.agents.registry import EngineRegistry
 from skaz.knowledge.agents.tools import ToolContext
 from skaz.knowledge.api.contract_routes import ContractFailure
-from skaz.knowledge.api.schemas_areas import KbAreaMap, KbSignals
+from skaz.knowledge.api.schemas_areas import KbAreaMap, KbSignals, KbTopicLabelling
 from skaz.knowledge.api.schemas_explore import (
     KbFinding,
     KbFindingGroup,
@@ -169,7 +169,8 @@ class FakeFunnel:
             id=run_id, owner="research", state="running", stage="collect", stop_reason=None,
             budget=budget,
             counters=counters(), checkpoint=None, created_at=NOW, updated_at=NOW, decision_choices=[],
-            decision_provider=None, retry_at=None, area_id=body.area_id, task_id=task_id, query=body.query,
+            decision_provider=None, retry_at=None, area_id=body.area_id, task_id=task_id,
+            query=body.query, plan=[],
             channels=list(body.channels), active_area_ids=[],
         )
         return self.runs[run_id]
@@ -227,7 +228,9 @@ class FakeAreas:
     async def map(self, parent_id: str | None = None, include_hidden: bool = False) -> KbAreaMap:
         self.maps.append(parent_id)
         return KbAreaMap(parent_id=parent_id, breadcrumbs=[], areas=[], total_pages=0, total_sources=0,
-                         worth_closing=[])
+                         worth_closing=[], unsorted_materials=0,
+                         labelling=KbTopicLabelling(state="idle", job_id=None, done=0, total=0,
+                                                    reason_code=None, engine=None))
 
     async def signals(self, cursor: str | None = None, limit: int = 50) -> KbSignals:
         return KbSignals(signals=[], next_cursor=None)
@@ -635,7 +638,7 @@ def test_stop_notes_are_honest_and_the_report_without_findings_says_so() -> None
         "counters": counters(checked=5).model_dump(), "checkpoint": None, "created_at": NOW,
         "updated_at": NOW, "decision_choices": ["download_local"], "decision_provider": None,
         "retry_at": NOW, "area_id": None, "task_id": "t", "query": "q", "channels": ["search"],
-        "active_area_ids": [],
+        "active_area_ids": [], "plan": [],
     })
     assert "no model is chosen" in (stop_note(run) or "")
     limited = run.model_copy(update={"stop_reason": "openalex_daily_limit"})

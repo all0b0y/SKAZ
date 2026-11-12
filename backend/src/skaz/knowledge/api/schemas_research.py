@@ -24,6 +24,17 @@ class KbResearchCreate(KbContractRequest):
     dates: KbDateWindow | None = None
 
 
+class KbResearchTopic(KbContractRequest):
+    """EX2: one topic on the Research task card — proposed by the chat agent, typed, or picked from the map.
+
+    Search and the fit decision use exactly the card's topics, never the user's areas."""
+
+    text: Annotated[str, Field(min_length=1, max_length=72)]
+    source: Literal["proposed", "typed", "picked"]
+    #: A topic picked from the map: its hidden OpenAlex label narrows the search.
+    area_id: KbEntityId | None = None
+
+
 class KbResearchTask(BaseModel):
     id: KbEntityId
     title: str
@@ -31,6 +42,8 @@ class KbResearchTask(BaseModel):
     chat_id: str
     origin_chat_id: str | None
     area_id: KbEntityId | None
+    #: EX2: the topics the task searches and judges by (the card as allowed).
+    topics: list[KbResearchTopic]
     run: KbExploreJob
     finding_count: int
     created_at: datetime
@@ -70,6 +83,10 @@ class KbResearchPermission(BaseModel):
 
 class KbResearchDecide(KbContractRequest):
     decision: Literal["allow", "allow_chat", "deny"]
+    #: EX2: the card as the user left it (proposed kept/edited/removed, typed, picked);
+    #: ``None`` = as proposed.
+    #: At least one topic to allow; 4 x 72 chars fit the one search line.
+    topics: list[KbResearchTopic] | None = Field(default=None, min_length=1, max_length=4)
 
 
 class KbResearchGrant(BaseModel):

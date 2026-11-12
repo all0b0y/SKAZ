@@ -32,7 +32,7 @@ function tile(id: string, parent_id: string | null, level: KbArea['level'], name
   return {
     ...f.KbArea, id, parent_id, level, name, original_name: name, pages, sources, newest_source_year,
     taxonomy_id: `fixture-${id}`, has_children: level !== 'topic', pinned: false, new_findings: 0,
-    marked_materials: 0, children_covered: 0, children_total: 0, wiki_share: pages / 412,
+    marked_materials: 0, materials: 0, children_covered: 0, children_total: 0, wiki_share: pages / 412,
     depth: pages === 0 ? 'empty' : pages < 10 ? 'thin' : pages < 40 ? 'medium' : 'dense', gap_reason: null,
     topic_ids: [], recent_activity_at: null, ...options,
   };
@@ -75,7 +75,8 @@ const aiChildren = [
 ];
 const closing = [gapVerify, gapEval, thinFact];
 const homeMap: KbAreaMap = { parent_id: null, breadcrumbs: [], areas: [physical, social, life, health],
-  total_pages: 412, total_sources: 131, worth_closing: closing };
+  total_pages: 412, total_sources: 131, worth_closing: closing,
+  unsorted_materials: 0, labelling: { state: 'idle', job_id: null, done: 0, total: 0, reason_code: null, engine: null } };
 const csMap: KbAreaMap = { ...homeMap, parent_id: cs.id, breadcrumbs: [physical, cs], areas: csChildren };
 const aiMap: KbAreaMap = { ...homeMap, parent_id: ai.id, breadcrumbs: [physical, cs, ai], areas: aiChildren };
 

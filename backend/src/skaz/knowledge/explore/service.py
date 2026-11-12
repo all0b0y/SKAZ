@@ -1063,6 +1063,8 @@ class ExploreFunnel:
                 "query": str(request.get("query") or ""),
                 "channels": list(request.get("channels") or ()),
                 "active_area_ids": list(request.get("area_options") or ()),
+                # EX2 contract (step 0): X2 stores and returns the plan the run used.
+                "plan": list(request.get("plan") or ()),
             }
         )
 

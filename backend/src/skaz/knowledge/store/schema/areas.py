@@ -1,7 +1,19 @@
-"""0.4.0 areas storage contract. JSON shapes are the matching Kb models."""
+"""0.4.0 areas storage contract. JSON shapes are the matching Kb models.
+
+v2 (EX2, after G2): the map is the user's own topics (``level='custom'``, two levels by ``parent_id``). A wiki
+material has at most one topic (``explore_area_materials``; ``origin`` agent|user — the user's move
+wins). Each own topic carries a hidden OpenAlex label in ``explore_area_topics`` with ``mapping_state``
+and the name it was mapped
+for (``mapped_name``: a rename re-maps). Pre-EX2 OpenAlex rows stay (history of signals/runs), off the map.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Callable
 
 NAME = "areas"
-VERSION = 1
+VERSION = 2
 
 SQL = """
 CREATE TABLE IF NOT EXISTS explore_areas (
@@ -12,7 +24,9 @@ CREATE TABLE IF NOT EXISTS explore_areas (
     original_name TEXT NOT NULL,
     name TEXT NOT NULL,
     hidden INTEGER NOT NULL DEFAULT 0 CHECK(hidden IN (0,1)),
-    pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1))
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),
+    mapping_state TEXT NOT NULL DEFAULT 'pending' CHECK(mapping_state IN ('pending','mapped','no_match')),
+    mapped_name TEXT
 );
 CREATE TABLE IF NOT EXISTS explore_area_topics (
     area_id TEXT NOT NULL REFERENCES explore_areas(id) ON DELETE CASCADE,
@@ -24,6 +38,13 @@ CREATE TABLE IF NOT EXISTS explore_area_pages (
     page_id TEXT NOT NULL,
     PRIMARY KEY(area_id, page_id)
 );
+CREATE TABLE IF NOT EXISTS explore_area_materials (
+    material_id TEXT PRIMARY KEY,
+    area_id TEXT NOT NULL REFERENCES explore_areas(id) ON DELETE CASCADE,
+    origin TEXT NOT NULL CHECK(origin IN ('agent','user')),
+    labelled_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS explore_area_materials_area ON explore_area_materials(area_id);
 CREATE TABLE IF NOT EXISTS explore_read_marks (
     target_kind TEXT NOT NULL CHECK(target_kind IN ('material','finding')),
     target_id TEXT NOT NULL,
@@ -47,3 +68,27 @@ CREATE TABLE IF NOT EXISTS explore_signals (
 CREATE INDEX IF NOT EXISTS explore_signals_subject ON explore_signals(subject_kind, subject_id, occurred_at);
 CREATE INDEX IF NOT EXISTS explore_signals_object ON explore_signals(object_kind, object_id, occurred_at);
 """
+
+
+def _v2(connection: sqlite3.Connection) -> None:
+    """Idempotent (an ALTER commits on its own; a start cut before the version row re-runs this — R2-02)."""
+    present = {row[1] for row in connection.execute("PRAGMA table_info(explore_areas)")}
+    if "mapping_state" not in present:
+        connection.execute(
+            "ALTER TABLE explore_areas ADD COLUMN mapping_state TEXT NOT NULL DEFAULT 'pending'"
+            " CHECK(mapping_state IN ('pending','mapped','no_match'))"
+        )
+    if "mapped_name" not in present:
+        connection.execute("ALTER TABLE explore_areas ADD COLUMN mapped_name TEXT")
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS explore_area_materials (material_id TEXT PRIMARY KEY,"
+        " area_id TEXT NOT NULL REFERENCES explore_areas(id) ON DELETE CASCADE,"
+        " origin TEXT NOT NULL CHECK(origin IN ('agent','user')),"
+        " labelled_at TEXT NOT NULL)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS explore_area_materials_area ON explore_area_materials(area_id)"
+    )
+
+
+UPGRADES: dict[int, Callable[[sqlite3.Connection], None]] = {2: _v2}

@@ -38,6 +38,7 @@ from ..api.schemas_research import (
     KbResearchTask,
     KbResearchTasks,
     KbResearchToolResult,
+    KbResearchTopic,
 )
 from ..areas.protocols import AreasService
 from ..chats.model import Message, MessageInput, TextPart
@@ -257,6 +258,9 @@ class ResearchTasks:
             chat_id=row.chat_id,
             origin_chat_id=row.origin_chat_id,
             area_id=row.area_id,
+            # EX2 contract (step 0): X3 stores the card's topics with their source;
+            # pre-EX2 tasks were proposed.
+            topics=[KbResearchTopic(text=topic[:72], source="proposed") for topic in row.topics],
             run=_job(run),
             finding_count=run.counters.new,
             created_at=_when(row.created_at),

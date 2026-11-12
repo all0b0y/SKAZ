@@ -251,6 +251,7 @@ export const contractFixtures = {
       "branches",
       "search"
     ],
+    "plan": [],
     "active_area_ids": [
       "topic-rag"
     ],
@@ -477,6 +478,7 @@ export const contractFixtures = {
         "recent_activity_at": "2026-11-09T10:00:00Z",
         "new_findings": 9,
         "marked_materials": 12,
+        "materials": 12,
         "wiki_share": 0.4,
         "depth": "dense",
         "children_covered": 0,
@@ -486,6 +488,8 @@ export const contractFixtures = {
     ],
     "total_pages": 320,
     "worth_closing": [],
+    "unsorted_materials": 0,
+    "labelling": { "state": "idle", "job_id": null, "done": 0, "total": 0, "reason_code": null, "engine": null },
     "total_sources": 131
   },
   "KbArea": {
@@ -505,6 +509,7 @@ export const contractFixtures = {
     "recent_activity_at": "2026-11-09T10:00:00Z",
     "new_findings": 9,
     "marked_materials": 12,
+    "materials": 12,
     "wiki_share": 0.4,
     "depth": "dense",
     "children_covered": 0,
@@ -574,6 +579,7 @@ export const contractFixtures = {
     "chat_id": "chat-research-1",
     "origin_chat_id": null,
     "area_id": "area-ai",
+    "topics": [{ "text": "LLM agents", "source": "proposed", "area_id": null }],
     "run": {
       "id": "run-1",
       "state": "running",
@@ -630,6 +636,7 @@ export const contractFixtures = {
         "chat_id": "chat-research-1",
         "origin_chat_id": null,
         "area_id": "area-ai",
+        "topics": [{ "text": "LLM agents", "source": "proposed", "area_id": null }],
         "run": {
           "id": "run-1",
           "state": "running",
@@ -729,6 +736,7 @@ export const contractFixtures = {
           "recent_activity_at": "2026-11-09T10:00:00Z",
           "new_findings": 9,
           "marked_materials": 12,
+          "materials": 12,
           "wiki_share": 0.4,
           "depth": "dense",
           "children_covered": 0,
@@ -738,6 +746,8 @@ export const contractFixtures = {
       ],
       "total_pages": 320,
       "worth_closing": [],
+      "unsorted_materials": 0,
+      "labelling": { "state": "idle", "job_id": null, "done": 0, "total": 0, "reason_code": null, "engine": null },
       "total_sources": 131
     },
     "findings": {
@@ -864,6 +874,7 @@ export const contractFixtures = {
           "chat_id": "chat-research-1",
           "origin_chat_id": null,
           "area_id": "area-ai",
+          "topics": [{ "text": "LLM agents", "source": "proposed", "area_id": null }],
           "run": {
             "id": "run-1",
             "state": "running",

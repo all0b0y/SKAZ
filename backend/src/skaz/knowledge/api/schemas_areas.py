@@ -1,4 +1,9 @@
-"""OpenAlex map, explicit marks and factual signal contracts (B4)."""
+"""Map of the user's own topics, explicit marks and factual signal contracts (B4; EX2 redesign after G2).
+
+EX2: the map is built from the user's own two-level topics (``level == "custom"``), stored when a material is
+labelled; reading the map never calls a model or the network. OpenAlex topic ids stay a hidden search
+label of a topic in the backend and never reach the UI (``topic_ids`` is empty for own topics).
+"""
 
 from __future__ import annotations
 
@@ -27,12 +32,14 @@ class KbArea(BaseModel):
     id: KbEntityId
     parent_id: KbEntityId | None
     taxonomy_id: str | None
-    #: Approved v3 opens on OpenAlex domains; a custom area collects topics from several branches.
+    #: EX2: ``custom`` = one of the user's own topics (topic or subtopic by ``parent_id``). The OpenAlex
+    #: levels     #: remain only for rows of 0.4.0 builds before EX2 (hidden, never on the map).
     level: Literal["domain", "field", "subfield", "topic", "custom"]
     name: str
     original_name: str
     hidden: bool
     pinned: bool
+    #: EX2: always empty for own topics — the hidden OpenAlex label never leaves the backend.
     topic_ids: list[str]
     has_children: bool
     #: "5 of 14 topics": children with pages, and all children in the taxonomy.
@@ -44,10 +51,27 @@ class KbArea(BaseModel):
     recent_activity_at: datetime | None
     new_findings: int
     marked_materials: int
+    #: EX2: wiki materials labelled with this topic (subtopics included); ``wiki_share`` is its share of all.
+    materials: int
     wiki_share: Annotated[float, Field(ge=0, le=1)]
     depth: Literal["empty", "thin", "medium", "dense"]
     #: A gap tile's factual reason ("Next to LLM agents · no pages yet"); ``null`` for covered areas.
     gap_reason: str | None
+
+
+class KbTopicLabelling(BaseModel):
+    """The background job that gives wiki materials their topic (EX2).
+
+    ``not_ready``: no wiki engine to ask."""
+
+    state: Literal["idle", "running", "paused", "not_ready"]
+    job_id: KbEntityId | None
+    done: int
+    total: int
+    #: A job stop reason / contract error code when paused or not ready (``engine_limit``, ``not_ready``…).
+    reason_code: str | None
+    #: The engine that labels (the wiki engine of Settings → Wiki), for "≈5 calls on Codex".
+    engine: str | None
 
 
 class KbAreaMap(BaseModel):
@@ -56,8 +80,11 @@ class KbAreaMap(BaseModel):
     areas: list[KbArea]
     total_pages: int
     total_sources: int
-    #: Gaps and thin areas anywhere below ``parent_id``, so not necessarily among ``areas``.
+    #: EX2: deprecated, always empty ("Worth closing" was removed with the OpenAlex domains map).
     worth_closing: list[KbArea]
+    #: EX2: wiki materials with no topic yet, and the job that labels them (started only by the user's click).
+    unsorted_materials: int
+    labelling: KbTopicLabelling
 
 
 class KbAreaUpdate(KbContractRequest):
@@ -67,8 +94,30 @@ class KbAreaUpdate(KbContractRequest):
 
 
 class KbAreaCreate(KbContractRequest):
+    """EX2: the user creates an own topic by name (a subtopic with ``parent_id``)."""
+
     name: Annotated[str, Field(min_length=1, max_length=200)]
-    topic_ids: list[str] = Field(min_length=1, max_length=100)
+    parent_id: KbEntityId | None = None
+    #: Pre-EX2 custom areas from OpenAlex topics; own topics leave it empty.
+    topic_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+class KbAreaMerge(KbContractRequest):
+    """EX2: merge this topic into another; its materials and subtopics move there."""
+
+    into_id: KbEntityId
+
+
+class KbMaterialTopicSet(KbContractRequest):
+    """EX2: the user moves a material to one of their topics (wins over the agent's label)."""
+
+    area_id: KbEntityId
+
+
+class KbMaterialTopic(BaseModel):
+    material_id: str
+    area_id: KbEntityId | None
+    origin: Literal["agent", "user"] | None
 
 
 class KbReadMarkUpdate(KbContractRequest):
