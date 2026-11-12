@@ -172,3 +172,27 @@ describe('EX2 X5 · read only when finished work is seen', () => {
     expect(base.requestMock).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', path: '/kb/chats/c1/read' }));
   });
 });
+
+
+describe('EX2 X5 · visible research funnel', () => {
+  it('shows found → fit → new and explains dropped works; It fits never starts a paid check', async () => {
+    const user = userEvent.setup();
+    const { base, fake } = setup(<ResearchTaskView initialTask={done} />);
+    vi.spyOn(fake.research, 'resume');
+    const request = base.requestMock.getMockImplementation()!;
+    const dropped = { ...f.KbFunnelCandidate, candidate_id: 'dropped', outcome: 'not_fit', reason: 'Does not fit the card topics', overridden: false };
+    base.requestMock.mockImplementation(async (req) => {
+      if (req.path.endsWith('/candidates')) return { ok: true, status: 200, data: { items: [dropped], next_cursor: null } };
+      if (req.path.endsWith('/dropped/fits')) return { ok: true, status: 200, data: { ...dropped, outcome: 'fits', overridden: true } };
+      return request(req);
+    });
+    const c = done.run.counters;
+    expect(screen.getByText(`${c.checked} found → ${c.on_topic} fit → ${c.new} new`)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show considered works' }));
+    expect(await screen.findByText(dropped.reason)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'It fits' }));
+    expect(await screen.findByText('Fits · novelty not checked')).toBeInTheDocument();
+    expect(fake.research.resume).not.toHaveBeenCalled();
+    expect(base.requestMock).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', path: '/kb/explore/runs' }));
+  });
+});

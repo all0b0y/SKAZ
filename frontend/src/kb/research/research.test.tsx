@@ -54,6 +54,10 @@ function renderWithScene(scene?: SceneName, ui?: React.ReactNode) {
   const base = createFakeBridge(chatWorld());
   const services = createServices(base.bridge, localStorage, { capture: null });
   const store = bindResearchApi(services.client, fake);
+  const request = base.requestMock.getMockImplementation()!;
+  base.requestMock.mockImplementation(async (req) => req.path === '/kb/research/proposals'
+    ? { ok: true, status: 200, data: { title: 'Research topics', topics: [{ text: 'RAG evaluation', source: 'proposed' }] } }
+    : request(req));
   const view = render(
     <KbServicesProvider services={services}>
       {ui ?? (
@@ -72,6 +76,10 @@ function renderResearchOnly(fake: FakeKb, node: React.ReactNode) {
   const base = createFakeBridge(chatWorld());
   const services = createServices(base.bridge, localStorage, { capture: null });
   const store = bindResearchApi(services.client, fake);
+  const request = base.requestMock.getMockImplementation()!;
+  base.requestMock.mockImplementation(async (req) => req.path === '/kb/research/proposals'
+    ? { ok: true, status: 200, data: { title: 'Research topics', topics: [{ text: 'RAG evaluation', source: 'proposed' }] } }
+    : request(req));
   const view = render(
     <KbServicesProvider services={services}>
       {node}
@@ -153,7 +161,7 @@ describe('F2 · 02 · New research task template & starters', () => {
     expect(screen.getByText('Up to 30 candidates checked against your wiki')).toBeInTheDocument();
 
     const promptInput = screen.getByRole('textbox', { name: 'Describe what you want to find or learn' });
-    const startBtn = screen.getByRole('button', { name: 'Start research' });
+    const startBtn = screen.getByRole('button', { name: 'Suggest topics' });
     expect(startBtn).toBeDisabled();
 
     // Starter 1: Something new for my wiki
@@ -172,6 +180,7 @@ describe('F2 · 02 · New research task template & starters', () => {
     expect(promptInput).toHaveValue('Find recent research on reliable RAG evaluation');
 
     await user.click(startBtn);
+    await user.click(await screen.findByRole('button', { name: 'Start research' }));
 
     await waitFor(() => {
       expect(fake.research.create).toHaveBeenCalledWith(
@@ -494,7 +503,7 @@ describe('F2 · task list in the Chats panel and centre routing', () => {
     const side = screen.getByRole('region', { name: 'Chats' });
 
     const list = await within(side).findByRole('region', { name: 'Research tasks' });
-    await user.click(within(list).getByRole('button', { name: 'Verify wiki claims' }));
+    await user.click(within(list).getByRole('button', { name: /^Verify wiki claims/ }));
     expect(store.getState().mode).toBe('task');
     expect(store.getState().activeTaskId).toBe('task-1');
     expect(screen.getByRole('region', { name: 'Research task' })).toBeInTheDocument();
@@ -557,7 +566,7 @@ describe('F2 · 06–08 · Permission card, compact pointer, and denied line in 
     expect(within(section).getByText(/Only these topics and source identifiers go to scientific databases, never your description/)).toBeInTheDocument();
     // Decision C0-1: the card lists exactly what would leave this computer.
     const topics = within(section).getByRole('list', { name: 'Topics that will be searched' });
-    expect(within(topics).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+    expect(within(topics).getAllByRole('textbox').map((input) => (input as HTMLInputElement).value)).toEqual([
       'claim verification methods',
       'fact-checking knowledge bases',
     ]);
@@ -565,7 +574,7 @@ describe('F2 · 06–08 · Permission card, compact pointer, and denied line in 
     await user.click(within(section).getByRole('button', { name: 'Allow once' }));
 
     await waitFor(() => {
-      expect(fake.research.decide).toHaveBeenCalledWith('permission-1', { decision: 'allow' });
+      expect(fake.research.decide).toHaveBeenCalledWith('permission-1', { decision: 'allow', topics: perm.topics.map((text) => ({ text, source: 'proposed', area_id: null })) });
     });
 
     // Renders compact pointer (07)
@@ -595,7 +604,7 @@ describe('F2 · 06–08 · Permission card, compact pointer, and denied line in 
     await user.click(screen.getByRole('button', { name: 'Allow in this chat' }));
 
     await waitFor(() => {
-      expect(fake.research.decide).toHaveBeenCalledWith('permission-1', { decision: 'allow_chat' });
+      expect(fake.research.decide).toHaveBeenCalledWith('permission-1', { decision: 'allow_chat', topics: perm.topics.map((text) => ({ text, source: 'proposed', area_id: null })) });
     });
 
     // Chat grant chip appears and can be revoked via DELETE /kb/chats/{chat_id}/research-grant
