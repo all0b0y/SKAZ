@@ -107,6 +107,21 @@ describe('EX2 exact search plan and scope', () => {
       plan: [{ area_id: 'ai', label: 'AI agents', terms: ['agent harnesses', 'Harness'] }] }));
   });
 
+  it('keeps an edited preview across temporarily hiding Explore', async () => {
+    vi.useFakeTimers();
+    const kb = ex2Kb();
+    const view = render(<ExploreSection clients={kb} />);
+    await flush();
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit search plan' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search term 1 for AI agents' }), { target: { value: 'only this edited term' } });
+    view.rerender(<ExploreSection clients={kb} hidden />);
+    view.rerender(<ExploreSection clients={kb} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    expect(screen.getByText(/Will search:/)).toHaveTextContent('only this edited term');
+    expect(kb.discovery.plan).toHaveBeenCalledTimes(1);
+  });
+
   it('disables empty/all-removed plans with a reason and never starts an empty run', async () => {
     const kb = ex2Kb();
     kb.discovery.plan.mockResolvedValue({ ready: false, reason: 'Choose a topic or enter a query.', items: [] });

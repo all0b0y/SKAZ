@@ -15,6 +15,7 @@ describe('EX2 topic editing', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(kb.areas.create).toHaveBeenCalledWith({ name: 'Meetings', parent_id: null }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('navigation', { name: 'Explore breadcrumbs' })).toHaveTextContent('Meetings'));
   });
 
   it('renames an own topic from its menu and updates the current path', async () => {
@@ -55,6 +56,7 @@ describe('EX2 topic editing', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Merge' }));
     await waitFor(() => expect(kb.topics.merge).toHaveBeenCalledWith('ai', 'ml'));
     await waitFor(() => expect(screen.getByRole('navigation', { name: 'Explore breadcrumbs' })).toHaveTextContent(roots[1]!.name));
+    expect(screen.getByRole('navigation', { name: 'Explore breadcrumbs' })).not.toHaveTextContent('AI agents');
   });
 
   it('keeps a failed edit open, preserves the name and hides raw provider detail', async () => {
