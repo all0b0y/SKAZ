@@ -1,4 +1,9 @@
-"""``AreasService`` implementation for SKAZ 0.4.0 (B4)."""
+"""``AreasService`` implementation for SKAZ 0.4.0 (B4; EX2: the map of the user's own topics).
+
+EX2: ``map`` reads stored state only — never a model, never the network. Materials get their topic from the
+wiki agent (at the end of ingest, or the "Sort materials" job the user starts); each topic's hidden OpenAlex
+label is made in the background when topics change (``mapping``).
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,6 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Literal, TypeVar, cast
 
 from ...native_io import disk_call
-from ..agents.prompting import untrusted_block
 from ..api.contract_routes import ContractFailure
 from ..api.schemas_areas import (
     KbArea,
@@ -27,31 +31,30 @@ from ..api.schemas_areas import (
     KbTopicLabelling,
 )
 from ..api.schemas_explore_common import KbAcknowledged, KbPublicationDate, KbReadMarkValue
-from ..decisions.protocol import ChoiceAnswer, ChoiceQuestion, DecisionLayer, Undecided
+from ..decisions.protocol import DecisionLayer
 from ..errors import NotFound
 from ..markdown.source import MaterialKind
-from ..science.errors import stop_failure
-from ..science.protocols import ScienceClient, ScienceStop
+from ..science.protocols import ScienceClient
 from ..service import KnowledgeService
-from .protocols import AreaDirectory, SignalDraft, SignalRecorder
+from .labelling import MaterialLabeller, TopicLabels, TopicSorting
+from .mapping import TopicMapper, TopicSearch
+from .protocols import AreaDirectory, SignalDraft, SignalRecorder, TopicDirectory
 from .signals import SignalStore
-from .store import AreaRow, AreasStore
+from .store import AreasStore
+from .topics import TopicStore
 
 if TYPE_CHECKING:
     from ..api.schemas_repeats import KbMaterialRepeats
     from ..explore.protocols import ExploreService
     from ..freshness.protocols import PublicationDates
+    from ..ingest.protocols import TopicLabeller
+    from ..ingest.service import IngestService
     from ..maintenance.protocols import FreshnessMarkReader
     from ..repeats.protocols import RepeatSummaries
+    from ..wiki.jobs import WikiJobs
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
-OFF_TOPIC_OPTION = "None of these: off-topic"
-#: One call to the map asks the decision model about at most this many pages (a batch, as in the funnel).
-PLACEMENT_BATCH = 30
-PLACEMENT_UNDECIDED_STOP = 5
-#: Pages the model called off-topic at a level, kept so the same question is never paid for twice.
-_OFF_TOPIC_KEY = "explore.areas.off_topic"
 _UNKNOWN_PUBLICATION = KbPublicationDate(
     year=None,
     date=None,
@@ -83,12 +86,20 @@ class ExploreAreasService:
         explore: ExploreService | Callable[[], ExploreService | None] | None = None,
         finding_exists: Callable[[str], bool] | None = None,
         new_findings_by_area: Callable[[], Mapping[str, int]] | None = None,
+        ingest: IngestService | Callable[[], IngestService | None] | None = None,
+        wiki_jobs: WikiJobs | Callable[[], WikiJobs | None] | None = None,
+        topic_search: Callable[[], TopicSearch | None] | None = None,
     ) -> None:
+        """``science`` is no longer read by the map (EX2: no taxonomy on GET); the hidden topic label uses
+        ``topic_search`` (B1's free OpenAlex ``/topics`` search) and ``decisions``. ``ingest`` and
+        ``wiki_jobs`` run the "Sort materials" job on the wiki agent."""
         self.kb = kb
         self._signals = SignalStore(kb.db)
         self.recorder: SignalRecorder = self._signals
         self.store = AreasStore(kb, self._signals)
         self.directory: AreaDirectory = self.store
+        #: EX2: the largest topics and their main concepts (X2's "All your topics" plan).
+        self.topic_directory: TopicDirectory = self.store
         self._science = science
         self._decisions = decisions
         self._publication_dates = publication_dates
@@ -97,6 +108,24 @@ class ExploreAreasService:
         self._explore = explore
         self._finding_exists = finding_exists
         self._new_findings_by_area = new_findings_by_area
+        self._ingest = ingest
+        self._wiki_jobs = wiki_jobs
+        self.topic_store: TopicStore = self.store.topic_store
+        self.mapper = TopicMapper(
+            self.topic_store,
+            search=lambda: topic_search() if topic_search is not None else None,
+            decisions=lambda: _given(self._decisions),
+        )
+        labels = TopicLabels(self.topic_store)
+        #: ``IngestService.topics``: the material's topic at the end of its wiki processing.
+        self.labeller: TopicLabeller = MaterialLabeller(labels, self.mapper.schedule)
+        self.sorting = TopicSorting(
+            kb,
+            labels,
+            ingest=lambda: _given(self._ingest),
+            wiki_jobs=lambda: _given(self._wiki_jobs),
+            after_new_topics=self.mapper.schedule,
+        )
 
     def _ensure_ready(self) -> None:
         """No library yet → ``not_ready`` (like every 0.4.0 slice), not an empty map that looks like a
@@ -131,121 +160,6 @@ class ExploreAreasService:
         return self.store.move_finding_mark_to_material(finding_id, material_id)
 
     # -- Internal helpers for protocol queries -------------------------------
-
-    async def _sync_taxonomy_level(self, parent_id: str | None) -> None:
-        parent_row: AreaRow | None = None
-        if parent_id is not None:
-            parent_row = await disk_call(self.store.get_area_row, parent_id)
-            if parent_row.level in ("topic", "custom"):
-                return
-        science = _given(self._science)
-        if science is None:
-            raise ContractFailure(503, "not_ready")
-        try:
-            if parent_row is None:
-                nodes = await science.taxonomy(None)
-            else:
-                lookup_id = parent_row.taxonomy_id or parent_row.id
-                nodes = await science.taxonomy(lookup_id)
-                if not nodes and parent_row.taxonomy_id and parent_row.taxonomy_id != parent_row.id:
-                    nodes = await science.taxonomy(parent_row.id)
-        except ScienceStop as stop:
-            # A level loaded before keeps its areas (the taxonomy changes rarely; nothing claims a
-            # refresh). A level never loaded has nothing true to show: its honest reason, never an empty
-            # map that looks like a result (review R1-08).
-            children = await disk_call(self.store.children_of, parent_id, include_hidden=True)
-            if any(child.taxonomy_id is not None for child in children):
-                logger.info("Taxonomy level not refreshed: %s", stop.stop_reason)
-                return
-            raise stop_failure(stop) from stop
-        if nodes:
-            await disk_call(self.store.sync_taxonomy_nodes, parent_id, nodes)
-
-    def _page_prompt_state(self, page_id: str) -> str | None:
-        record = self.kb.page_repo.get(page_id)
-        if record is None:
-            return None
-        blocks = self.kb.page_repo.blocks(page_id)
-        first = next((b.text for b in blocks if b.text.strip()), "")[:200]
-        aliases = f" (aliases: {', '.join(record.aliases)})" if record.aliases else ""
-        return f"{record.title}{aliases}: {first}"
-
-    async def _place_pages_at_level(self, parent_id: str | None) -> None:
-        await disk_call(self.store.place_pages_from_source_topics)
-        children = await disk_call(self.store.children_of, parent_id, include_hidden=False)
-        candidates = [c for c in children if c.level != "custom"]
-        if not candidates:
-            return
-        decisions = _given(self._decisions)
-        if decisions is None:
-            return
-
-        if parent_id is None:
-            page_ids = await disk_call(self.store.unplaced_wiki_page_ids)
-        else:
-            page_ids = await disk_call(self.store.direct_wiki_page_ids, parent_id)
-        if not page_ids:
-            return
-
-        options = [c.original_name for c in candidates] + [OFF_TOPIC_OPTION]
-        by_option = {c.original_name: c.id for c in candidates}
-        areas_text = "\n".join(c.original_name for c in candidates)
-
-        level_key = parent_id or ""
-        off_topic = await disk_call(self._off_topic_pages, level_key)
-        asked = 0
-        undecided_in_a_row = 0
-        newly_off_topic: list[str] = []
-        for page_id in page_ids:
-            if page_id in off_topic:
-                continue
-            if asked >= PLACEMENT_BATCH:
-                break
-            page_text = await disk_call(self._page_prompt_state, page_id)
-            if not page_text:
-                continue
-            state = "\n".join(
-                [
-                    untrusted_block("wiki page", page_text),
-                    untrusted_block("areas", areas_text),
-                ]
-            )
-            question = ChoiceQuestion(
-                state=state,
-                question="Which area does this wiki page belong to?",
-                options=options,
-            )
-            asked += 1
-            try:
-                answer = await decisions.ask(question)
-            except Exception:
-                answer = Undecided("the decision layer failed")
-            undecided_in_a_row = undecided_in_a_row + 1 if isinstance(answer, Undecided) else 0
-            if isinstance(answer, ChoiceAnswer) and answer.option == OFF_TOPIC_OPTION:
-                newly_off_topic.append(page_id)
-            elif isinstance(answer, ChoiceAnswer) and answer.option in by_option:
-                chosen_id = by_option[answer.option]
-                await disk_call(
-                    self.store.assign_page,
-                    chosen_id,
-                    page_id,
-                    replace_area_id=parent_id,
-                )
-            if undecided_in_a_row >= PLACEMENT_UNDECIDED_STOP:
-                break  # the model is unavailable or unsure: do not keep asking on this call
-        if newly_off_topic:
-            await disk_call(self._remember_off_topic, level_key, newly_off_topic)
-
-    def _off_topic_pages(self, level_key: str) -> set[str]:
-        raw = self.kb.settings.get(_OFF_TOPIC_KEY, {})
-        pages = raw.get(level_key, []) if isinstance(raw, dict) else []
-        return {str(p) for p in pages} if isinstance(pages, list) else set()
-
-    def _remember_off_topic(self, level_key: str, page_ids: Sequence[str]) -> None:
-        raw = self.kb.settings.get(_OFF_TOPIC_KEY, {})
-        stored: dict[str, list[str]] = dict(raw) if isinstance(raw, dict) else {}
-        stored[level_key] = sorted({*stored.get(level_key, []), *page_ids})
-        self.kb.settings.set(_OFF_TOPIC_KEY, stored)
 
     async def _fetch_publication_dates(
         self, material_ids: Sequence[str] | None = None
@@ -293,9 +207,9 @@ class ExploreAreasService:
     # -- AreasService Protocol -----------------------------------------------
 
     async def map(self, parent_id: str | None = None, include_hidden: bool = False) -> KbAreaMap:
+        """Stored state only: no model call, no network (EX2)."""
         self._ensure_ready()
-        await self._sync_taxonomy_level(parent_id)
-        await self._place_pages_at_level(parent_id)
+        labelling = await disk_call(self.sorting.state)
         pub_dates = await self._fetch_publication_dates()
         finding_counts = await self._fetch_new_findings_counts()
         return await disk_call(
@@ -304,30 +218,36 @@ class ExploreAreasService:
             include_hidden=include_hidden,
             publication_dates=pub_dates,
             new_findings_by_area=finding_counts,
+            labelling=labelling,
         )
 
     async def create(self, body: KbAreaCreate) -> KbArea:
         self._ensure_ready()
         pub_dates = await self._fetch_publication_dates()
         finding_counts = await self._fetch_new_findings_counts()
-        return await disk_call(
+        area = await disk_call(
             self.store.create_custom,
             body,
             publication_dates=pub_dates,
             new_findings_by_area=finding_counts,
         )
+        self.mapper.schedule()
+        return area
 
     async def update(self, area_id: str, body: KbAreaUpdate) -> KbArea:
         self._ensure_ready()
         pub_dates = await self._fetch_publication_dates()
         finding_counts = await self._fetch_new_findings_counts()
-        return await disk_call(
+        area = await disk_call(
             self.store.update_area,
             area_id,
             body,
             publication_dates=pub_dates,
             new_findings_by_area=finding_counts,
         )
+        if body.name is not None:
+            self.mapper.schedule()  # a renamed topic gets its hidden label again
+        return area
 
     async def delete(self, area_id: str) -> KbAcknowledged:
         self._ensure_ready()
@@ -455,15 +375,35 @@ class ExploreAreasService:
             require_existing_mark=not has_provider,
         )
 
-    # EX2 step 0 — X1 implements; until then the routes answer an honest 503 not_ready.
+    # -- EX2: own topics ----------------------------------------------------------
+
     async def sort_topics(self) -> KbTopicLabelling:
-        raise ContractFailure(503, "not_ready")
+        """The user's click: the wiki agent sorts unsorted wiki materials (~20 per call), or a sorting
+        paused at a usage limit continues. No wiki agent → 503 ``not_ready`` (the map says why)."""
+        self._ensure_ready()
+        return await self.sorting.start()
 
     async def merge(self, area_id: str, body: KbAreaMerge) -> KbArea:
-        raise ContractFailure(503, "not_ready")
+        self._ensure_ready()
+        await disk_call(self.topic_store.merge, area_id, body.into_id)
+        self.mapper.schedule()  # the merged topic gets its hidden label again
+        pub_dates = await self._fetch_publication_dates()
+        finding_counts = await self._fetch_new_findings_counts()
+        return await disk_call(
+            self.store.get_area,
+            body.into_id,
+            publication_dates=pub_dates,
+            new_findings_by_area=finding_counts,
+        )
 
     async def set_material_topic(self, material_id: str, body: KbMaterialTopicSet) -> KbMaterialTopic:
-        raise ContractFailure(503, "not_ready")
+        """The user's move wins over the agent's label; re-processing the material keeps it."""
+        self._ensure_ready()
+        return await disk_call(self.topic_store.move, material_id, body.area_id)
+
+    async def map_topics(self, area_ids: Sequence[str] | None = None) -> int:
+        """Make the missing hidden labels now (X2 may call it before a search inside a topic)."""
+        return await self.mapper.map_pending(area_ids)
 
     async def signals(self, cursor: str | None = None, limit: int = 50) -> KbSignals:
         self._ensure_ready()

@@ -18,7 +18,6 @@ from skaz.knowledge.api.schemas_areas import (
 )
 from skaz.knowledge.areas.protocols import (
     AreaDirectory,
-    AreasService,
     SignalDraft,
     SignalRecorder,
 )
@@ -161,7 +160,7 @@ def test_areas_store_directory_custom_areas_and_read_marks(ready: KnowledgeServi
     # Custom area creation & deletion
     custom = store.create_custom(KbAreaCreate(name="My Agent Stack", topic_ids=["topic-rag", "topic-agents"]))
     assert custom.level == "custom"
-    assert custom.topic_ids == ["topic-rag", "topic-agents"]
+    assert custom.topic_ids == []  # EX2: the hidden OpenAlex label never reaches the UI
     assert list(directory.topics(custom.id)) == ["topic-rag", "topic-agents"]
     store.delete_area(custom.id)
     with pytest.raises(NotFound):
@@ -214,338 +213,10 @@ def test_areas_store_directory_custom_areas_and_read_marks(ready: KnowledgeServi
 
     # Signals recorded superseding chain for read marks
     all_signals = signals.list_signals(limit=20).signals
-    mat_signals = [
-        s for s in all_signals if s.object.kind == "material" and s.object.id == mat_id
-    ]
+    mat_signals = [s for s in all_signals if s.object.kind == "material" and s.object.id == mat_id]
     assert len(mat_signals) >= 3
     assert mat_signals[0].supersedes_id == mat_signals[1].id
     assert mat_signals[1].supersedes_id == mat_signals[2].id
-
-
-async def test_areas_service_map_decision_placement_and_protocols(ready: KnowledgeService) -> None:
-    from collections.abc import Mapping, Sequence
-
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-
-    from skaz.knowledge.api import areas as areas_router
-    from skaz.knowledge.api.schemas_explore_common import KbMaterialRef, KbPublicationDate
-    from skaz.knowledge.api.schemas_repeats import KbMaterialRepeats
-    from skaz.knowledge.decisions.protocol import (
-        Answer,
-        ChoiceAnswer,
-        ChoiceQuestion,
-        DeciderId,
-        Question,
-    )
-    from skaz.knowledge.markdown.page import Block, Cite, PageDocument, PageMeta
-    from skaz.knowledge.markdown.source import FragmentInput, Origin
-    from skaz.knowledge.science.protocols import TaxonomyNode
-
-    # Create materials & wiki pages (plus a study deck page that must be excluded from the map!)
-    folder_id = ready.folders()[0].id
-    m_rag = ready.create_material(
-        folder_id,
-        "RAG beyond the basics",
-        "web",
-        [FragmentInput(text="Retrieval-augmented generation grounds claims.")],
-        origin=Origin(type="url", url="https://example.org/rag"),
-    ).manifest.id
-    m_agents = ready.create_material(
-        folder_id,
-        "Reflexion Agents",
-        "pdf",
-        [FragmentInput(text="Agents use tools and self-reflection.")],
-        origin=Origin(type="url", url="https://example.org/agents", topic_ids=["topic-agents"]),  # type: ignore[call-arg]
-    ).manifest.id
-    m_fact = ready.create_material(
-        folder_id,
-        "Hallucination survey",
-        "pdf",
-        [FragmentInput(text="Factuality in language models.")],
-        origin=Origin(type="url", url="https://example.org/fact", topic_ids=["topic-fact"]),  # type: ignore[call-arg]
-    ).manifest.id
-
-    ready.create_page(
-        PageDocument(
-            meta=PageMeta(
-                skaz_id="page-rag",
-                kind="concept",
-                title="Retrieval-augmented generation",
-                sources=(m_rag,),
-            ),
-            parts=[
-                Block.create(
-                    "c-1",
-                    "from_source",
-                    "RAG combines retrieval with generation.",
-                    cites=(Cite(material_id=m_rag, seg=1),),
-                ),
-            ],
-        )
-    )
-    ready.create_page(
-        PageDocument(
-            meta=PageMeta(
-                skaz_id="page-agents",
-                kind="concept",
-                title="LLM agents",
-                sources=(m_agents,),
-            ),
-            parts=[
-                Block.create(
-                    "c-1",
-                    "from_source",
-                    "Agents call tools.",
-                    cites=(Cite(material_id=m_agents, seg=1),),
-                ),
-            ],
-        )
-    )
-    ready.create_page(
-        PageDocument(
-            meta=PageMeta(
-                skaz_id="page-fact",
-                kind="concept",
-                title="Factuality",
-                sources=(m_fact,),
-            ),
-            parts=[
-                Block.create(
-                    "c-1",
-                    "from_source",
-                    "Factuality checks.",
-                    cites=(Cite(material_id=m_fact, seg=1),),
-                ),
-            ],
-        )
-    )
-    # Study deck page: must NOT count in total_pages or area pages
-    ready.create_page(
-        PageDocument(
-            meta=PageMeta(
-                skaz_id="deck-1",
-                kind="deck",
-                title="RAG Deck",
-                sources=(m_rag,),
-            ),
-            parts=[],
-        )
-    )
-
-    class FakeScience:
-        def __init__(self) -> None:
-            self.tree: dict[str | None, list[TaxonomyNode]] = {
-                None: [
-                    TaxonomyNode("domain-physical", None, "domain", "Physical Sciences", 2),
-                    TaxonomyNode("domain-social", None, "domain", "Social Sciences", 1),
-                ],
-                "domain-physical": [
-                    TaxonomyNode("field-cs", "domain-physical", "field", "Computer Science", 1),
-                ],
-                "field-cs": [
-                    TaxonomyNode("area-ai", "field-cs", "subfield", "Artificial Intelligence", 4),
-                ],
-                "area-ai": [
-                    TaxonomyNode("topic-rag", "area-ai", "topic", "Retrieval-augmented generation", 0),
-                    TaxonomyNode("topic-agents", "area-ai", "topic", "LLM agents and tool use", 0),
-                    TaxonomyNode("topic-fact", "area-ai", "topic", "Factuality and hallucination", 0),
-                    TaxonomyNode("topic-verify", "area-ai", "topic", "Self-correction and verification", 0),
-                ],
-            }
-
-        async def taxonomy(self, parent_id: str | None = None) -> Sequence[TaxonomyNode]:
-            return self.tree.get(parent_id, [])
-
-    class FakeDecisionLayer:
-        @property
-        def id(self) -> DeciderId:
-            return "local"
-
-        async def ask(self, question: Question) -> Answer:
-            assert isinstance(question, ChoiceQuestion)
-            assert "<untrusted-data" in question.state
-            for opt in (
-                "Retrieval-augmented generation",
-                "Artificial Intelligence",
-                "Computer Science",
-                "Physical Sciences",
-            ):
-                if opt in question.options:
-                    return ChoiceAnswer(option=opt, probabilities={opt: 0.95}, confidence=0.95)
-            return ChoiceAnswer(
-                option=question.options[0],
-                probabilities={question.options[0]: 0.9},
-                confidence=0.9,
-            )
-
-        async def ask_many(self, questions: Sequence[Question]) -> Sequence[Answer]:
-            return [await self.ask(q) for q in questions]
-
-    class FakePublicationDates:
-        def dates(self, material_ids: Sequence[str]) -> Mapping[str, KbPublicationDate]:
-            out: dict[str, KbPublicationDate] = {}
-            for mid in material_ids:
-                if mid in (m_rag, m_agents):
-                    out[mid] = KbPublicationDate(
-                        year=2026,
-                        date=date(2026, 10, 15),
-                        precision="day",
-                        origin="openalex",
-                        evidence_url="https://example.org/pub",
-                    )
-                elif mid == m_fact:
-                    out[mid] = KbPublicationDate(
-                        year=2023,
-                        date=None,
-                        precision="year",
-                        origin="crossref",
-                        evidence_url=None,
-                    )
-            return out
-
-    class FakeRepeatSummaries:
-        def summaries(self, material_ids: Sequence[str]) -> Mapping[str, KbMaterialRepeats]:
-            out: dict[str, KbMaterialRepeats] = {}
-            if m_rag in material_ids:
-                out[m_rag] = KbMaterialRepeats(
-                    material_id=m_rag,
-                    status="checked",
-                    percent=80,
-                    repeated=4,
-                    total=5,
-                    from_materials=[KbMaterialRef(material_id=m_agents, title="Lecture 7")],
-                    paragraphs=[],
-                    checked_at=None,
-                )
-            return out
-
-    class FakeFreshnessMarks:
-        def mark_ids(self, material_ids: Sequence[str]) -> Mapping[str, Sequence[str]]:
-            return {m_rag: ["mark-version"]} if m_rag in material_ids else {}
-
-    known_findings = {"finding-1"}
-    service: AreasService = ExploreAreasService(
-        ready,
-        science=FakeScience(),  # type: ignore[arg-type]
-        decisions=FakeDecisionLayer(),
-        publication_dates=FakePublicationDates(),
-        repeat_summaries=FakeRepeatSummaries(),
-        freshness_marks=FakeFreshnessMarks(),
-        finding_exists=lambda fid: fid in known_findings,
-        new_findings_by_area=lambda: {"topic-rag": 2, "topic-fact": 1},
-    )
-
-    # 1. Top level map (domains)
-    top_map = await service.map()
-    assert top_map.parent_id is None
-    assert top_map.breadcrumbs == []
-    assert top_map.total_pages == 3  # study deck excluded!
-    assert top_map.total_sources == 3
-    assert [a.id for a in top_map.areas] == ["domain-physical", "domain-social"]
-
-    # 2. Drill down: domain -> field -> subfield -> topic (one level at a time)
-    phys_map = await service.map(parent_id="domain-physical")
-    assert [b.id for b in phys_map.breadcrumbs] == ["domain-physical"]
-    assert [a.id for a in phys_map.areas] == ["field-cs"]
-
-    cs_map = await service.map(parent_id="field-cs")
-    assert [b.id for b in cs_map.breadcrumbs] == ["domain-physical", "field-cs"]
-    assert [a.id for a in cs_map.areas] == ["area-ai"]
-
-    ai_map = await service.map(parent_id="area-ai")
-    assert [b.id for b in ai_map.breadcrumbs] == ["domain-physical", "field-cs", "area-ai"]
-    ai_topics = {a.id: a for a in ai_map.areas}
-    assert set(ai_topics) == {"topic-rag", "topic-agents", "topic-fact", "topic-verify"}
-    assert ai_topics["topic-rag"].pages == 1
-    assert ai_topics["topic-rag"].sources == 1
-    assert ai_topics["topic-rag"].newest_source_year == 2026
-    assert ai_topics["topic-rag"].new_findings == 2
-    assert ai_topics["topic-verify"].pages == 0
-    assert ai_topics["topic-verify"].depth == "empty"
-    assert ai_topics["topic-verify"].gap_reason is not None
-    assert "no pages yet" in ai_topics["topic-verify"].gap_reason
-    assert ai_topics["topic-fact"].depth == "thin"
-    assert ai_topics["topic-fact"].gap_reason == "thin · 1 source, 2023"
-
-    # Worth closing on parent map includes deep gaps & thin areas
-    top_map_after = await service.map()
-    closing_ids = [a.id for a in top_map_after.worth_closing]
-    assert "topic-verify" in closing_ids
-    assert "topic-fact" in closing_ids
-
-    # 3. Materials in area-ai use RepeatSummaries, FreshnessMarkReader, PublicationDates
-    await service.set_read_mark(m_rag, KbReadMarkUpdate(value="useful_method"))
-    mats = await service.materials("area-ai")
-    assert mats.not_checked_count == 2  # m_agents and m_fact are not_checked
-    by_id = {m.material_id: m for m in mats.materials}
-    assert by_id[m_rag].repeat_status == "checked"
-    assert by_id[m_rag].repeated_percent == 80
-    assert by_id[m_rag].repeats_source_titles == ["Lecture 7"]
-    assert by_id[m_rag].freshness_mark_ids == ["mark-version"]
-    assert by_id[m_rag].read_mark == "useful_method"
-    assert by_id[m_rag].publication.year == 2026
-    assert by_id[m_agents].repeat_status == "not_checked"
-
-    # 4. Route integration via FastAPI TestClient
-    app = FastAPI()
-    app.include_router(areas_router.router)
-    app.state.kb_areas = service
-
-    with TestClient(app) as client:
-        res = client.get("/kb/explore/map")
-        assert res.status_code == 200
-        assert res.json()["total_pages"] == 3
-
-        res = client.post(
-            "/kb/explore/areas",
-            json={"name": "Custom RAG", "topic_ids": ["topic-rag"]},
-        )
-        assert res.status_code == 200
-        custom_id = res.json()["id"]
-        assert res.json()["pages"] == 1
-
-        res = client.patch(
-            f"/kb/explore/areas/{custom_id}",
-            json={"name": "Renamed Custom", "pinned": True},
-        )
-        assert res.status_code == 200
-        assert res.json()["name"] == "Renamed Custom"
-        assert res.json()["pinned"] is True
-
-        res = client.post(f"/kb/explore/areas/{custom_id}/opened")
-        assert res.status_code == 200
-        assert res.json() == {"ok": True}
-
-        res = client.delete("/kb/explore/areas/topic-rag")
-        assert res.status_code == 409
-        assert res.json() == {"code": "conflict"}
-
-        res = client.delete(f"/kb/explore/areas/{custom_id}")
-        assert res.status_code == 200
-        assert res.json() == {"ok": True}
-
-        res = client.put(
-            "/kb/explore/findings/finding-1/read-mark",
-            json={"value": "already_knew"},
-        )
-        assert res.status_code == 200
-        assert res.json()["value"] == "already_knew"
-
-        res = client.put(
-            "/kb/explore/findings/missing-finding/read-mark",
-            json={"value": "already_knew"},
-        )
-        assert res.status_code == 404
-        assert res.json() == {"code": "not_found"}
-
-        res = client.delete("/kb/explore/findings/finding-1/read-mark")
-        assert res.status_code == 200
-        assert res.json()["value"] is None
-
-        res = client.get("/kb/explore/signals")
-        assert res.status_code == 200
-        assert len(res.json()["signals"]) >= 4
 
 
 async def test_edge_cases_science_stop_hidden_undecided_and_pagination(
@@ -675,31 +346,29 @@ async def test_edge_cases_science_stop_hidden_undecided_and_pagination(
         explore=FakeExploreWithImportedFinding(),  # type: ignore[arg-type]
     )
 
-    # Initial sync succeeds, UndecidedLayer does not guess placement for page-unplaced
+    # EX2: own topics; the map never asks the science client or the decision model.
+    one = await service.create(KbAreaCreate(name="Topic One"))
+    two = await service.create(KbAreaCreate(name="Topic Two"))
+    science.blocked = True
     m_initial = await service.map()
-    assert len(m_initial.areas) == 2
+    assert {a.id for a in m_initial.areas} == {one.id, two.id}
     assert sum(a.pages for a in m_initial.areas) == 0
 
-    await service.map(parent_id="dom-1")
-
-    # Hide dom-2: hidden by default, shown with include_hidden=True
-    await service.update("dom-2", KbAreaUpdate(hidden=True, pinned=True))
+    # Hide two: hidden by default, shown with include_hidden=True
+    await service.update(two.id, KbAreaUpdate(hidden=True, pinned=True))
     m_visible = await service.map(include_hidden=False)
-    assert [a.id for a in m_visible.areas] == ["dom-1"]
+    assert [a.id for a in m_visible.areas] == [one.id]
     m_all = await service.map(include_hidden=True)
-    assert [a.id for a in m_all.areas] == ["dom-1", "dom-2"]
-    assert "dom-2" not in service.pinned()
-
-    # ScienceStop does not crash map(); cached areas still served
-    science.blocked = True
-    m_blocked = await service.map()
-    assert [a.id for a in m_blocked.areas] == ["dom-1"]
+    assert {a.id for a in m_all.areas} == {one.id, two.id}
+    assert two.id not in service.pinned()
+    service.topic_store.label(m1, one.id, "agent")
+    service.topic_store.label(m2, one.id, "agent")
 
     # Materials pagination
-    page1 = await service.materials("T-1", limit=1)
+    page1 = await service.materials(one.id, limit=1)
     assert len(page1.materials) == 1
     assert page1.next_cursor is not None
-    page2 = await service.materials("T-1", cursor=page1.next_cursor, limit=1)
+    page2 = await service.materials(one.id, cursor=page1.next_cursor, limit=1)
     assert len(page2.materials) == 1
     assert page2.next_cursor is None
     assert {page1.materials[0].material_id, page2.materials[0].material_id} == {m1, m2}
@@ -736,9 +405,9 @@ async def test_runtime_wires_kb_areas_in_real_app(kb_client: object, kb_app: obj
     assert res.json() == {"code": "not_ready"}
 
     runtime.kb.connect(None)
-    # Science integration off and no level loaded yet: the honest reason, not an empty map (review R1-08).
+    # EX2: the map is the user's own topics from stored state; it never needs OpenAlex consent.
     res = await client.get("/kb/explore/map")
-    assert (res.status_code, res.json()) == (403, {"code": "consent_required"})
+    assert res.status_code == 200 and res.json()["areas"] == []
 
     res = await client.post(
         "/kb/explore/areas",
@@ -757,98 +426,6 @@ async def test_runtime_wires_kb_areas_in_real_app(kb_client: object, kb_app: obj
     assert any(s["predicate"] == "area_opened" and s["object"]["id"] == area_id for s in signals)
 
 
-async def test_placement_never_asks_again_about_off_topic_pages_and_caps_each_call(
-    ready: KnowledgeService,
-) -> None:
-    """Decision cost: a page the model called off-topic is not asked again; one call asks at most 30."""
-    from collections.abc import Sequence
-
-    from skaz.knowledge.areas.service import OFF_TOPIC_OPTION
-    from skaz.knowledge.decisions.protocol import Answer, ChoiceAnswer, Question
-    from skaz.knowledge.markdown.page import Block, PageDocument, PageMeta
-    from skaz.knowledge.science.protocols import TaxonomyNode
-
-    for index in range(35):
-        ready.create_page(
-            PageDocument(
-                meta=PageMeta(skaz_id=f"page-{index:02d}", kind="concept", title=f"Concept {index:02d}"),
-                parts=[Block.create(f"c-{index}", "from_source", "A statement.")],
-            )
-        )
-
-    class Science:
-        async def taxonomy(self, parent_id: str | None = None) -> Sequence[TaxonomyNode]:
-            return [TaxonomyNode("dom-1", None, "domain", "Domain One", 0)] if parent_id is None else []
-
-    class Layer:
-        def __init__(self) -> None:
-            self.asked: list[str] = []
-
-        @property
-        def id(self) -> str:
-            return "local"
-
-        async def ask(self, question: Question) -> Answer:
-            self.asked.append(question.state)
-            return ChoiceAnswer(option=OFF_TOPIC_OPTION, probabilities={}, confidence=0.9)
-
-        async def ask_many(self, questions: Sequence[Question]) -> Sequence[Answer]:
-            return [await self.ask(q) for q in questions]
-
-    layer = Layer()
-    service = ExploreAreasService(ready, science=Science(), decisions=layer)  # type: ignore[arg-type]
-
-    await service.map()
-    assert len(layer.asked) == 30  # one call never asks more than a batch
-    await service.map()
-    assert len(layer.asked) == 35  # the 30 off-topic answers are kept; only the 5 left are asked
-    await service.map()
-    assert len(layer.asked) == 35  # nothing is asked twice
-
-
-async def test_a_map_level_that_cannot_load_answers_its_honest_reason(ready: KnowledgeService) -> None:
-    """Review R1-08: consent, the day limit and a provider failure are not an empty map."""
-    from collections.abc import Sequence
-    from datetime import UTC, datetime
-
-    from skaz.knowledge.science.protocols import (
-        ScienceConsentRequired,
-        ScienceDailyLimit,
-        ScienceUnavailable,
-        TaxonomyNode,
-    )
-
-    class StoppedScience:
-        def __init__(self, stop: Exception) -> None:
-            self.stop = stop
-
-        async def taxonomy(self, parent_id: str | None = None) -> Sequence[TaxonomyNode]:
-            raise self.stop
-
-    cases = [
-        (ScienceConsentRequired(), 403, "consent_required"),
-        (ScienceDailyLimit(datetime(2026, 11, 11, tzinfo=UTC)), 429, "openalex_daily_limit"),
-        (ScienceUnavailable(), 502, "provider_unavailable"),
-    ]
-    for stop, status, code in cases:
-        service = ExploreAreasService(ready, science=StoppedScience(stop))  # type: ignore[arg-type]
-        with pytest.raises(ContractFailure) as caught:
-            await service.map()
-        assert (caught.value.status, caught.value.code) == (status, code)
-
-    unwired = ExploreAreasService(ready, science=lambda: None)
-    with pytest.raises(ContractFailure) as caught:
-        await unwired.map()
-    assert (caught.value.status, caught.value.code) == (503, "not_ready")
-
-    class Nested:  # a dependency is taken as given, never guessed from its attributes
-        client = StoppedScience(ScienceUnavailable())
-
-    nested = ExploreAreasService(ready, science=Nested())  # type: ignore[arg-type]
-    with pytest.raises((ContractFailure, AttributeError)):
-        await nested.map()
-
-
 def test_a_parent_area_scope_is_its_own_hierarchy_id(ready: KnowledgeService) -> None:
     """Review R1-05: the same scope before and after one child is expanded."""
     from skaz.knowledge.science.protocols import TaxonomyNode
@@ -862,3 +439,120 @@ def test_a_parent_area_scope_is_its_own_hierarchy_id(ready: KnowledgeService) ->
     assert list(store.topics("domains-3")) == ["domains-3"]
     assert list(store.topics("subfields-1702")) == ["subfields-1702"]
     assert list(store.topics("T10181")) == ["T10181"]
+
+
+async def test_own_topic_materials_carry_repeats_freshness_dates_and_routes_work(
+    ready: KnowledgeService,
+) -> None:
+    """EX2 port of the B4 map test: a topic's materials (subtopics included) and the area routes."""
+    from collections.abc import Mapping, Sequence
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from skaz.knowledge.api import areas as areas_router
+    from skaz.knowledge.api.schemas_explore_common import KbMaterialRef, KbPublicationDate
+    from skaz.knowledge.api.schemas_repeats import KbMaterialRepeats
+    from skaz.knowledge.markdown.page import Block, Cite, PageDocument, PageMeta
+    from skaz.knowledge.markdown.source import FragmentInput
+
+    folder_id = ready.folders()[0].id
+    ids = []
+    for title in ("RAG beyond the basics", "Reflexion Agents", "Hallucination survey"):
+        mid = ready.create_material(folder_id, title, "pdf", [FragmentInput(text="Text.")]).manifest.id
+        ready.create_page(
+            PageDocument(
+                meta=PageMeta(
+                    skaz_id=f"page-{mid}", kind="concept", title=f"{title} concept", sources=(mid,)
+                ),
+                parts=[
+                    Block.create("c-1", "from_source", "A statement.", cites=(Cite(material_id=mid, seg=1),))
+                ],
+            )
+        )
+        ids.append(mid)
+    m_rag, m_agents, m_fact = ids
+    ready.create_page(
+        PageDocument(  # a study deck never counts on the map
+            meta=PageMeta(skaz_id="deck-1", kind="deck", title="RAG Deck", sources=(m_rag,)), parts=[]
+        )
+    )
+
+    class Dates:
+        def dates(self, material_ids: Sequence[str]) -> Mapping[str, KbPublicationDate]:
+            return {
+                mid: KbPublicationDate(
+                    year=2026, date=date(2026, 10, 15), precision="day", origin="openalex", evidence_url=None
+                )
+                for mid in material_ids
+                if mid == m_rag
+            }
+
+    class Repeats:
+        def summaries(self, material_ids: Sequence[str]) -> Mapping[str, KbMaterialRepeats]:
+            return {
+                m_rag: KbMaterialRepeats(
+                    material_id=m_rag,
+                    status="checked",
+                    percent=80,
+                    repeated=4,
+                    total=5,
+                    from_materials=[KbMaterialRef(material_id=m_agents, title="Lecture 7")],
+                    paragraphs=[],
+                    checked_at=None,
+                )
+            }
+
+    class Freshness:
+        def mark_ids(self, material_ids: Sequence[str]) -> Mapping[str, Sequence[str]]:
+            return {m_rag: ["mark-version"]} if m_rag in material_ids else {}
+
+    service = ExploreAreasService(
+        ready,
+        publication_dates=Dates(),
+        repeat_summaries=Repeats(),
+        freshness_marks=Freshness(),
+        finding_exists=lambda fid: fid == "finding-1",
+        new_findings_by_area=lambda: {"x": 0},
+    )
+    ai = await service.create(KbAreaCreate(name="AI"))
+    rag = await service.create(KbAreaCreate(name="RAG", parent_id=ai.id))
+    service.topic_store.label(m_rag, rag.id, "agent")
+    service.topic_store.label(m_agents, ai.id, "agent")
+    service.topic_store.label(m_fact, rag.id, "agent")
+
+    top = await service.map()
+    assert top.total_pages == 3 and top.total_sources == 3  # the deck is not a wiki page
+    (tile,) = top.areas
+    assert (tile.materials, tile.pages, tile.newest_source_year, tile.wiki_share) == (3, 3, 2026, 1.0)
+    await service.set_read_mark(m_rag, KbReadMarkUpdate(value="useful_method"))
+    mats = await service.materials(ai.id)
+    assert mats.not_checked_count == 2
+    by_id = {m.material_id: m for m in mats.materials}
+    assert set(by_id) == {m_rag, m_agents, m_fact}
+    assert by_id[m_rag].repeats_source_titles == ["Lecture 7"] and by_id[m_rag].freshness_mark_ids == [
+        "mark-version"
+    ]
+    assert by_id[m_rag].read_mark == "useful_method" and by_id[m_rag].publication.year == 2026
+    assert [m.material_id for m in (await service.materials(rag.id)).materials] == [m_fact, m_rag]
+
+    app = FastAPI()
+    app.include_router(areas_router.router)
+    app.state.kb_areas = service
+    with TestClient(app) as client:
+        assert client.get("/kb/explore/map").json()["total_pages"] == 3
+        res = client.patch(f"/kb/explore/areas/{rag.id}", json={"name": "Retrieval", "pinned": True})
+        assert (res.status_code, res.json()["name"], res.json()["pinned"]) == (200, "Retrieval", True)
+        assert client.post(f"/kb/explore/areas/{rag.id}/opened").json() == {"ok": True}
+        res = client.put(f"/kb/materials/{m_agents}/topic", json={"area_id": rag.id})
+        assert res.json() == {"material_id": m_agents, "area_id": rag.id, "origin": "user"}
+        res = client.post(f"/kb/explore/areas/{rag.id}/merge", json={"into_id": ai.id})
+        assert (res.status_code, res.json()["id"], res.json()["materials"]) == (200, ai.id, 3)
+        assert (
+            client.put("/kb/explore/findings/finding-1/read-mark", json={"value": "already_knew"}).status_code
+            == 200
+        )
+        res = client.put("/kb/explore/findings/missing-finding/read-mark", json={"value": "already_knew"})
+        assert (res.status_code, res.json()) == (404, {"code": "not_found"})
+        assert client.delete(f"/kb/explore/areas/{ai.id}").json() == {"ok": True}
+        assert len(client.get("/kb/explore/signals").json()["signals"]) >= 3
