@@ -62,7 +62,8 @@ describe('Feedback motion with reduced motion', () => {
   it('new chat plays nothing', async () => {
     const user = userEvent.setup();
     renderKb({ world: chatWorld() });
-    await user.click(await within(side()).findByRole('button', { name: 'New chat' }));
+    await user.click(await within(side()).findByRole('button', { name: 'New' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'New chat' }));
     expect(iconPlays).toEqual([]);
   });
 

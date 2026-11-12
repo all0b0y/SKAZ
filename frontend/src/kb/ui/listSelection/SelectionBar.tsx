@@ -64,8 +64,10 @@ export interface SelectionSet {
  * the rest, ✕ clears (Esc too). `full` under a table — labelled buttons; `compact` in the narrow side
  * panel — icon buttons with the name and shortcut in a tooltip.
  */
-export function SelectionBar({ count, selection, sets = [], hintKey, variant = 'full', actions, more = [], onClear }: {
+export function SelectionBar({ count, selection, entry = true, sets = [], hintKey, variant = 'full', actions, more = [], onClear }: {
   selection?: ListSelection;
+  /** The "Select items" button before a selection starts (EX2, G2-5: the side Chats list has none). */
+  entry?: boolean;
   sets?: readonly SelectionSet[];
   /** Shared app-session hint budget; standalone examples keep their own budget. */
   hintKey?: string;
@@ -117,7 +119,7 @@ export function SelectionBar({ count, selection, sets = [], hintKey, variant = '
   };
   const controls = (
     <div className="kb-selection-controls" data-active={active ? 'true' : undefined} data-sel-keep="">
-      {selection && !selection.selecting && (
+      {selection && entry && !selection.selecting && (
         <div className="kb-selection-entry" data-sel-keep="">
           <button ref={chooseBtn} type="button" aria-label="Select items" aria-haspopup="menu" aria-expanded={chooseMenu}
             onClick={() => setChooseMenu((v) => !v)}><Icon name="more" size={14} />Select</button>

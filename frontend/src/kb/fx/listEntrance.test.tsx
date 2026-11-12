@@ -46,13 +46,13 @@ describe('AnimatedList: the first load of the side list', () => {
     // Every row of the list takes part, exactly once.
     const rows = [...side().querySelectorAll('[data-entrance]')];
     expect(list.map((p) => p.el)).toEqual(rows);
-    expect(list[0]!.el).toHaveTextContent('New chat');
+    // EX2 (G2-5): no New chat row; the list starts with the chats.
+    expect(list[0]!.el).not.toHaveTextContent('New chat');
     expect(list.map((p) => p.opts.delay)).toEqual(rows.map((_, i) => Math.min(i, 12) * ENTRANCE_STEP_MS));
     expect(list[0]!.frames).toEqual([{ opacity: 0, transform: `translateY(${ENTRANCE_RISE_PX}px)` }, { opacity: 1, transform: 'none' }]);
     expect(list[0]!.opts).toMatchObject({ duration: ENTRANCE_SPRING.duration, easing: ENTRANCE_SPRING.easing, fill: 'backwards' });
-    // The bridge of the open row (New chat) comes with its row, not before it.
-    const layer = entrances().find((p) => p.el.classList.contains('kb-tablayer'));
-    expect(layer?.opts.delay).toBe(0);
+    // EX2 (G2-5): a fresh chat has no row, so no bridge enters ahead of the rows.
+    expect(entrances().find((p) => p.el.classList.contains('kb-tablayer'))).toBeUndefined();
   });
 
   it('never again: chat switch, selection, section switch (remount) and back, a store update — no entrance', async () => {

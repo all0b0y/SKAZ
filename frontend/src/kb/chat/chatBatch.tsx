@@ -104,7 +104,7 @@ export function useChatSelection({ chats: list, onOpen, variant = 'compact', res
   const answering = doomed.filter((c) => c.state === 'answering' && !c.research_task_id);
   const overlays = (
     <>
-      <SelectionBar selection={variant === 'compact' && !sel.selecting && sel.selected.size === 0 ? undefined : sel} sets={sets} hintKey="list-selection" count={sel.selected.size} variant={variant} actions={actions} more={more} onClear={sel.clear} />
+      <SelectionBar selection={sel} entry={variant !== 'compact'} sets={sets} hintKey="list-selection" count={sel.selected.size} variant={variant} actions={actions} more={more} onClear={sel.clear} />
       {exp.dialog}
       <ShortcutsPopover open={sel.shortcutsOpen} onClose={() => sel.setShortcutsOpen(false)} anchorRef={sel.listRef}
         has={{ delete: true, export: Boolean(exportMd) }} />

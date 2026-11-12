@@ -60,6 +60,8 @@ async def _failed_once(kb_app: Any, kb_client: httpx.AsyncClient, profile: dict[
                         models=[ModelOption("checkpoint-model", "Checkpoint model", ("low", "high"), "low")])
     runtime.kb_ingest.engines = lambda _engine: engine
     runtime.kb_ingest.detector = PatternDetector()
+    # EX2: these count the Notes/Concepts calls; the topic label call is tested in test_ex2_topics.
+    runtime.kb_ingest.topics = None
     saved = await kb_client.put("/kb/settings/wiki", json={"wiki_engine": "codex", **profile,
                                                            "write_notes_automatically": True})
     assert saved.status_code == 200, saved.text

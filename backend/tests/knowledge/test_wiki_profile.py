@@ -39,6 +39,8 @@ async def test_ingest_pins_wiki_profile_instead_of_following_a_later_setting(
                         models=[ModelOption("profile-model", "Profile model", ("low", "high"), "low")])
     runtime.kb_ingest.engines = lambda _engine: wiki.engine
     runtime.kb_ingest.detector = PatternDetector()
+    # EX2: these count the Notes/Concepts calls; the topic label call is tested in test_ex2_topics.
+    runtime.kb_ingest.topics = None
     await kb_client.put("/kb/settings/wiki", json={
         "wiki_engine": "codex", "wiki_model": "profile-model", "wiki_effort": "high",
     })
@@ -122,6 +124,8 @@ async def test_unavailable_wiki_selection_never_calls_a_substitute_model(
                         models=[ModelOption("profile-model", "Profile model", ("low", "high"), "low")])
     runtime.kb_ingest.engines = lambda _engine: wiki.engine
     runtime.kb_ingest.detector = PatternDetector()
+    # EX2: these count the Notes/Concepts calls; the topic label call is tested in test_ex2_topics.
+    runtime.kb_ingest.topics = None
     await kb_client.put("/kb/settings/wiki", json={
         "wiki_engine": "codex", "wiki_model": model, "wiki_effort": effort,
     })
@@ -144,6 +148,8 @@ async def test_provider_reported_usage_is_accounted_without_saving_source_text(
     wiki = ScriptedWiki(notes=[NOTES_OK], concepts=[CONCEPTS_OK], usage=Usage(10, 5))
     runtime.kb_ingest.engines = lambda _engine: wiki.engine
     runtime.kb_ingest.detector = PatternDetector()
+    # EX2: these count the Notes/Concepts calls; the topic label call is tested in test_ex2_topics.
+    runtime.kb_ingest.topics = None
     material_id = add_material(runtime.kb, "Physics", "Usage test", kind="pdf")
     response = await kb_client.post(f"/kb/materials/{material_id}/ingest")
     await settle(lambda: not runtime.kb_ingest.active_jobs())
@@ -166,6 +172,8 @@ async def test_a_queued_material_keeps_the_profile_selected_when_it_was_queued(
                         models=[ModelOption("queue-model", "Queue model", ("low", "high"), "low")])
     runtime.kb_ingest.engines = lambda _engine: wiki.engine
     runtime.kb_ingest.detector = PatternDetector()
+    # EX2: these count the Notes/Concepts calls; the topic label call is tested in test_ex2_topics.
+    runtime.kb_ingest.topics = None
     await kb_client.put("/kb/settings/wiki", json={
         "wiki_engine": "codex", "wiki_model": "queue-model", "wiki_effort": "high",
     })

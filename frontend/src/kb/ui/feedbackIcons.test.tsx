@@ -142,14 +142,13 @@ describe('Feedback motion of the six buttons', () => {
     expect(iconPlays).toEqual([]);
   });
 
-  it('new chat: the pen plays once per click on the list entry, not on hover', async () => {
+  it('new chat: "+" → New chat opens a fresh chat and moves nothing (EX2, G2-5: the side row with the pen is gone)', async () => {
     const user = userEvent.setup();
-    renderKb({ world: chatWorld() });
-    const entry = await within(side()).findByRole('button', { name: 'New chat' });
-    await user.hover(entry);
+    const { services } = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: 'New' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'New chat' }));
+    expect(services.chats.getState().currentId).toBeNull();
     expect(iconPlays).toEqual([]);
-    await user.click(entry);
-    expect(iconPlays).toEqual(['newChat']);
   });
 
   describe('bell', () => {

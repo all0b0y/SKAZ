@@ -106,6 +106,8 @@ async def test_wiki_accounting_keeps_cache_and_reasoning_per_stage(kb_app: Any, 
     wiki = ScriptedWiki(notes=[NOTES_OK], concepts=[CONCEPTS_OK], usage=usage)
     runtime.kb_ingest.engines = lambda _engine: wiki.engine
     runtime.kb_ingest.detector = PatternDetector()
+    # EX2: these count the Notes/Concepts calls; the topic label call is tested in test_ex2_topics.
+    runtime.kb_ingest.topics = None
     material_id = add_material(runtime.kb, "Physics", "Cache test", kind="pdf")
     job_id = (await kb_client.post(f"/kb/materials/{material_id}/ingest")).json()["id"]
     await settle(lambda: not runtime.kb_ingest.active_jobs())
@@ -133,6 +135,8 @@ async def test_wiki_accounting_marks_unreported_cache_as_unknown(kb_app: Any, kb
     runtime.kb_ingest.update_settings(write_notes_automatically=True)  # count Notes and Concepts
     runtime.kb_ingest.engines = lambda _engine: wiki.engine
     runtime.kb_ingest.detector = PatternDetector()
+    # EX2: these count the Notes/Concepts calls; the topic label call is tested in test_ex2_topics.
+    runtime.kb_ingest.topics = None
     material_id = add_material(runtime.kb, "Physics", "No cache test", kind="pdf")
     job_id = (await kb_client.post(f"/kb/materials/{material_id}/ingest")).json()["id"]
     await settle(lambda: not runtime.kb_ingest.active_jobs())

@@ -54,7 +54,8 @@ describe('layer 3 · states are the real ones', () => {
     await waitFor(() => expect(selected!.querySelectorAll('[aria-selected="true"]')).toHaveLength(2));
     const bar = within(selected!).getByRole('toolbar', { name: '2 selected' });
     expect(bar.closest('header')).not.toBeNull();
-    expect(within(states!).getByRole('button', { name: 'Select items' }).closest('header')).not.toBeNull();
+    // EX2 (G2-5): the side list has no "··· Select" button; ⌘/Shift-click and drag select.
+    expect(within(states!).queryByRole('button', { name: 'Select items' })).toBeNull();
   }, 15_000);
 
   it('chat rows: the side list sits next to a centre sheet, so the open chat’s bridge meets it (B1)', async () => {
