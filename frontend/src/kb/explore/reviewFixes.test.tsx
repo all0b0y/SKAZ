@@ -1,12 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { KbAreaMap, KbAreaMaterials, KbExploreJob, KbFindings, KbJobSummary } from '../../api/kb/types.gen';
 import { KbApiError } from '../api/client';
-import { createFakeKb } from '../api/fake';
+import { createFakeKb, scenes } from './test/legacyFixtures';
 import { contractFixtures as f } from '../api/fake/fixtures';
-import { scenes } from '../api/fake/scenes';
 import { runNavigation } from '../notifications/navigation';
 import { getResearchStore } from '../research/store';
 import { Shell } from '../shell/Shell';
@@ -287,6 +286,7 @@ describe('FX-D review regressions', () => {
     const settings = vi.fn();
     render(<ExploreSection clients={kb} onOpenSettings={settings} />);
     await screen.findByRole('button', { name: /Physical Sciences/ });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Find what's new/ })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Find what's new/ }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/permission/i);
     fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
@@ -355,11 +355,16 @@ describe('FX-D review regressions', () => {
     const area = scenes.area.map.breadcrumbs.at(-1)!;
     const update = vi.spyOn(kb.areas, 'update').mockImplementation(async (_, patch) => ({ ...area, pinned: patch.pinned ?? false }));
     render(<ExploreSection clients={kb} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Pin area for weekly discovery' }));
-    expect(await screen.findByRole('button', { name: 'Unpin area from weekly discovery' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(await screen.findByRole('button', { name: 'Topic actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^Pin topic/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Topic actions' }));
+    expect(await screen.findByRole('menuitem', { name: /^Unpin topic/ })).toBeInTheDocument();
     expect(update).toHaveBeenLastCalledWith(area.id, { pinned: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Unpin area from weekly discovery' }));
-    expect(await screen.findByRole('button', { name: 'Pin area for weekly discovery' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Unpin topic/ }));
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Topic actions' }));
+    expect(await screen.findByRole('menuitem', { name: /^Pin topic/ })).toBeInTheDocument();
     expect(update).toHaveBeenLastCalledWith(area.id, { pinned: false });
   });
 
@@ -376,11 +381,13 @@ describe('FX-D review regressions', () => {
     await flush();
     changed = true;
     await tick();
-    fireEvent.click(screen.getByRole('button', { name: 'Pin area for weekly discovery' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Topic actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Pin topic/ }));
     await flush();
-    expect(screen.getByRole('button', { name: 'Unpin area from weekly discovery' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Topic actions' }));
+    expect(screen.getByRole('menuitem', { name: /^Unpin topic/ })).toBeInTheDocument();
     await act(async () => { lateMap.resolve(scenes.area.map); });
-    expect(screen.getByRole('button', { name: 'Unpin area from weekly discovery' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Unpin topic/ })).toBeInTheDocument();
   });
 
   it('R3-12 honors Shell hiding Explore when a document expands with its actual CSS', async () => {

@@ -2,13 +2,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFakeKb } from '../api/fake';
+import { createFakeKb, scenes } from './test/legacyFixtures';
 import { renderKb } from '../test/renderKb';
 import { createFakeBridge } from '../test/fakeBridge';
 import { createServices, KbServicesProvider } from '../state/context';
 import { MotionProvider } from '../ui';
 import { contractFixtures } from '../api/fake/fixtures';
-import { scenes } from '../api/fake/scenes';
 import { auditCss } from '../board/audit';
 import type { DocTarget } from '../state/document';
 import { ExploreSection } from './ExploreSection';
@@ -65,10 +64,10 @@ describe('F1 — Explore treemap math (treemap.ts)', () => {
     expect(squarify([{ id: 'a', weight: 10 }], 0, 0, 0, 300)).toEqual([]);
   });
 
-  it('computes minimum positive weight for gap tiles so 0-page gaps remain visible', () => {
+  it('gives empty own topics no map weight', () => {
     const gapArea = scenes.topic.map.areas.find((a) => a.pages === 0)!;
     const regularArea = scenes.topic.map.areas.find((a) => a.pages > 0)!;
-    expect(tileWeight(gapArea, 62)).toBeCloseTo(62 * 0.045, 2);
+    expect(tileWeight(gapArea, 62)).toBe(0);
     expect(tileWeight(regularArea, 62)).toBe(regularArea.pages);
   });
 
@@ -90,7 +89,7 @@ describe('F1 — ExploreSection UI & interactions', () => {
     vi.useRealTimers();
   });
 
-  it('renders Home scene with domain tiles, search scope, grouped findings, OpenAlex hint, and Worth closing', async () => {
+  it('renders own-topic fixtures, scope, grouped findings and the OpenAlex hint without Worth closing', async () => {
     const kb = createFakeKb('home');
     const dismissSpy = vi.spyOn(kb.science, 'dismiss_hint');
 
@@ -103,7 +102,7 @@ describe('F1 — ExploreSection UI & interactions', () => {
     expect(screen.getByRole('button', { name: /Health Sciences/i })).toBeTruthy();
 
     // Search bar scope & Weekly indicator
-    expect(screen.getByText('in all your areas')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Search scope: All your topics' })).toBeTruthy();
     expect(screen.getByPlaceholderText(/What exactly\? Optional/i)).toBeTruthy();
     expect(screen.getByText('Weekly · Mon')).toBeTruthy();
 
@@ -127,9 +126,9 @@ describe('F1 — ExploreSection UI & interactions', () => {
     expect(screen.queryByText(/Add a free OpenAlex key to get full text for 1 of these/i)).toBeNull();
 
     // Worth closing section
-    expect(screen.getByText('Worth closing')).toBeTruthy();
-    expect(screen.getByText('Self-correction and verification')).toBeTruthy();
-    expect(screen.getByText('Evaluating LLM answers')).toBeTruthy();
+    expect(screen.queryByText('Worth closing')).toBeNull();
+    expect(screen.queryByText('Self-correction and verification')).toBeNull();
+    expect(screen.queryByText('Evaluating LLM answers')).toBeNull();
   });
 
   it('shows hover tooltip with wiki share, pages, sources, depth, and marked/new counts', async () => {
@@ -140,8 +139,8 @@ describe('F1 — ExploreSection UI & interactions', () => {
     fireEvent.mouseEnter(physTile);
 
     const tooltip = await screen.findByRole('tooltip');
-    expect(within(tooltip).getByText(/58% of your wiki · 239 pages/i)).toBeTruthy();
-    expect(within(tooltip).getByText(/74 sources, newest 2026 · dense/i)).toBeTruthy();
+    expect(within(tooltip).getByText(/58% of your wiki · 239 materials/i)).toBeTruthy();
+    expect(within(tooltip).getByText(/239 concept pages · 74 sources/i)).toBeTruthy();
     expect(within(tooltip).getByText(/You marked 19 · 7 new/i)).toBeTruthy();
 
     fireEvent.mouseLeave(physTile);
@@ -168,13 +167,13 @@ describe('F1 — ExploreSection UI & interactions', () => {
 
     // Area scene loaded (Computer Science)
     await screen.findByRole('button', { name: /Artificial Intelligence/i });
-    expect(screen.getByText('in Computer Science')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Search scope: Computer Science' })).toBeTruthy();
     expect(screen.getByText('41% of your wiki')).toBeTruthy();
 
     // Click root Explore breadcrumb to return home
     fireEvent.click(screen.getByRole('button', { name: 'Explore' }));
     await screen.findByRole('button', { name: /Physical Sciences/i });
-    expect(screen.getByText('in all your areas')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Search scope: All your topics' })).toBeTruthy();
   });
 
   it('selects a leaf topic in place, switches to Your materials tab, opens material in DocPanel, and runs older materials check', async () => {
@@ -236,12 +235,14 @@ describe('F1 — ExploreSection UI & interactions', () => {
 
     const input = screen.getByPlaceholderText(/What exactly\? Optional/i);
     fireEvent.change(input, { target: { value: 'evaluating RAG answers' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Find what's new/i })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: /Find what's new/i }));
 
     await waitFor(() =>
       expect(startSpy).toHaveBeenCalledWith({
         area_id: 'field-cs',
-        query: 'evaluating RAG answers',
+        query: 'evaluating RAG answers', all_topics: false,
+        plan: [{ area_id: 'field-cs', label: 'evaluating RAG answers', terms: ['evaluating RAG answers'] }],
       }),
     );
 
@@ -295,7 +296,7 @@ describe('F1 — ExploreSection UI & interactions', () => {
     const resumeSpy = vi.spyOn(kbNoModel.explore, 'resume').mockResolvedValue(structuredClone(scenes.searching.run));
     const { unmount } = render(<ExploreSection clients={kbNoModel} initial={{ run: stopped }} />);
 
-    await screen.findByText(/Choose how to sort candidates by area/i);
+    await screen.findByText(/Choose how to check topic fit/i);
     const localBtn = screen.getByRole('button', { name: /Download local model/i });
     expect(screen.getByRole('button', { name: /OpenRouter Jev/i })).toBeTruthy();
     fireEvent.click(localBtn);

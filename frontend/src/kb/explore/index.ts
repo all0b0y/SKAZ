@@ -23,3 +23,6 @@ export {
   type FindingHostComponent,
   type FindingHostProps,
 } from './types';
+
+export { FunnelView } from './FunnelView';
+export { createDiscoveryClient, createTopicActions, type DiscoveryClient, type TopicActions } from './clients';

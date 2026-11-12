@@ -8,11 +8,18 @@ import type {
 import { useServices, type KbServices } from '../state/context';
 import type { DocTarget } from '../state/document';
 import type { SettingsSection } from '../state/ui';
-import { Icon } from '../ui';
+import { Button, Icon, IconButton, Menu } from '../ui';
 import { AreaColumn } from './AreaColumn';
 import { FindingClientsProvider } from './finding';
 import { ExploreMap } from './ExploreMap';
 import { CheckProgress } from './CheckProgress';
+import { ScopePicker } from './ScopePicker';
+import { SearchPlan } from './SearchPlan';
+import { useSearchPlan } from './useSearchPlan';
+import { TopicLabelling } from './TopicLabelling';
+import { FunnelView } from './FunnelView';
+import { TopicDialog, type TopicEdit } from './TopicDialog';
+import { TOPICS_CHANGED } from './topicEvents';
 import { exploreIssue, type ExploreIssue } from './errors';
 import { useExploreScope } from './useExploreScope';
 import { useExploreJobs } from './useExploreJobs';
@@ -99,6 +106,9 @@ export function ExploreSection({
   const [openFinding, setOpenFinding] = useState<KbFinding | null>(initial?.finding ?? null);
   const [keyHintDismissed, setKeyHintDismissed] = useState(false);
   const [query, setQuery] = useState('');
+  const [topicEdit, setTopicEdit] = useState<TopicEdit | null>(null);
+  const [topicMenu, setTopicMenu] = useState(false);
+  const topicMenuRef = useRef<HTMLButtonElement | null>(null);
   const [actionIssue, setActionIssue] = useState<ExploreIssue | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -126,10 +136,36 @@ export function ExploreSection({
 
   const activeScopeArea = selectedTopic ?? currentMapArea;
   const scopeId = activeScopeArea?.id ?? map?.parent_id ?? null;
-  const scopeName = activeScopeArea?.name ?? 'all your areas';
+  const scopeName = activeScopeArea?.name ?? 'All your topics';
+  const searchArea = activeScopeArea;
+  const searchRequest = useMemo(() => ({ area_id: searchArea?.id ?? null, query: query.trim(), all_topics: !searchArea && !query.trim() }), [searchArea?.id, query]);
+  const planSource = JSON.stringify([map?.areas.map((area) => [area.id, area.name, area.materials]), searchArea?.name]);
+  const searchPlan = useSearchPlan(clients.discovery, searchRequest, hidden, planSource);
   const isRootScope = scopeId === null;
   const scopePages = activeScopeArea?.pages ?? map?.total_pages ?? 0;
-  const sourcesCount = activeScopeArea?.sources ?? map?.total_sources ?? 0;
+  const sourcesCount = activeScopeArea?.materials ?? map?.total_sources ?? 0;
+
+  useEffect(() => {
+    if (hidden || !map || !['running', 'paused'].includes(map.labelling.state)) return;
+    let polling = false;
+    const timer = window.setInterval(() => {
+      if (polling) return;
+      polling = true;
+      void scope.refresh().finally(() => { polling = false; });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [hidden, map?.labelling.state, scope.refresh]);
+
+  useEffect(() => {
+    const changed = () => void scope.refresh();
+    window.addEventListener(TOPICS_CHANGED, changed);
+    return () => window.removeEventListener(TOPICS_CHANGED, changed);
+  }, [scope.refresh]);
+
+  const handleSortTopics = () => perform(async () => {
+    if (!clients.topics) throw new KbApiError(503, '', 'not_ready');
+    scope.saveLabelling(await clients.topics.sort());
+  });
 
   const navigateToParent = useCallback(async (parentId: string | null) => {
     setOpenFinding(null);
@@ -140,8 +176,8 @@ export function ExploreSection({
     setOpenFinding(null);
     void clients.areas.opened(area.id).catch((error) => setActionIssue(exploreIssue(error)));
     if (area.has_children && !isGapArea(area)) await scope.load(area.id);
-    else await scope.load(map?.parent_id ?? null, area);
-  }, [clients, map, scope.load]);
+    else await scope.load(area.parent_id, area);
+  }, [clients, scope.load]);
 
   const breadcrumbs = useMemo<CrumbItem[]>(() => {
     const items: CrumbItem[] = [{ id: null, name: 'Explore' }];
@@ -172,9 +208,9 @@ export function ExploreSection({
 
   const handleStartSearch = (e?: FormEvent) => {
     e?.preventDefault();
+    if (!searchPlan.ready || scope.loading) return;
     return perform(async () => {
-      const trimmed = query.trim();
-      const started = await clients.explore.start({ area_id: scopeId, ...(trimmed ? { query: trimmed } : {}) });
+      const started = await clients.explore.start({ ...searchRequest, plan: searchPlan.items });
       setOpenFinding(null); jobs.setRun(started);
     });
   };
@@ -307,14 +343,17 @@ export function ExploreSection({
               <span className="kb-explore-head__meta">
                 {formatWikiShare(activeScopeArea.wiki_share)} of your wiki
               </span>
-              <button type="button" className="kb-explore-crumbs__btn" aria-pressed={activeScopeArea.pinned}
-                aria-label={activeScopeArea.pinned ? 'Unpin area from weekly discovery' : 'Pin area for weekly discovery'}
-                title="Weekly discovery uses pinned areas" disabled={busy} onClick={() => void handlePin()}>
-                {activeScopeArea.pinned ? 'Unpin area' : 'Pin area'}
-              </button>
+              <IconButton ref={topicMenuRef} icon="more" label="Topic actions" aria-haspopup="menu" aria-expanded={topicMenu} disabled={busy} onClick={() => setTopicMenu((old) => !old)} />
+              <Menu open={topicMenu} onClose={() => setTopicMenu(false)} anchorRef={topicMenuRef} label="Topic actions" items={[
+                { id: 'rename', label: 'Rename topic', icon: 'pencil', onSelect: () => setTopicEdit({ mode: 'rename', area: activeScopeArea }) },
+                { id: 'merge', label: 'Merge into another topic…', onSelect: () => setTopicEdit({ mode: 'merge', area: activeScopeArea }) },
+                { id: 'pin', label: activeScopeArea.pinned ? 'Unpin topic' : 'Pin topic', note: 'For weekly discovery', onSelect: () => void handlePin() },
+                { id: 'subtopic', label: 'New subtopic', icon: 'plus', onSelect: () => setTopicEdit({ mode: 'create', area: null, parentId: activeScopeArea.id }) },
+              ]} />
             </>
           )}
 
+          <Button variant="quiet" size="sm" icon="plus" disabled={!map || scope.loading || busy} onClick={() => setTopicEdit({ mode: 'create', area: null })}>New topic</Button>
           <div className="kb-explore-head__spacer" />
 
           <span className="kb-explore-head__meta" title="Findings you took to explore">
@@ -350,25 +389,21 @@ export function ExploreSection({
             <>
               <form className="kb-explore-search__field" onSubmit={(e) => void handleStartSearch(e)}>
                 <Icon name="search" size={14} />
-                <span
-                  className="kb-explore-search__scope"
-                  title="Where to look — follows the area you open"
-                >
-                  in {scopeName}
-                </span>
+                <ScopePicker clients={clients} value={searchArea} onChange={(area) => { if (area) void handleSelectAreaTile(area); else void navigateToParent(null); }} onQuery={setQuery} disabled={busy} />
                 <input
                   type="text"
+                  aria-label="Precise query"
                   className="kb-explore-search__input"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="What exactly? Optional — e.g. evaluating RAG answers"
                 />
-                <button type="submit" className="kb-explore-search__go" disabled={busy || scope.loading || !map}>
+                <button type="submit" className="kb-explore-search__go" disabled={busy || scope.loading || !searchPlan.ready}>
                   Find what&apos;s new
                 </button>
               </form>
               {weeklyDay && (
-                <span className="kb-explore-search__week" title="Pinned areas, free steps only">
+                <span className="kb-explore-search__week" title="Pinned topics, free steps only">
                   Weekly · {weeklyDay}
                 </span>
               )}
@@ -384,6 +419,14 @@ export function ExploreSection({
           )}
         </div>
 
+        {!isScanning && <SearchPlan items={searchPlan.items} message={searchPlan.message} failed={searchPlan.failed}
+          onRetry={searchPlan.retry} onChange={searchPlan.edit} disabled={busy} />}
+        {map && <TopicLabelling job={map.labelling} unsorted={map.unsorted_materials} busy={busy}
+          onSort={() => void handleSortTopics()} onSettings={handleOpenSettings} />}
+        {run && <FunnelView key={run.id} run={run} client={clients.discovery} hidden={hidden} busy={busy} onChanged={() => jobs.refreshRun(run.id)}
+          onCheckNovelty={(candidateIds) => void perform(async () => {
+            jobs.setRun(await clients.explore.start({ candidate_ids: candidateIds, channels: [] }));
+          })} />}
         {repeatCheck && <CheckProgress kind="repeat" job={repeatCheck} busy={busy}
           onPause={() => void handlePauseRepeats()} onResume={(choice) => void handleResumeRepeats(choice)}
           onOpenSettings={() => handleOpenSettings('search')} />}
@@ -391,7 +434,8 @@ export function ExploreSection({
           onPause={() => void handlePauseWeekly()} onResume={(choice) => void handleResumeWeekly(choice)}
           onOpenSettings={() => handleOpenSettings('search')} />}
         <div className="kb-explore-body" aria-busy={scope.loading}>
-          <ExploreMap
+          {map && <ExploreMap
+            scopeKey={map.parent_id}
             areas={map?.areas ?? []}
             parentPages={currentMapArea?.pages ?? map?.total_pages ?? 0}
             selectedAreaId={selectedTopic?.id ?? null}
@@ -399,9 +443,9 @@ export function ExploreSection({
             activeAreaIds={run?.active_area_ids ?? []}
             justDone={Boolean(isJustDone)}
             onSelectArea={(area) => void handleSelectAreaTile(area)}
-          />
+          />}
 
-          {scope.loading ? <p className="kb-explore-cap" role="status">Loading area…</p> : scope.issue && !findings ? null : <AreaColumn
+          {scope.loading ? <p className="kb-explore-cap" role="status">Loading topics…</p> : (scope.issue && !findings) || (map?.labelling.state === 'not_ready' && map.areas.length === 0 && !run) ? null : <AreaColumn
             busy={busy}
             loadingMore={scope.loadingMore}
             onLoadMoreFindings={() => void scope.loadMore('findings')}
@@ -434,6 +478,14 @@ export function ExploreSection({
             onOpenWiki={handleOpenWiki}
           />}
         </div>
+        {topicEdit && <TopicDialog edit={topicEdit} clients={clients} onClose={() => setTopicEdit(null)} onSaved={(area, mode) => {
+          if (mode === 'rename') { scope.saveArea(area); searchPlan.retry(); }
+          else if (mode === 'merge') {
+            void scope.load(area.has_children ? area.id : area.parent_id, area.has_children ? undefined : area);
+          } else {
+            void scope.load(area.parent_id, area);
+          }
+        }} />}
       </main>
     </FindingClientsProvider>
   );
