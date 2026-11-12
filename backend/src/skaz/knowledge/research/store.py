@@ -15,7 +15,20 @@ from typing import Any, Literal, cast
 from ..store.database import KnowledgeDatabase
 
 PermissionStatus = Literal["pending", "allowed", "denied", "cancelled"]
-_PERMISSION_FIELDS = frozenset({"status", "reason", "decided_at", "task_id", "auto"})
+TopicSource = Literal["proposed", "typed", "picked"]
+_PERMISSION_FIELDS = frozenset({"status", "reason", "decided_at", "task_id", "auto", "topics"})
+
+
+@dataclass(frozen=True)
+class CardTopic:
+    """EX2: one topic of a task's card as the user left it (``KbResearchTopic``)."""
+
+    text: str
+    source: TopicSource
+    area_id: str | None = None
+
+    def dump(self) -> dict[str, Any]:
+        return {"text": self.text, "source": self.source, "area_id": self.area_id}
 
 
 @dataclass(frozen=True)
@@ -35,6 +48,23 @@ class TaskRow:
     @property
     def topics(self) -> list[str]:
         return [str(topic) for topic in self.request.get("topics") or ()]
+
+    @property
+    def card(self) -> list[CardTopic]:
+        """EX2: the topics the task searches and judges by, with where each came from. A task from before
+        EX2 stored the agent's topics only: they were proposed."""
+        stored = self.request.get("card")
+        if not isinstance(stored, list):
+            return [CardTopic(text=topic, source="proposed") for topic in self.topics]
+        return [
+            CardTopic(
+                text=str(item["text"]),
+                source=cast(TopicSource, item.get("source") or "proposed"),
+                area_id=str(item["area_id"]) if item.get("area_id") else None,
+            )
+            for item in stored
+            if isinstance(item, dict) and item.get("text")
+        ]
 
 
 @dataclass(frozen=True)
@@ -89,6 +119,18 @@ def _permission(row: sqlite3.Row) -> PermissionRow:
         created_at=row["created_at"],
         decided_at=row["decided_at"],
     )
+
+
+#: ``update_permission`` field → its column (the topics are stored as JSON).
+_COLUMNS = {"topics": "topics_json"}
+
+
+def _column_value(name: str, value: Any) -> Any:
+    if name == "auto":
+        return int(value)
+    if name == "topics":
+        return _json([str(topic) for topic in value])
+    return value
 
 
 def _json(value: Any) -> str:
@@ -226,7 +268,7 @@ class ResearchStore:
     ) -> PermissionRow | None:
         if not set(fields) <= _PERMISSION_FIELDS:
             raise ValueError("Unknown research permission fields")
-        values = {name: int(value) if name == "auto" else value for name, value in fields.items()}
+        values = {_COLUMNS.get(name, name): _column_value(name, value) for name, value in fields.items()}
         query = (
             f"UPDATE research_permissions SET {', '.join(f'{name} = ?' for name in values)} WHERE id = ?"
         )

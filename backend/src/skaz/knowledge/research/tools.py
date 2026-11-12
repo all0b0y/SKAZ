@@ -44,13 +44,15 @@ class ResearchStartArgs(_Args):
         "derives short search topics from it and shows them to the user before anything is sent.",
     )
     area_id: KbEntityId | None = Field(
-        default=None, description="An Explore area id (from skaz_explore_read) to search around, if any."
+        default=None,
+        description="One of the user's topics on the Explore map (its id from skaz_explore_read) to search "
+        "around, if any.",
     )
     dates: KbDateWindow | None = Field(default=None, description="Only works published in this window.")
 
 
 class ExploreReadArgs(_Args):
-    area_id: KbEntityId | None = Field(default=None, description="Read one area of the map (its children).")
+    area_id: KbEntityId | None = Field(default=None, description="Read one topic of the map (its subtopics).")
     task_id: KbEntityId | None = Field(
         default=None, description="Read one research task's findings (in a task's own chat: that task)."
     )
@@ -109,9 +111,9 @@ def research_tools(service: ResearchTasks, runs: Callable[[str], RunRef | None])
         ),
         SkazTool(
             READ_TOOL,
-            "Read Explore: the map of areas (one level), research tasks with their state, findings "
-            "(scientific works SKAZ compared with the wiki: label, reason, theses, wiki pages they touch) "
-            "and the user's own marks and activity facts. Read-only; starts no search.",
+            "Read Explore: the map of the user's own topics (one level), research tasks with their state, "
+            "findings (scientific works SKAZ compared with the wiki: label, reason, theses, wiki pages they "
+            "touch) and the user's own marks and activity facts. Read-only; starts no search.",
             ExploreReadArgs,
             run=read,
             timeout_s=None,

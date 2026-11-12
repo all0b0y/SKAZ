@@ -16,14 +16,12 @@ from skaz.knowledge.api.schemas_explore import KbSearchPlanItem
 from skaz.knowledge.research.agent import TOPICS_INSTRUCTIONS
 from skaz.knowledge.research.store import TaskRow
 
+from . import test_b3_research as b3
 from .chat_support import finished
-from .test_b3_research import (  # noqa: F401  (``env`` is the shared fixture)
-    DESCRIPTION,
-    Env,
-    counters,
-    env,
-    finding,
-)
+from .test_b3_research import DESCRIPTION, Env, counters, finding
+
+#: B3's environment: the real app, a scripted agent and a fake funnel.
+env = b3.env
 
 RUSSIAN = "Найди, что нового в проверке утверждений для моей вики; это попросил коллега"
 
@@ -40,7 +38,9 @@ def topic_turns(env: Env) -> int:
 
 
 async def test_a_proposal_shows_the_agents_title_and_topics_and_starts_nothing(env: Env) -> None:
-    env.agents["codex"].topics = {"title": "Проверка утверждений", "topics": ["проверка утверждений", "fact-checking"]}
+    env.agents["codex"].topics = {
+        "title": "Проверка утверждений", "topics": ["проверка утверждений", "fact-checking"]
+    }
     chats_before = (await env.client.get("/kb/chats")).json()
     response = await env.client.post("/kb/research/proposals", json={"description": RUSSIAN})
     assert response.status_code == 200, response.text
@@ -107,7 +107,8 @@ async def test_a_task_starts_with_exactly_the_cards_topics_and_no_derivation(env
 
 async def test_card_topics_are_tidied_but_never_changed_or_filtered(env: Env) -> None:
     card = [topic("  graph   neural  networks "), topic("Graph neural networks", "proposed"), topic("rag")]
-    task = (await env.client.post("/kb/research/tasks", json={"description": DESCRIPTION, "topics": card})).json()
+    request = {"description": DESCRIPTION, "topics": card}
+    task = (await env.client.post("/kb/research/tasks", json=request)).json()
     # Spaces are tidied; the same topic twice is sent once (the first one wins).
     assert task["topics"] == [topic("graph neural networks"), topic("rag")]
     (_, _, body), = env.funnel.bodies
@@ -121,7 +122,8 @@ async def test_a_card_with_a_blank_topic_starts_nothing(env: Env) -> None:
     )
     assert (response.status_code, response.json()) == (422, {"code": "invalid_request"})
     too_many = [topic(f"topic {n}") for n in range(5)]
-    response = await env.client.post("/kb/research/tasks", json={"description": DESCRIPTION, "topics": too_many})
+    request = {"description": DESCRIPTION, "topics": too_many}
+    response = await env.client.post("/kb/research/tasks", json=request)
     assert response.status_code == 422
     assert env.funnel.bodies == [] and topic_turns(env) == 0
 
@@ -137,11 +139,14 @@ async def test_without_a_card_the_agents_topics_start_as_proposed(env: Env) -> N
 
 async def test_a_task_from_before_ex2_shows_its_topics_as_proposed(env: Env) -> None:
     task = (await env.client.post("/kb/research/tasks", json={"description": DESCRIPTION})).json()
+    with env.research.store.db.write() as connection:  # the row as a pre-EX2 build wrote it
+        connection.execute(
+            "UPDATE research_tasks SET request_json = ? WHERE id = ?",
+            (json.dumps({"topics": ["neural search"], "funnel": {}}), task["id"]),
+        )
     row = env.research.store.task(task["id"])
-    old = TaskRow(**{**row.__dict__, "id": "task-old", "chat_id": "chat-old",
-                     "request": {"topics": ["neural search"], "funnel": {}}})
-    env.research.store.add_task(old)
-    shown = (await env.client.get("/kb/research/tasks/task-old")).json()
+    assert isinstance(row, TaskRow) and row.topics == ["neural search"]
+    shown = (await env.client.get(f"/kb/research/tasks/{task['id']}")).json()
     assert shown["topics"] == [topic("neural search", "proposed")]
 
 

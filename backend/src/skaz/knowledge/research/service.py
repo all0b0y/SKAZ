@@ -4,6 +4,11 @@
   funnel logic. It starts from «+» (``create``) or from a chat's ``skaz_research_start`` behind a card.
 * Before anything is started the research agent turns the description into topics; only those leave the
   machine (C0-1). The card shows them, so Allow allows exactly what is sent. Deny creates nothing.
+* EX2 card: «+» asks for a proposal first (``propose``: title + proposed topics, nothing starts); the user
+  keeps/edits/removes them, types own ones and picks own topics from the map, and ``create`` starts with
+  exactly that card — no derivation. In a chat, Allow carries the card as the user left it
+  (``KbResearchDecide.topics``). Each topic is stored with its source and area; the funnel gets the card as
+  its search plan (one item per topic), so search and the fit decision use exactly these topics.
 * The card waits like ``WebSearchBroker``: no timeout, Allow once / Allow in this chat / Deny, the grant is
   per chat, Stop cancels it, and after a restart nothing waits (``recover``).
 * Progress and the final report go into the task's chat: a short note at every stop (with its honest
@@ -26,7 +31,13 @@ from typing import Any, Literal, Protocol
 
 from ...native_io import disk_call
 from ..api.contract_routes import ContractFailure
-from ..api.schemas_explore import KbFinding, KbFindingChannel, KbFunnelRun, KbFunnelStart
+from ..api.schemas_explore import (
+    KbFinding,
+    KbFindingChannel,
+    KbFunnelRun,
+    KbFunnelStart,
+    KbSearchPlanItem,
+)
 from ..api.schemas_explore_common import KbContinue, KbExploreJob
 from ..api.schemas_research import (
     KbExploreRead,
@@ -53,7 +64,7 @@ from ..service import KnowledgeService
 from . import RESEARCH_FINISHED
 from .agent import Derived, ResearchAgentUnavailable, SummaryPoint
 from .parts import permission_view
-from .store import PermissionRow, ResearchStore, TaskRow
+from .store import CardTopic, PermissionRow, ResearchStore, TaskRow
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +150,10 @@ def stop_note(run: KbExploreJob) -> str | None:
             "SKAZ doesn't switch to another source by itself."
         )
     if reason == "decision_model_required":
-        return "Paused: no model is chosen to sort the works by area. Choose one in this task to go on."
+        return (
+            "Paused: no model is chosen to judge whether the works fit this task's topics. "
+            "Choose one in this task to go on."
+        )
     if reason == "science_consent_required":
         return "Paused: science databases are turned off. Turn them on in Settings → Search, then Continue."
     if reason == "provider_unavailable":
@@ -259,9 +273,7 @@ class ResearchTasks:
             chat_id=row.chat_id,
             origin_chat_id=row.origin_chat_id,
             area_id=row.area_id,
-            # EX2 contract (step 0): X3 stores the card's topics with their source;
-            # pre-EX2 tasks were proposed.
-            topics=[KbResearchTopic(text=topic[:72], source="proposed") for topic in row.topics],
+            topics=[_topic_view(topic) for topic in row.card],
             run=_job(run),
             finding_count=run.counters.new,
             created_at=_when(row.created_at),
@@ -286,14 +298,24 @@ class ResearchTasks:
     # -- ResearchService: tasks ------------------------------------------------------------------------
 
     async def propose(self, body: KbResearchCreate) -> KbResearchProposal:
-        # EX2 step 0 — X3 implements; until then the route answers an honest 503 not_ready.
-        raise ContractFailure(503, "not_ready")
-
-    async def create(self, body: KbResearchCreate) -> KbResearchTask:
-        """«+» → New research task: the user's own start, so no card (the template says what is sent)."""
+        """«+» → New research task, before anything starts: the chat agent's title and proposed topics for
+        the description. Only the chat agent sees the description; nothing is searched, no task or chat."""
         self._ensure_ready()
         derived = await self._derive(body.description, engine=None, model=None)
-        row = await self._start(body, derived, origin=None)
+        return KbResearchProposal(
+            title=derived.title, topics=[_topic_view(topic) for topic in _proposed(derived.topics)]
+        )
+
+    async def create(self, body: KbResearchCreate) -> KbResearchTask:
+        """«+» → New research task. With the card (``topics``) it starts with exactly those topics, no
+        derivation; without it the chat agent derives them and they start as proposed."""
+        self._ensure_ready()
+        if body.topics is not None:
+            card = final_card(body.topics)
+            row = await self._start(body, card_title(card), card, origin=None)
+        else:
+            derived = await self._derive(body.description, engine=None, model=None)
+            row = await self._start(body, derived.title, _proposed(derived.topics), origin=None)
         return await self._view(row)
 
     async def tasks(self, cursor: str | None = None, limit: int = 30) -> KbResearchTasks:
@@ -357,16 +379,21 @@ class ResearchTasks:
                     decided_at=self._clock(),
                 )
             else:
+                # The card as the user left it (EX2); ``None`` = as proposed. A card that can't be sent
+                # (a blank topic) keeps waiting, as below.
+                card = final_card(body.topics) if body.topics is not None else _proposed(record.topics)
                 # Started first: if it can't start (science off, no agent) the card keeps waiting and the
                 # user sees why; Allow stays possible once that is fixed.
                 task = await self._start(
                     KbResearchCreate.model_validate(dict(record.arguments)),
-                    Derived(title=_title_of(record), topics=record.topics),
+                    _title_of(record),
+                    card,
                     origin=record.chat_id,
                 )
+                # The pointer shows what left, not what was proposed.
                 updated = await disk_call(
                     self.store.update_permission, request_id, expect=("pending",), status="allowed",
-                    decided_at=self._clock(), task_id=task.id,
+                    decided_at=self._clock(), task_id=task.id, topics=[topic.text for topic in card],
                 )
                 if updated is None:  # stopped meanwhile: the task it started must not go on unseen
                     with contextlib.suppress(KnowledgeError, ContractFailure):
@@ -462,7 +489,7 @@ class ResearchTasks:
         """"Allow in this chat": SKAZ still records the card (``auto``), so every start stays visible."""
         await disk_call(self.store.add_permission, base)
         try:
-            task = await self._start(body, derived, origin=base.chat_id)
+            task = await self._start(body, derived.title, _proposed(derived.topics), origin=base.chat_id)
         except (KnowledgeError, ContractFailure) as error:
             reason = start_problem(error)
             updated = await disk_call(
@@ -524,32 +551,30 @@ class ResearchTasks:
         except ResearchAgentUnavailable:
             raise ContractFailure(502, "provider_unavailable") from None
 
-    async def _start(self, body: KbResearchCreate, derived: Derived, *, origin: str | None) -> TaskRow:
+    async def _start(
+        self, body: KbResearchCreate, title: str, card: Sequence[CardTopic], *, origin: str | None
+    ) -> TaskRow:
         """The run first (a refused consent leaves nothing behind), then the task's chat and row."""
         task_id = new_id("task")
-        channels: list[KbFindingChannel] = (
-            ["continues", "branches", "search"] if body.area_id is not None else ["search"]
-        )
-        funnel_body = KbFunnelStart(
-            area_id=body.area_id,
-            # Only the topics leave (C0-1); OpenAlex reads «A OR B» as either topic.
-            query=" OR ".join(derived.topics),
-            dates=body.dates,
-            channels=channels,
-        )
-        run = await self.funnel.start_for_task(task_id, derived.title, funnel_body)
+        texts = [topic.text for topic in card]
+        funnel_body = funnel_start(body, card)
+        run = await self.funnel.start_for_task(task_id, title, funnel_body)
         try:
             engine = model = effort = None
             if origin is not None:  # a task started from a chat answers with that chat's agent
                 origin_chat = (await self.chats.summary(origin)).chat
                 engine, model, effort = origin_chat.engine, origin_chat.model, origin_chat.effort
-            view = await self.chats.create(title=derived.title, engine=engine, model=model, effort=effort)
+            view = await self.chats.create(title=title, engine=engine, model=model, effort=effort)
             chat_id = str(view.chat.id)
             now = self._clock()
             row = TaskRow(
-                id=task_id, title=derived.title, description=body.description, chat_id=chat_id,
+                id=task_id, title=title, description=body.description, chat_id=chat_id,
                 origin_chat_id=origin, area_id=body.area_id, job_id=run.id,
-                request={"topics": list(derived.topics), "funnel": funnel_body.model_dump(mode="json")},
+                request={
+                    "topics": texts,
+                    "card": [topic.dump() for topic in card],
+                    "funnel": funnel_body.model_dump(mode="json"),
+                },
                 reported=None, created_at=now, updated_at=now,
             )
             await disk_call(self.store.add_task, row)
@@ -560,7 +585,7 @@ class ResearchTasks:
         await self._post(row, [
             Message(id=new_id("msg"), chat_id=chat_id, seq=0, role="user", state="done", created_at=now,
                     parts=(TextPart(body.description),), input=MessageInput(text=body.description)),
-            self._note(row, "Searching scientific databases for: " + " · ".join(derived.topics)
+            self._note(row, "Searching scientific databases for: " + " · ".join(texts)
                        + ". Only these topics leave your computer."),
         ])
         logger.info("Research task %s started (run %s)", task_id, run.id)
@@ -729,7 +754,60 @@ def _report_key(run: KbExploreJob) -> str:
 
 def _title_of(record: PermissionRow) -> str:
     """The title for a card's task: the one the agent gave with the topics."""
-    return record.title or record.topics[0][:1].upper() + record.topics[0][1:]
+    return record.title or _capital(record.topics[0])
+
+
+def _capital(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
+def card_title(card: Sequence[CardTopic]) -> str:
+    """A task started from the «+» card: its first topic names it (the card carries no title)."""
+    return _capital(card[0].text)
+
+
+def _proposed(topics: Sequence[str]) -> list[CardTopic]:
+    return [CardTopic(text=topic, source="proposed") for topic in topics]
+
+
+def _topic_view(topic: CardTopic) -> KbResearchTopic:
+    return KbResearchTopic(text=topic.text[:72], source=topic.source, area_id=topic.area_id)
+
+
+def final_card(topics: Sequence[KbResearchTopic]) -> list[CardTopic]:
+    """The card as the user left it, sent as it is: spaces tidied and the same topic once (the first one
+    wins). Nothing is filtered or reworded — the user saw and chose every word. A blank topic is refused
+    (422) before anything starts."""
+    card: list[CardTopic] = []
+    seen: set[str] = set()
+    for topic in topics:
+        text = " ".join(topic.text.replace("\x00", " ").split())
+        if not text:
+            raise ContractFailure(422, "invalid_request")
+        if text.casefold() in seen:
+            continue
+        seen.add(text.casefold())
+        card.append(CardTopic(text=text, source=topic.source, area_id=topic.area_id))
+    if not card:
+        raise ContractFailure(422, "invalid_request")
+    return card
+
+
+def funnel_start(body: KbResearchCreate, card: Sequence[CardTopic]) -> KbFunnelStart:
+    """The seam to B2/X2: the card is the run's search plan, one item per topic, its words exactly the
+    topic (only these leave, C0-1); a topic picked from the map carries its area, so its hidden OpenAlex
+    label narrows the search and its materials seed continuations and neighbours. No query is derived."""
+    picked = body.area_id is not None or any(topic.area_id for topic in card)
+    channels: list[KbFindingChannel] = ["continues", "branches", "search"] if picked else ["search"]
+    return KbFunnelStart(
+        area_id=body.area_id,
+        query="",
+        dates=body.dates,
+        channels=channels,
+        plan=[
+            KbSearchPlanItem(area_id=topic.area_id, label=topic.text, terms=[topic.text]) for topic in card
+        ],
+    )
 
 
 def _when(value: str) -> datetime:

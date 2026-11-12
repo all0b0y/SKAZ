@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from ...native_io import disk_call
 from ..errors import KnowledgeError, NotFound
+from ..ids import utc_now
 from ..keyed_locks import KeyedLocks
 from .actions import ActionSpec, NotificationActions
 
@@ -35,6 +36,10 @@ NAVIGATION_ACTIONS = frozenset(
     {OPEN_MATERIAL.id, "open_explore", "open_research_task", "view_check", "check_novelty", "review_updates"}
 )
 ALREADY_RESOLVED = "This notification is already resolved."
+#: EX2: kinds that stay unread until the user sees their subject; only ``POST /kb/notifications/{id}/read``
+#: reads them, never the bell's read up to a cursor. ``research_finished`` (B3): read when the user opens
+#: the finished task (G2: it was read 1 s after it was created, as soon as the bell's feed showed it).
+SELF_READ_KINDS = frozenset({"research_finished"})
 
 
 class AlreadyResolved(KnowledgeError):
@@ -129,7 +134,17 @@ class NotificationFeed:
             return resolved
 
     def mark_read(self, up_to_seq: int) -> int:
-        return self.kb.notification_repo.mark_read(up_to_seq)
+        """The bell's read: everything up to ``up_to_seq``, except the kinds only their own read reads
+        (``SELF_READ_KINDS``); returns how many became read."""
+        repo = self.kb.notification_repo
+        marks = ",".join("?" for _ in SELF_READ_KINDS)
+        with repo.db.write() as connection:
+            cursor = connection.execute(
+                "UPDATE notifications SET read_at = ? WHERE read_at IS NULL AND seq <= ?"
+                f" AND kind NOT IN ({marks})",
+                (utc_now(), up_to_seq, *sorted(SELF_READ_KINDS)),
+            )
+            return int(cursor.rowcount)
 
     def mark_one_read(self, notification_id: str) -> bool:
         return self.kb.notification_repo.mark_one_read(notification_id)
