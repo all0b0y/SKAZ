@@ -100,7 +100,6 @@ export function AreaColumn({
   onTabChange,
   materials,
   findings,
-  worthClosing,
   run,
   repeatCheck,
   keyHintDismissed,
@@ -118,7 +117,6 @@ export function AreaColumn({
   onCloseFinding,
   onExploreFinding,
   onAddToWiki,
-  onSelectWorthClosing,
   FindingComponent,
   onOpenDocument,
   onOpenSettings,
@@ -181,7 +179,7 @@ export function AreaColumn({
               ) : (
                 <span className="kb-explore-steps__dot" />
               )}
-              <span>Sort by area</span>
+              <span>Check topic fit</span>
               <span className="kb-explore-steps__count">
                 {run.counters.decided} of {run.counters.after_rules}
               </span>
@@ -217,10 +215,10 @@ export function AreaColumn({
               {run.stop_reason === 'decision_model_required' && (
                 <>
                   <div className="kb-explore-stop-box__title">
-                    Choose how to sort candidates by area
+                    Choose how to check topic fit
                   </div>
                   <p className="kb-explore-stop-box__text">
-                    Sorting uses a small local model for free, or OpenRouter Jev.
+                    Checking topic fit uses a small local model for free, or OpenRouter Jev.
                   </p>
                   <div className="kb-explore-stop-box__actions">
                     {run.decision_choices.map((choice) => (
@@ -536,27 +534,6 @@ export function AreaColumn({
 
             {findings?.next_cursor && <button type="button" className="kb-explore-btn" disabled={loadingMore}
               onClick={onLoadMoreFindings}>Load more findings</button>}
-            {worthClosing.length > 0 && (
-              <div className="kb-explore-closing">
-                <div className="kb-explore-section-title">Worth closing</div>
-                {worthClosing.map((area) => (
-                  <button
-                    key={area.id}
-                    type="button"
-                    className="kb-explore-item"
-                    onClick={() => onSelectWorthClosing(area)}
-                  >
-                    <span className="kb-explore-item__title">{area.name}</span>
-                    <span className="kb-explore-item__sub">
-                      {area.gap_reason ??
-                        (area.pages === 0
-                          ? 'no pages yet · Find sources'
-                          : `thin · ${area.sources} source${area.newest_source_year ? `, ${area.newest_source_year}` : ''}`)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
           </>
         )}
       </div>

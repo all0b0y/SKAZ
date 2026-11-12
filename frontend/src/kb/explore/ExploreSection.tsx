@@ -13,6 +13,11 @@ import { AreaColumn } from './AreaColumn';
 import { FindingClientsProvider } from './finding';
 import { ExploreMap } from './ExploreMap';
 import { CheckProgress } from './CheckProgress';
+import { ScopePicker } from './ScopePicker';
+import { SearchPlan } from './SearchPlan';
+import { useSearchPlan } from './useSearchPlan';
+import { TopicLabelling } from './TopicLabelling';
+import { FunnelView } from './FunnelView';
 import { exploreIssue, type ExploreIssue } from './errors';
 import { useExploreScope } from './useExploreScope';
 import { useExploreJobs } from './useExploreJobs';
@@ -99,6 +104,7 @@ export function ExploreSection({
   const [openFinding, setOpenFinding] = useState<KbFinding | null>(initial?.finding ?? null);
   const [keyHintDismissed, setKeyHintDismissed] = useState(false);
   const [query, setQuery] = useState('');
+  const [searchOverride, setSearchOverride] = useState<KbArea | null | undefined>();
   const [actionIssue, setActionIssue] = useState<ExploreIssue | null>(null);
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
@@ -126,18 +132,32 @@ export function ExploreSection({
 
   const activeScopeArea = selectedTopic ?? currentMapArea;
   const scopeId = activeScopeArea?.id ?? map?.parent_id ?? null;
-  const scopeName = activeScopeArea?.name ?? 'all your areas';
+  const scopeName = activeScopeArea?.name ?? 'All your topics';
+  const searchArea = searchOverride === undefined ? activeScopeArea : searchOverride;
+  const searchRequest = useMemo(() => ({ area_id: searchArea?.id ?? null, query: query.trim(), all_topics: !searchArea && !query.trim() }), [searchArea?.id, query]);
+  const searchPlan = useSearchPlan(clients.discovery, searchRequest, hidden);
   const isRootScope = scopeId === null;
   const scopePages = activeScopeArea?.pages ?? map?.total_pages ?? 0;
-  const sourcesCount = activeScopeArea?.sources ?? map?.total_sources ?? 0;
+  const sourcesCount = activeScopeArea?.materials ?? map?.total_sources ?? 0;
+
+  useEffect(() => {
+    if (hidden || !map || !['running', 'paused'].includes(map.labelling.state)) return;
+    const timer = window.setInterval(() => void scope.refresh(), 1000);
+    return () => window.clearInterval(timer);
+  }, [hidden, map?.labelling.state, scope.refresh]);
+
+  const handleSortTopics = () => perform(async () => {
+    if (!clients.topics) throw new KbApiError(503, '', 'not_ready');
+    scope.saveLabelling(await clients.topics.sort());
+  });
 
   const navigateToParent = useCallback(async (parentId: string | null) => {
-    setOpenFinding(null);
+    setOpenFinding(null); setSearchOverride(undefined);
     await scope.load(parentId);
   }, [scope.load]);
 
   const handleSelectAreaTile = useCallback(async (area: KbArea) => {
-    setOpenFinding(null);
+    setOpenFinding(null); setSearchOverride(undefined);
     void clients.areas.opened(area.id).catch((error) => setActionIssue(exploreIssue(error)));
     if (area.has_children && !isGapArea(area)) await scope.load(area.id);
     else await scope.load(map?.parent_id ?? null, area);
@@ -172,9 +192,9 @@ export function ExploreSection({
 
   const handleStartSearch = (e?: FormEvent) => {
     e?.preventDefault();
+    if (!searchPlan.ready || scope.loading) return;
     return perform(async () => {
-      const trimmed = query.trim();
-      const started = await clients.explore.start({ area_id: scopeId, ...(trimmed ? { query: trimmed } : {}) });
+      const started = await clients.explore.start({ ...searchRequest, plan: searchPlan.items });
       setOpenFinding(null); jobs.setRun(started);
     });
   };
@@ -308,9 +328,9 @@ export function ExploreSection({
                 {formatWikiShare(activeScopeArea.wiki_share)} of your wiki
               </span>
               <button type="button" className="kb-explore-crumbs__btn" aria-pressed={activeScopeArea.pinned}
-                aria-label={activeScopeArea.pinned ? 'Unpin area from weekly discovery' : 'Pin area for weekly discovery'}
-                title="Weekly discovery uses pinned areas" disabled={busy} onClick={() => void handlePin()}>
-                {activeScopeArea.pinned ? 'Unpin area' : 'Pin area'}
+                aria-label={activeScopeArea.pinned ? 'Unpin topic from weekly discovery' : 'Pin topic for weekly discovery'}
+                title="Weekly discovery uses pinned topics" disabled={busy} onClick={() => void handlePin()}>
+                {activeScopeArea.pinned ? 'Unpin topic' : 'Pin topic'}
               </button>
             </>
           )}
@@ -350,25 +370,21 @@ export function ExploreSection({
             <>
               <form className="kb-explore-search__field" onSubmit={(e) => void handleStartSearch(e)}>
                 <Icon name="search" size={14} />
-                <span
-                  className="kb-explore-search__scope"
-                  title="Where to look — follows the area you open"
-                >
-                  in {scopeName}
-                </span>
+                <ScopePicker clients={clients} value={searchArea} onChange={setSearchOverride} onQuery={setQuery} disabled={busy} />
                 <input
                   type="text"
+                  aria-label="Precise query"
                   className="kb-explore-search__input"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="What exactly? Optional — e.g. evaluating RAG answers"
                 />
-                <button type="submit" className="kb-explore-search__go" disabled={busy || scope.loading || !map}>
+                <button type="submit" className="kb-explore-search__go" disabled={busy || scope.loading || !searchPlan.ready}>
                   Find what&apos;s new
                 </button>
               </form>
               {weeklyDay && (
-                <span className="kb-explore-search__week" title="Pinned areas, free steps only">
+                <span className="kb-explore-search__week" title="Pinned topics, free steps only">
                   Weekly · {weeklyDay}
                 </span>
               )}
@@ -384,6 +400,14 @@ export function ExploreSection({
           )}
         </div>
 
+        {!isScanning && <SearchPlan items={searchPlan.items} message={searchPlan.message} failed={searchPlan.failed}
+          onRetry={searchPlan.retry} onChange={searchPlan.edit} disabled={busy} />}
+        {map && <TopicLabelling job={map.labelling} unsorted={map.unsorted_materials} busy={busy}
+          onSort={() => void handleSortTopics()} onSettings={handleOpenSettings} />}
+        {run && <FunnelView key={run.id} run={run} client={clients.discovery} hidden={hidden} busy={busy}
+          onCheckNovelty={(candidateIds) => void perform(async () => {
+            jobs.setRun(await clients.explore.start({ candidate_ids: candidateIds, channels: [] }));
+          })} />}
         {repeatCheck && <CheckProgress kind="repeat" job={repeatCheck} busy={busy}
           onPause={() => void handlePauseRepeats()} onResume={(choice) => void handleResumeRepeats(choice)}
           onOpenSettings={() => handleOpenSettings('search')} />}
@@ -391,7 +415,8 @@ export function ExploreSection({
           onPause={() => void handlePauseWeekly()} onResume={(choice) => void handleResumeWeekly(choice)}
           onOpenSettings={() => handleOpenSettings('search')} />}
         <div className="kb-explore-body" aria-busy={scope.loading}>
-          <ExploreMap
+          {map && <ExploreMap
+            scopeKey={map.parent_id}
             areas={map?.areas ?? []}
             parentPages={currentMapArea?.pages ?? map?.total_pages ?? 0}
             selectedAreaId={selectedTopic?.id ?? null}
@@ -399,9 +424,9 @@ export function ExploreSection({
             activeAreaIds={run?.active_area_ids ?? []}
             justDone={Boolean(isJustDone)}
             onSelectArea={(area) => void handleSelectAreaTile(area)}
-          />
+          />}
 
-          {scope.loading ? <p className="kb-explore-cap" role="status">Loading area…</p> : scope.issue && !findings ? null : <AreaColumn
+          {scope.loading ? <p className="kb-explore-cap" role="status">Loading topics…</p> : (scope.issue && !findings) || (map?.labelling.state === 'not_ready' && map.areas.length === 0 && !run) ? null : <AreaColumn
             busy={busy}
             loadingMore={scope.loadingMore}
             onLoadMoreFindings={() => void scope.loadMore('findings')}

@@ -98,15 +98,13 @@ export function squarify<T extends WeightedItem>(
   return out;
 }
 
+/** Empty topics are available in the picker and topic manager, but take no map area. */
 export function isGapArea(area: KbArea): boolean {
-  return area.pages === 0 || area.depth === 'empty';
+  return area.materials === 0;
 }
 
-export function tileWeight(area: KbArea, parentPages: number): number {
-  if (isGapArea(area)) {
-    return Math.max(parentPages * 0.045, 1);
-  }
-  return Math.max(area.pages, 1);
+export function tileWeight(area: KbArea, _parentMaterials?: number): number {
+  return area.level === 'custom' && !area.hidden ? Math.max(0, area.materials) : 0;
 }
 
 export function formatWikiShare(share: number): string {
@@ -118,44 +116,33 @@ export function formatWikiShare(share: number): string {
 }
 
 export interface AreaTileLayout {
-  area: KbArea;
+  area: KbArea | null;
+  members: readonly KbArea[];
   weight: number;
+  share: number;
   x: number;
   y: number;
   w: number;
   h: number;
-  isGap: boolean;
   small: boolean;
 }
 
+/** Small topics keep their full weight inside Other; there is no minimum or invented gap weight. */
 export function layoutAreaTiles(
   areas: readonly KbArea[],
-  parentPages: number,
+  _parentMaterials: number,
   width: number,
   height: number,
 ): AreaTileLayout[] {
-  const effectiveParent = parentPages > 0 ? parentPages : areas.reduce((s, a) => s + a.pages, 0) || 100;
-  const weighted = areas
-    .map((area) => ({
-      area,
-      weight: tileWeight(area, effectiveParent),
-    }))
-    .sort((a, b) => b.weight - a.weight);
-
-  return squarify(weighted, 0, 0, width, height).map((rect) => {
-    const x = rect.x + 2;
-    const y = rect.y + 2;
-    const w = Math.max(24, rect.w - 4);
-    const h = Math.max(24, rect.h - 4);
-    return {
-      area: rect.area,
-      weight: rect.weight,
-      x,
-      y,
-      w,
-      h,
-      isGap: isGapArea(rect.area),
-      small: w < 130 || h < 80,
-    };
-  });
+  const populated = areas.filter((area) => tileWeight(area) > 0).sort((a, b) => b.materials - a.materials || a.id.localeCompare(b.id));
+  const total = populated.reduce((sum, area) => sum + area.materials, 0);
+  const small = populated.filter((area) => area.materials / total < 0.025);
+  const smallIds = new Set(small.map((area) => area.id));
+  const weighted = populated.filter((area) => !smallIds.has(area.id)).map((area) => ({
+    area: area as KbArea | null, members: [area] as readonly KbArea[], weight: area.materials, share: area.wiki_share,
+  }));
+  if (small.length) weighted.push({ area: null, members: small, weight: small.reduce((sum, area) => sum + area.materials, 0), share: small.reduce((sum, area) => sum + area.wiki_share, 0) });
+  return squarify(weighted, 0, 0, width, height).map((rect) => ({
+    ...rect, x: rect.x + 2, y: rect.y + 2, w: Math.max(0, rect.w - 4), h: Math.max(0, rect.h - 4), small: rect.w < 130 || rect.h < 80,
+  }));
 }

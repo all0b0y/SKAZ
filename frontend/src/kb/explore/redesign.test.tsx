@@ -95,7 +95,7 @@ describe('EX2 exact search plan and scope', () => {
   it('previews all populated topics and sends only the edited plan on the click', async () => {
     const kb = ex2Kb();
     render(<ExploreSection clients={kb} />);
-    expect(await screen.findByText(/Will search:/)).toHaveTextContent('AI agents');
+    await waitFor(() => expect(screen.getByText(/Will search:/)).toHaveTextContent('AI agents'));
     expect(kb.discovery.plan).toHaveBeenCalledWith({ area_id: null, query: '', all_topics: true });
     expect(kb.explore.start).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Edit search plan' }));
@@ -121,6 +121,7 @@ describe('EX2 exact search plan and scope', () => {
     let resolveOld!: (p: KbSearchPlan) => void;
     kb.discovery.plan.mockImplementationOnce(() => new Promise((r) => { resolveOld = r; }));
     render(<ExploreSection clients={kb} />);
+    await waitFor(() => expect(kb.discovery.plan).toHaveBeenCalledTimes(1));
     fireEvent.click(await screen.findByRole('button', { name: 'Search scope: All your topics' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Search topics or concepts' }), { target: { value: 'harnesses' } });
     fireEvent.click(await screen.findByRole('button', { name: /AI agents › Agent harnesses/ }));

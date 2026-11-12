@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { KbArea, KbAreaMap, KbAreaMaterials, KbFindings } from '../../api/kb/types.gen';
+import type { KbArea, KbAreaMap, KbAreaMaterials, KbFindings, KbTopicLabelling } from '../../api/kb/types.gen';
 import { exploreIssue, type ExploreIssue } from './errors';
 import { isGapArea } from './treemap';
 import type { ExploreClients, ExploreInitialState } from './types';
@@ -42,13 +42,14 @@ export function useExploreScope(clients: ExploreClients, initial?: ExploreInitia
   const refreshPending = useRef(false);
   const lastLoad = useRef<{ parentId: string | null; topic?: KbArea | string }>({ parentId: seed.current?.parentId ?? null, topic: seed.current?.topicId });
   const writeVersion = useRef(0);
-  const pins = useRef(new Map<string, { version: number; pinned: boolean }>());
+  const writes = useRef(new Map<string, { version: number; area: KbArea }>());
+  const labellingWrite = useRef<{ version: number; job: KbTopicLabelling } | null>(null);
   const reconcileMap = useCallback((nextMap: KbAreaMap, readVersion: number): KbAreaMap => {
     const reconcile = (items: KbArea[]) => items.map((area) => {
-      const saved = pins.current.get(area.id);
-      return saved && saved.version > readVersion ? { ...area, pinned: saved.pinned } : area;
+      const saved = writes.current.get(area.id);
+      return saved && saved.version > readVersion ? saved.area : area;
     });
-    return { ...nextMap, areas: reconcile(nextMap.areas), breadcrumbs: reconcile(nextMap.breadcrumbs), worth_closing: reconcile(nextMap.worth_closing) };
+    return { ...nextMap, labelling: labellingWrite.current && labellingWrite.current.version > readVersion ? labellingWrite.current.job : nextMap.labelling, areas: reconcile(nextMap.areas), breadcrumbs: reconcile(nextMap.breadcrumbs), worth_closing: reconcile(nextMap.worth_closing) };
   }, []);
 
   const readFindings = useCallback(async (areaId: string | null, count: number) => {
@@ -155,12 +156,17 @@ export function useExploreScope(clients: ExploreClients, initial?: ExploreInitia
   }, [clients, findings, materials]);
 
   const saveArea = useCallback((area: KbArea) => {
-    pins.current.set(area.id, { version: ++writeVersion.current, pinned: area.pinned });
+    writes.current.set(area.id, { version: ++writeVersion.current, area });
     const replace = (items: KbArea[]) => items.map((item) => item.id === area.id ? area : item);
     setMap((old) => old ? { ...old, areas: replace(old.areas), breadcrumbs: replace(old.breadcrumbs), worth_closing: replace(old.worth_closing) } : old);
     setSelectedTopic((old) => old?.id === area.id ? area : old);
   }, []);
 
+  const saveLabelling = useCallback((job: KbTopicLabelling) => {
+    labellingWrite.current = { version: ++writeVersion.current, job };
+    setMap((old) => old ? { ...old, labelling: job } : old);
+  }, []);
+
   const retry = useCallback(() => load(lastLoad.current.parentId, lastLoad.current.topic), [load]);
-  return { map, selectedTopic, materials, findings, activeTab, setActiveTab, loading, loadingMore, issue, load, retry, refresh, loadMore, saveArea };
+  return { map, selectedTopic, materials, findings, activeTab, setActiveTab, loading, loadingMore, issue, load, retry, refresh, loadMore, saveArea, saveLabelling };
 }

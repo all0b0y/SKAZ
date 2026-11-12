@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import { createDiscoveryClient, createTopicActions, type DiscoveryClient, type TopicActions } from './clients';
 import type {
   KbAreaMaterial,
   KbContinue,
@@ -25,10 +26,14 @@ export interface ExploreClients {
   science: ScienceClient;
   repeats: RepeatsClient;
   maintenance: MaintenanceClient;
+  topics?: TopicActions;
+  discovery?: DiscoveryClient;
 }
 
 export function createExploreClients(client: Pick<KbClient, 'call'>): ExploreClients {
   return {
+    topics: createTopicActions(client),
+    discovery: createDiscoveryClient(client),
     areas: createAreasClient(client),
     explore: createExploreClient(client),
     science: createScienceClient(client),
