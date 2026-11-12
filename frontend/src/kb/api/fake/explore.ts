@@ -14,5 +14,14 @@ export function createFakeExploreClient(): ExploreClient {
     explore: async () => structuredClone(f.KbExploring),
     add_to_wiki: async () => structuredClone(f.KbFindingImported),
     exploring: async () => structuredClone(f.KbExploringList),
+    searches: async () => structuredClone(f.KbSearches),
+    search_findings: async () => structuredClone(f.KbFindings),
+    rename_search: async () => structuredClone(f.KbSearch),
+    delete_search: async () => structuredClone(f.KbAcknowledged),
+    seen: async () => structuredClone(f.KbFinding),
+    dismiss: async () => structuredClone(f.KbFinding),
+    restore: async () => structuredClone(f.KbFinding),
+    add_to_materials: async () => structuredClone(f.KbFindingImported),
+    discuss: async () => structuredClone(f.KbDiscussion),
   };
 }

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -969,8 +969,9 @@ class AreasStore:
             material_pages: dict[str, set[str]] = defaultdict(set)
             #: EX3 (UX-13): the map's tile size — concept pages only (a note per material would skew it).
             material_concepts: dict[str, set[str]] = defaultdict(set)
+            concept_titles: dict[str, str] = {}
             for row in conn.execute(
-                "SELECT ps.page_id, ps.material_id, p.kind FROM page_sources ps "
+                "SELECT ps.page_id, ps.material_id, p.kind, p.title FROM page_sources ps "
                 "JOIN pages p ON p.id = ps.page_id "
                 "JOIN materials m ON m.id = ps.material_id "
                 f"WHERE p.kind NOT IN ({placeholders_study})",
@@ -979,6 +980,7 @@ class AreasStore:
                 material_pages[str(row["material_id"])].add(str(row["page_id"]))
                 if row["kind"] == "concept":
                     material_concepts[str(row["material_id"])].add(str(row["page_id"]))
+                    concept_titles[str(row["page_id"])] = str(row["title"] or "")
             wiki_materials = set(material_pages)
 
             # Origins only for OpenAlex rows of builds before EX2 (never on the map).
@@ -1042,6 +1044,10 @@ class AreasStore:
             pset: set[str] = set().union(*(material_pages.get(mid, set()) for mid in mset))
             page_count = len(pset)
             concept_count = len(set().union(*(material_concepts.get(mid, set()) for mid in mset)))
+            # The topic's main concepts: the ones most of its materials gave the wiki.
+            spread: Counter[str] = Counter(cid for mid in mset for cid in material_concepts.get(mid, ()))
+            ranked = sorted(spread.items(), key=lambda kv: (-kv[1], concept_titles.get(kv[0], "")))
+            top_concepts = [concept_titles[cid] for cid, _ in ranked if concept_titles.get(cid)][:8]
             years = [
                 yr
                 for mid in mset
@@ -1086,6 +1092,7 @@ class AreasStore:
                     "children_total": children_total,
                     "pages": page_count,
                     "concepts": concept_count,
+                    "top_concepts": top_concepts,
                     "sources": len(mset),
                     "newest_source_year": max(years) if years else None,
                     "recent_activity_at": (

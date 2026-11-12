@@ -49,6 +49,8 @@ class KbArea(BaseModel):
     #: EX3 (UX-13): concept pages of the wiki made from this topic's materials — the tile's size. A concept
     #: drawn from two topics counts in each.
     concepts: int = 0
+    #: EX3: up to 8 concept titles most of the topic's materials gave the wiki (the topic panel's chips).
+    top_concepts: list[str] = Field(default_factory=list)
     sources: int
     newest_source_year: int | None
     recent_activity_at: datetime | None

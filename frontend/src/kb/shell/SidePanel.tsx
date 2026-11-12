@@ -10,6 +10,7 @@ import { usePrefs } from '../state/context';
 import { useMotionLevel } from '../ui/motionLevel';
 import type { Section } from '../state/prefs';
 import { GUTTER } from './layout';
+import { ExploreSide } from '../explore/ExploreSide';
 
 /** A rail section switch crossfades the panel body (opacity only; nothing at calm or off). */
 export const SECTION_FADE_MS = 140;
@@ -55,6 +56,7 @@ export function SidePanel({ width }: { width: number }) {
         {section === 'chats' && <ChatList />}
         {section === 'materials' && <LibraryPanel />}
         {section === 'wiki' && <WikiSide />}
+        {section === 'explore' && <ExploreSide />}
         {section === 'study' && <StudyShelf />}
         {section === 'graph' && <GraphSide />}
         {section === 'notifications' && <NotificationsFeed />}

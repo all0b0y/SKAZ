@@ -233,6 +233,7 @@ export interface KbArea {
   children_total: number;
   pages: number;
   concepts?: number;
+  top_concepts?: string[];
   sources: number;
   newest_source_year: number | null;
   recent_activity_at: string | null;

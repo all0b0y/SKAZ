@@ -49,7 +49,7 @@ export function Shell() {
   // The graph asks for a wide panel (v4/v5); it still yields to the centre minimum.
   const wanted = right?.kind === 'graph' ? Math.max(rightWidth, GRAPH_W) : rightWidth;
   const layout = computeLayout({
-    windowWidth, sideOpen: sideOpen && !isExplore, sideWidth, docOpen: right !== null, docExpanded, rightWidth: wanted,
+    windowWidth, sideOpen, sideWidth, docOpen: right !== null, docExpanded, rightWidth: wanted,
   });
   const { sideMax, rightMax } = resizeLimits(windowWidth, layout);
   // AnimatedList (FIX2 S-H1): only the side list shown when the app opens may stagger in.
