@@ -23,8 +23,10 @@ from .schemas_science import SCIENCE_TOPIC_CHARS, KbScienceWork
 
 KbFindingLabel = Literal["new", "extends", "contradicts", "branch", "covered"]
 KbFindingChannel = Literal["continues", "branches", "search"]
-#: EX3 (UX-2): New → Seen (opened) → In materials / Dismissed («Not for me»). Kept per work across searches.
-KbFindingState = Literal["new", "seen", "dismissed", "materials"]
+#: EX3 (UX-2): New → Seen → Importing → In materials / Dismissed («Not for me»).
+KbFindingState = Literal["new", "seen", "dismissed", "importing", "materials"]
+#: FX-2: how a finding was imported into «From Explore».
+KbImportedContent = Literal["pdf", "full_text", "abstract_only", "link_only"]
 #: EX3 (UX-3): ``open`` — a free copy answered with text; ``paid`` — only the publisher has it.
 KbFindingAccess = Literal["open", "paid", "unchecked"]
 KbFindingsShow = Literal["active", "new", "seen", "dismissed"]
@@ -132,7 +134,7 @@ class KbFinding(BaseModel):
     repeat_hint: str | None
     read_mark: KbReadMarkValue | None
     material_id: str | None
-    text_available: Literal["full_text", "abstract_only", "unchecked"]
+    text_available: Literal["pdf", "full_text", "abstract_only", "link_only", "unchecked"]
     created_at: datetime
     #: EX3: what the user did with this work (any search).
     state: KbFindingState = "new"
@@ -145,6 +147,9 @@ class KbFinding(BaseModel):
     has_abstract: bool = True
     #: EX3: the «Discuss» chat of this finding, once opened.
     discuss_chat_id: str | None = None
+    #: FX-2: background import in progress and what content kind was imported once finished.
+    importing: bool = False
+    imported_content: KbImportedContent | None = None
 
 
 class KbFindingGroup(BaseModel):
@@ -166,10 +171,11 @@ class KbFindings(BaseModel):
 
 class KbFindingImported(BaseModel):
     finding_id: KbEntityId
-    material_id: str
-    content: Literal["full_text", "abstract_only"]
+    material_id: str | None = None
+    content: KbImportedContent = "full_text"
+    importing: bool = False
     #: EX3 (UX-11): Explore adds to the «From Explore» folder without the wiki; the wiki comes later.
-    to_wiki: bool = True
+    to_wiki: bool = False
 
 
 class KbSearch(BaseModel):
@@ -180,6 +186,8 @@ class KbSearch(BaseModel):
     owner: Literal["explore", "weekly"]
     area_id: KbEntityId | None
     query: str
+    #: FX-1 / FX-5: the English search terms sent to OpenAlex (shown in header and empty state).
+    terms: list[str] = Field(default_factory=list)
     state: KbExploreJobState
     stage: str
     stop_reason: str | None
@@ -187,7 +195,10 @@ class KbSearch(BaseModel):
     checkpoint_revision: int | None
     #: ``found`` → ``fit`` → ``new`` (the funnel line) and how many had no text to read.
     found: int
+    after_rules: int = 0
+    decided: int = 0
     fit: int
+    novelty_checked: int = 0
     new: int
     no_text: int
     #: Findings not opened, dismissed or added — the «+N».
@@ -209,3 +220,4 @@ class KbSearchRename(KbContractRequest):
 class KbDiscussion(BaseModel):
     finding_id: KbEntityId
     chat_id: str
+    material_id: str | None = None

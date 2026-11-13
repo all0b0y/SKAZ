@@ -16,13 +16,14 @@ KbStopReason = Literal[
     "app_exit",
     "openalex_daily_limit",
     "decision_model_required",
+    "agent_required",
     "science_consent_required",
     "provider_unavailable",
     "completed",
     "cancelled",
     "failed",
 ]
-KbRunStage = Literal["collect", "rules", "decision", "novelty", "ready", "links", "repeats"]
+KbRunStage = Literal["plan", "collect", "rules", "decision", "novelty", "ready", "links", "repeats"]
 KbJobOwner = Literal["explore", "research", "links", "weekly", "repeats"]
 #: What one budget step counts. The funnel is always 30 candidates per batch (decision 3a+).
 KbBudgetUnit = Literal["candidate", "claim_comparison", "material", "link"]

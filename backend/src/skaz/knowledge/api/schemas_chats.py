@@ -278,6 +278,15 @@ class KbMessage(BaseModel):
     input: KbMessageInput | None
 
 
+class KbDiscussFinding(BaseModel):
+    """FX-3: the Explore finding a Discuss chat is about (bound to its material when added, else its card)."""
+
+    finding_id: str
+    title: str
+    material_id: str | None = None
+    importing: bool = False
+
+
 class KbChatSummary(BaseModel):
     id: str
     title: str
@@ -299,6 +308,8 @@ class KbChatSummary(BaseModel):
     waiting_for_user: bool = False
     #: 0.4.0 B3: this chat is a research task's own chat (its id); ``null`` for every other chat.
     research_task_id: str | None = None
+    #: FX-3: set when this chat was opened by Explore's «Discuss» on a finding.
+    discuss_finding: KbDiscussFinding | None = None
 
 
 class KbChat(KbChatSummary):

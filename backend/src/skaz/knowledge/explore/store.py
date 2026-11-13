@@ -91,6 +91,18 @@ class ExploreStore:
             return None
         return RunRow(row["id"], row["area_id"], row["task_id"], json.loads(row["request_json"]))
 
+    def update_run_request(self, run_id: str, changes: Mapping[str, Any]) -> RunRow | None:
+        with self.db.write() as connection:
+            row = connection.execute("SELECT * FROM explore_runs WHERE id = ?", (run_id,)).fetchone()
+            if row is None:
+                return None
+            request = {**json.loads(row["request_json"]), **changes}
+            connection.execute(
+                "UPDATE explore_runs SET request_json = ? WHERE id = ?",
+                (json.dumps(request, ensure_ascii=False), run_id),
+            )
+        return RunRow(row["id"], row["area_id"], row["task_id"], request)
+
     def runs(self, run_ids: Sequence[str]) -> dict[str, RunRow]:
         if not run_ids:
             return {}

@@ -401,6 +401,7 @@ export interface KbChat {
   unread: boolean;
   waiting_for_user?: boolean;
   research_task_id?: string | null;
+  discuss_finding?: KbDiscussFinding | null;
   messages: KbMessage[];
   cursor: number;
 }
@@ -492,6 +493,7 @@ export interface KbChatSummary {
   unread: boolean;
   waiting_for_user?: boolean;
   research_task_id?: string | null;
+  discuss_finding?: KbDiscussFinding | null;
 }
 
 /** The chat's "Allow in this chat" for web search (the header chip; revoked with DELETE). */
@@ -512,7 +514,7 @@ export interface KbCheckNotification {
 export interface KbCheckpoint {
   id: string;
   revision: number;
-  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stage: "plan" | "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
   cursor: string | null;
   completed_ids: string[];
   pending_ids: string[];
@@ -728,9 +730,18 @@ export interface KbDisagreementSide {
   text: string;
 }
 
+/** FX-3: the Explore finding a Discuss chat is about (bound to its material when added, else its card). */
+export interface KbDiscussFinding {
+  finding_id: string;
+  title: string;
+  material_id?: string | null;
+  importing?: boolean;
+}
+
 export interface KbDiscussion {
   finding_id: string;
   chat_id: string;
+  material_id?: string | null;
 }
 
 export interface KbEnginePause {
@@ -837,14 +848,16 @@ export interface KbFinding {
   repeat_hint: string | null;
   read_mark: "useful_method" | "changed_my_view" | "already_knew" | "not_for_me" | null;
   material_id: string | null;
-  text_available: "full_text" | "abstract_only" | "unchecked";
+  text_available: "pdf" | "full_text" | "abstract_only" | "link_only" | "unchecked";
   created_at: string;
-  state?: "new" | "seen" | "dismissed" | "materials";
+  state?: "new" | "seen" | "dismissed" | "importing" | "materials";
   access?: "open" | "paid" | "unchecked";
   read_url?: string | null;
   new_line?: string | null;
   has_abstract?: boolean;
   discuss_chat_id?: string | null;
+  importing?: boolean;
+  imported_content?: "pdf" | "full_text" | "abstract_only" | "link_only" | null;
 }
 
 export interface KbFindingGroup {
@@ -857,8 +870,9 @@ export interface KbFindingGroup {
 
 export interface KbFindingImported {
   finding_id: string;
-  material_id: string;
-  content: "full_text" | "abstract_only";
+  material_id?: string | null;
+  content?: "pdf" | "full_text" | "abstract_only" | "link_only";
+  importing?: boolean;
   to_wiki?: boolean;
 }
 
@@ -968,8 +982,8 @@ export interface KbFunnelRun {
   id: string;
   owner: "explore" | "research" | "links" | "weekly" | "repeats";
   state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
-  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
-  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  stage: "plan" | "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "agent_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
   budget: KbRunBudget;
   counters: KbRunCounters;
   checkpoint: KbCheckpoint | null;
@@ -1207,8 +1221,8 @@ export interface KbJobSummary {
   owner: "explore" | "research" | "links" | "weekly" | "repeats";
   title: string;
   state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
-  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
-  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  stage: "plan" | "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "agent_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
   budget: KbRunBudget;
   task_id: string | null;
   chat_id: string | null;
@@ -1289,8 +1303,8 @@ export interface KbLinkCheck {
   id: string;
   owner: "explore" | "research" | "links" | "weekly" | "repeats";
   state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
-  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
-  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  stage: "plan" | "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "agent_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
   budget: KbRunBudget;
   counters: KbRunCounters;
   checkpoint: KbCheckpoint | null;
@@ -1976,8 +1990,8 @@ export interface KbRepeatCheck {
   id: string;
   owner: "explore" | "research" | "links" | "weekly" | "repeats";
   state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
-  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
-  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  stage: "plan" | "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "agent_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
   budget: KbRunBudget;
   counters: KbRunCounters;
   checkpoint: KbCheckpoint | null;
@@ -2140,13 +2154,17 @@ export interface KbSearch {
   owner: "explore" | "weekly";
   area_id: string | null;
   query: string;
+  terms?: string[];
   state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
   stage: string;
   stop_reason: string | null;
   checkpoint_id: string | null;
   checkpoint_revision: number | null;
   found: number;
+  after_rules?: number;
+  decided?: number;
   fit: number;
+  novelty_checked?: number;
   new: number;
   no_text: number;
   unseen: number;
@@ -2753,8 +2771,8 @@ export interface KbWeeklyCheck {
   id: string;
   owner: "explore" | "research" | "links" | "weekly" | "repeats";
   state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
-  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
-  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  stage: "plan" | "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "agent_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
   budget: KbRunBudget;
   counters: KbRunCounters;
   checkpoint: KbCheckpoint | null;

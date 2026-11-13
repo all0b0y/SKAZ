@@ -44,6 +44,7 @@ export interface ExploreSectionProps {
 }
 
 export const STAGE_STEP: Record<KbFunnelRun['stage'], number> = {
+  plan: 1,
   collect: 1,
   rules: 2,
   links: 2,

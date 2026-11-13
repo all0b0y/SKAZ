@@ -119,7 +119,7 @@ export function SearchPage(props: SearchPageProps) {
 
   const addToMaterials = (f: KbFinding) => act(async () => {
     const added = await explore.add_to_materials(f.id);
-    replace({ ...f, state: 'materials', material_id: added.material_id });
+    replace({ ...f, state: 'materials', material_id: added.material_id ?? null });
     onChanged();
     toast({ text: 'Added to Materials › From Explore · not in the wiki yet', tone: 'done' });
   });

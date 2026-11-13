@@ -98,7 +98,7 @@ from .novelty import (
 )
 from .planning import SearchPlanner
 from .protocols import NoveltyChecker
-from .reading import ReadingDesk
+from .reading import ReadingDesk, is_real_abstract
 from .rules import (
     Seed,
     blocked_by_rules,
@@ -190,6 +190,7 @@ class ExploreFunnel:
         search_rules: Callable[[], ActiveRules | None],
         reading: ReadingDesk,
         area_scope: Callable[[str], Sequence[str]],
+        agents: Callable[[], Any] | None = None,
         science: ScienceClient | None = None,
         today: Callable[[], date] = lambda: datetime.now(UTC).date(),
     ) -> None:
@@ -209,6 +210,7 @@ class ExploreFunnel:
         self.reading = reading
         #: Blocking: an area id → the area ids its tile counts (B4 ``AreasStore.scope_ids``).
         self.area_scope = area_scope
+        self.agents = agents
         self._today = today
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._gates: dict[str, asyncio.Future[bool]] = {}
@@ -1403,6 +1405,16 @@ class ExploreFunnel:
                 continue
             counters = self._counters(run.id)
             state = "queued" if run.id in self._queued else job.state
+            plan_items = run.request.get("plan") or ()
+            terms = list(
+                dict.fromkeys(
+                    str(term).strip()
+                    for item in plan_items
+                    if isinstance(item, Mapping)
+                    for term in (item.get("terms") or ())
+                    if str(term).strip()
+                )
+            )
             items.append(
                 KbSearch(
                     id=run.id,
@@ -1410,13 +1422,17 @@ class ExploreFunnel:
                     owner="weekly" if job.owner == "weekly" else "explore",
                     area_id=run.area_id,
                     query=str(run.request.get("query") or ""),
+                    terms=terms,
                     state=state,
                     stage=job.stage,
                     stop_reason=job.stop_reason,
                     checkpoint_id=job.checkpoint.id if job.checkpoint else None,
                     checkpoint_revision=job.checkpoint.revision if job.checkpoint else None,
                     found=counters.checked,
+                    after_rules=counters.after_rules,
+                    decided=counters.decided,
                     fit=counters.on_topic,
+                    novelty_checked=counters.novelty_checked,
                     new=max(counters.new - counters.no_text, 0),
                     no_text=counters.no_text,
                     unseen=unseen.get(run.id, 0),
@@ -1515,13 +1531,8 @@ def _neg_date(publication: KbPublicationDate) -> tuple[int, int, int]:
     return (-year, -month, -(parts[2] if len(parts) > 2 else 0))
 
 
-#: A stub abstract some sources send in place of a real one («Research article: <title>»).
-_STUB_PREFIXES = ("research article:",)
-
-
-def _real_abstract(abstract: str | None) -> bool:
-    text = (abstract or "").strip()
-    return len(text) >= 80 and not text.lower().startswith(_STUB_PREFIXES)
+def _real_abstract(abstract: str | None, title: str | None = None) -> bool:
+    return is_real_abstract(abstract, title)
 
 
 def _read_url(work: KbScienceWork, checked: str | None) -> str | None:
@@ -1544,9 +1555,13 @@ def _reading_facts(
     details = row.details
     work = KbScienceWork.model_validate(details["work"])
     seen_at, dismissed_at = state or (None, None)
+    has_material = bool(row.material_id or material_id)
+    importing = bool(details.get("importing")) and not has_material
     finding_state: KbFindingState
-    if row.material_id or material_id:
+    if has_material:
         finding_state = "materials"
+    elif importing:
+        finding_state = "importing"
     elif dismissed_at:
         finding_state = "dismissed"
     elif seen_at:
@@ -1562,13 +1577,18 @@ def _reading_facts(
     new_line = next(
         (str(t.get("text")) for t in row.theses if t.get("label") == "new" and t.get("text")), None
     )
+    imported_content = details.get("imported_content")
+    if imported_content not in ("pdf", "full_text", "abstract_only", "link_only"):
+        imported_content = None
     return {
         "state": finding_state,
         "access": access,
         "read_url": _read_url(work, details.get("read_url")),
         "new_line": new_line,
-        "has_abstract": _real_abstract(work.abstract),
+        "has_abstract": _real_abstract(work.abstract, work.title),
         "discuss_chat_id": details.get("discuss_chat_id"),
+        "importing": importing,
+        "imported_content": imported_content,
     }
 
 

@@ -5,12 +5,12 @@ from collections.abc import Callable
 from typing import Any, Literal, Protocol
 
 from ...native_io import disk_call
-from ..agents.prompting import untrusted_block
 from ..api.contract_routes import ContractFailure
 from ..api.schemas_explore import (
     KbDiscussion,
     KbFinding,
     KbFindingImported,
+    KbImportedContent,
 )
 from ..api.schemas_science import KbScienceText
 from ..chats.model import MessageInput
@@ -28,10 +28,20 @@ from ..sources.duplicates import find_duplicate
 from ..sources.fragments import sanitize_title
 from ..sources.intake import Prepared, prepare_text
 from ..sources.service import IntakeResult
+from .discuss import card_message, discuss_finding
 from .rules import work_urls
 from .store import ExploreStore
 
 FULL_TEXT_KINDS = frozenset({"tei", "arxiv_html", "open_page"})
+#: A stub abstract some sources send in place of a real one («Research article: <title>»).
+_STUB_PREFIXES = ("research article:",)
+
+
+def is_real_abstract(abstract: str | None, title: str | None = None) -> bool:
+    text = (abstract or "").strip()
+    if len(text) < 80 or text.lower().startswith(_STUB_PREFIXES):
+        return False
+    return not (title and text.lower() == title.strip().lower())
 
 
 class Chats(Protocol):
@@ -101,40 +111,17 @@ class ReadingDesk:
         )
 
     async def discuss(self, finding: KbFinding) -> KbDiscussion:
-        """EX3 (UX-7a): an ordinary chat on the paper's card — nothing is downloaded. The agent answers from
-        the card and says plainly where it ends (the full text needs «Add to materials»)."""
-        if finding.discuss_chat_id:
-            return KbDiscussion(finding_id=finding.id, chat_id=finding.discuss_chat_id)
-        view = await self.chats.create(title=finding.work.title[:120])
-        chat_id = str(view.chat.id)
-        await disk_call(self.store.update_details, finding.id, {"discuss_chat_id": chat_id})
-        await self.chats.send(chat_id, self._card_message(finding))
-        return KbDiscussion(finding_id=finding.id, chat_id=chat_id)
+        """FX-3: delegated to ``discuss.py`` so F2 and F3 stay file-disjoint."""
+        return await discuss_finding(self, finding)
 
     @staticmethod
     def _card_message(finding: KbFinding) -> MessageInput:
-        work = finding.work
-        card = f"Title: {work.title}\nAuthors: {', '.join(work.authors[:8])}\n"
-        if work.publication.year:
-            card += f"Year: {work.publication.year}\n"
-        if work.venue:
-            card += f"Published in: {work.venue}\n"
-        if finding.read_url or work.doi:
-            card += f"Link: {finding.read_url or 'https://doi.org/' + str(work.doi)}\n"
-        if finding.new_line:
-            card += f"New for me compared with my wiki: {finding.new_line}\n"
-        card += "\nAbstract:\n" + ((work.abstract or "").strip() if finding.has_abstract else "(none)")
-        ask = (
-            "Let's discuss this paper. Start with two or three sentences on what it is about and what is new "
-            "for me. Answer only from this card; when a question needs the paper's text (methods, numbers, "
-            "tables), say so and suggest adding the paper to my materials."
-        )
-        return MessageInput(text=ask + "\n\n" + untrusted_block("paper card", card))
+        return card_message(finding)
 
     async def _import(
         self,
         finding: KbFinding,
-        content: Literal["full_text", "abstract_only"],
+        content: KbImportedContent,
         text: str,
         source_url: str | None = None,
         *,

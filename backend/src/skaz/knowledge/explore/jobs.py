@@ -35,6 +35,7 @@ STATE_OF: dict[str, KbExploreJobState] = {
     "app_exit": "paused",
     "openalex_daily_limit": "paused",
     "decision_model_required": "paused",
+    "agent_required": "paused",
     "science_consent_required": "paused",
     "provider_unavailable": "paused",
     "completed": "done",
