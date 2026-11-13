@@ -117,8 +117,10 @@ def test_schema_append_is_idempotent_and_preserves_existing_database(existing: b
     apply_schemas(connection)
     apply_schemas(connection)
     versions = applied_versions(connection)
-    # EX2 step 0: areas is at v2 (own topics); the other 0.4.0 modules are at v1.
-    assert all(versions[area] == (2 if area in ("areas", "explore") else 1) for area in AREAS)
+    # EX2 step 0: areas v2 (own topics), EX3 S4: areas v3 (why a topic has no OpenAlex label);
+    # explore is at v2; the other 0.4.0 modules are at v1.
+    expected = {"areas": 3, "explore": 2}
+    assert all(versions[area] == expected.get(area, 1) for area in AREAS)
     if existing:
         assert connection.execute("SELECT value FROM settings WHERE key='c0_sentinel'").fetchone() == (
             '"keep me"',

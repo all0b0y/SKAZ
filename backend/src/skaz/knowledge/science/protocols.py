@@ -131,8 +131,16 @@ class ScienceClient(Protocol):
     async def taxonomy(self, parent_id: str | None = None) -> Sequence[TaxonomyNode]: ...
 
 
+#: ``search_topics`` limits, shared by the producer of the terms (``areas.mapping``) and the client: at most
+#: this many terms of at most this many characters; each term is its own free ``/topics`` search (OpenAlex
+#: ANDs the words of one search), merged into at most ``TOPIC_RESULTS`` topics.
+TOPIC_TERMS = 6
+TOPIC_TERM_CHARS = 72
+TOPIC_RESULTS = 30
+
+
 class TopicSearch(Protocol):
-    """X1's hidden-label mapper; one consent-gated, journalled OpenAlex /topics request."""
+    """X1's hidden-label mapper; consent-gated, journalled OpenAlex /topics requests (one per term)."""
 
     async def search_topics(
         self, terms: Sequence[str], *, run_id: str | None = None

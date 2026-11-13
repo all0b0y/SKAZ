@@ -25,7 +25,14 @@ from skaz.knowledge.areas import prompts
 from skaz.knowledge.areas.mapping import search_terms
 from skaz.knowledge.areas.service import ExploreAreasService
 from skaz.knowledge.areas.topics import TopicStore
-from skaz.knowledge.decisions.protocol import Answer, ChoiceAnswer, ChoiceQuestion, DeciderId, Question, Undecided
+from skaz.knowledge.decisions.protocol import (
+    Answer,
+    ChoiceAnswer,
+    ChoiceQuestion,
+    DeciderId,
+    Question,
+    Undecided,
+)
 from skaz.knowledge.science.client import ScienceGateway
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.store.schema import areas
@@ -115,7 +122,12 @@ def sent_searches(bases: Bases, path: str = "/topics") -> list[str]:
 def test_terms_are_the_name_and_main_concepts_without_their_glosses() -> None:
     terms = search_terms(
         "AI agents",
-        ["Subagents (Сабагенты)", "Agent loop (Цикл)", "Command-hook protocol (Протокол (command-хуки))", "x"],
+        [
+            "Subagents (Сабагенты)",
+            "Agent loop (Цикл)",
+            "Command-hook protocol (Протокол (command-хуки))",
+            "x",
+        ],
     )
     assert terms == ["AI agents", "Subagents", "Agent loop", "Command-hook protocol"]
     assert search_terms("Data", ["Data", "Backup (бэкапы)", "  "]) == ["Data", "Backup"]
@@ -180,9 +192,13 @@ async def test_why_a_topic_has_no_label_is_kept_for_the_system(
     assert bases.requests == [] and store.topic(cooking).mapping_reason == "no_decision_model"
 
     assert await service.map_topics() == 2
-    assert (store.topic(cooking).mapping_state, store.topic(cooking).mapping_reason) == ("no_match", "no_candidates")
-    assert (store.topic(comms).mapping_state, store.topic(comms).mapping_reason) == ("no_match", "none_fit")
-    assert (store.topic(exams).mapping_state, store.topic(exams).mapping_reason) == ("pending", "undecided")
+    def state(area_id: str) -> tuple[str, str | None]:
+        topic = store.topic(area_id)
+        return topic.mapping_state, topic.mapping_reason
+
+    assert state(cooking) == ("no_match", "no_candidates")
+    assert state(comms) == ("no_match", "none_fit")
+    assert state(exams) == ("pending", "undecided")
     assert list(service.topics(comms)) == [] and list(service.topics(cooking)) == []
     assert not any("Cooking" in q.state for q in decider.asked)  # nothing found: the model is not asked
 
@@ -194,19 +210,23 @@ def test_areas_v3_retries_the_old_no_match_labels_once(tmp_path: Path) -> None:
     """The library copy: 39 topics ``no_match`` from the joined search → ``pending`` again, once."""
     connection = sqlite3.connect(tmp_path / "knowledge.sqlite3")
     connection.executescript(
-        "CREATE TABLE explore_areas (id TEXT PRIMARY KEY, parent_id TEXT, taxonomy_id TEXT, level TEXT NOT NULL,"
-        " original_name TEXT NOT NULL, name TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0,"
+        "CREATE TABLE explore_areas (id TEXT PRIMARY KEY, parent_id TEXT, taxonomy_id TEXT,"
+        " level TEXT NOT NULL, original_name TEXT NOT NULL, name TEXT NOT NULL,"
+        " hidden INTEGER NOT NULL DEFAULT 0,"
         " pinned INTEGER NOT NULL DEFAULT 0, mapping_state TEXT NOT NULL DEFAULT 'pending'"
         " CHECK(mapping_state IN ('pending','mapped','no_match')), mapped_name TEXT);"
         "CREATE TABLE explore_area_topics (area_id TEXT NOT NULL, topic_id TEXT NOT NULL);"
-        "INSERT INTO explore_areas VALUES ('a1',NULL,NULL,'custom','AI agents','AI agents',0,0,'no_match','AI agents');"
+        "INSERT INTO explore_areas VALUES"
+        " ('a1',NULL,NULL,'custom','AI agents','AI agents',0,0,'no_match','AI agents');"
         "INSERT INTO explore_areas VALUES ('a2',NULL,NULL,'custom','RAG','RAG',0,0,'mapped','RAG');"
         "INSERT INTO explore_area_topics VALUES ('a2','T1');"
         "INSERT INTO explore_areas VALUES ('d1',NULL,NULL,'domain','S','S',0,0,'pending',NULL);"
     )
     step = areas.UPGRADES[3]
     step(connection)
-    connection.execute("UPDATE explore_areas SET mapping_state='no_match', mapping_reason='none_fit' WHERE id='a2'")
+    connection.execute(
+        "UPDATE explore_areas SET mapping_state='no_match', mapping_reason='none_fit' WHERE id='a2'"
+    )
     step(connection)  # a start cut before the version row runs it again: a kept reason is not retried
     rows = connection.execute(
         "SELECT id, mapping_state, mapped_name, mapping_reason FROM explore_areas ORDER BY id"
@@ -255,7 +275,7 @@ async def test_search_inside_a_labelled_topic_filters_by_its_topic_id_and_unlabe
     cooking = own_topic(kb, "Cooking", ["Sourdough"])
     decider = Decider({"AI agents": "Multi-Agent Systems and Negotiation"})
     service = ExploreAreasService(kb, decisions=decider, topic_search=lambda: gateway.search_topics)
-    assert await service.map_topics() == 1
+    assert await service.map_topics() == 2  # AI agents mapped, Cooking no match
     parts.directory.paths.update({agents: ["AI agents"], cooking: ["Cooking"]})
     parts.science.search = gateway.search  # the real OpenAlex request under the funnel
 

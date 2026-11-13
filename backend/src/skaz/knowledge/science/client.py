@@ -51,7 +51,15 @@ from .ids import (
     scope_filter,
     split_arxiv,
 )
-from .protocols import ScienceRef, ScienceUnavailable, ScienceUpdate, TaxonomyNode
+from .protocols import (
+    TOPIC_RESULTS,
+    TOPIC_TERM_CHARS,
+    TOPIC_TERMS,
+    ScienceRef,
+    ScienceUnavailable,
+    ScienceUpdate,
+    TaxonomyNode,
+)
 from .store import ScienceStore
 from .transport import Call, ScienceTransport
 
@@ -684,27 +692,38 @@ class ScienceGateway:
     async def search_topics(
         self, terms: Sequence[str], *, run_id: str | None = None
     ) -> Sequence[TaxonomyNode]:
-        """One free /topics search for X1's hidden label. No model or mapping work happens here."""
+        """Free /topics searches for X1's hidden label: one per term, since OpenAlex ANDs the words of a
+        search (a topic name joined with its concepts matched no topic at all). The topics found by more
+        terms come first, then by the first term that found them and its rank. No model work here."""
         await self._ready()
         words = list(dict.fromkeys(term.strip() for term in terms if term.strip()))
         if not words:
             return []
-        if len(words) > 6 or any(len(word) > 72 for word in words):
+        if len(words) > TOPIC_TERMS or any(len(word) > TOPIC_TERM_CHARS for word in words):
             raise ContractFailure(422, "invalid_request")
-        data = await self._json(
-            Call(
-                "openalex",
-                "taxonomy",
-                f"{openalex.API}/topics",
-                KbSciencePayload(topics=words),
-                params={"search": " ".join(words), "per-page": "30"},
-                cost=openalex.COST_SINGLE,
-            ),
-            run_id,
-        )
-        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
-            raise ScienceUnavailable()
-        return openalex.taxonomy_nodes(data, None, "topic")[:30]
+        found: dict[str, tuple[TaxonomyNode, int, int, int]] = {}  # id → node, hits, first term, rank
+        for index, word in enumerate(words):
+            data = await self._json(
+                Call(
+                    "openalex",
+                    "taxonomy",
+                    f"{openalex.API}/topics",
+                    KbSciencePayload(topics=[word]),
+                    params={"search": word, "per-page": str(TOPIC_RESULTS)},
+                    cost=openalex.COST_SINGLE,
+                ),
+                run_id,
+            )
+            if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+                raise ScienceUnavailable()
+            for rank, found_node in enumerate(openalex.taxonomy_nodes(data, None, "topic")):
+                known = found.get(found_node.taxonomy_id)
+                if known is None:
+                    found[found_node.taxonomy_id] = (found_node, 1, index, rank)
+                else:
+                    found[found_node.taxonomy_id] = (known[0], known[1] + 1, known[2], known[3])
+        ranked = sorted(found.values(), key=lambda item: (-item[1], item[2], item[3]))
+        return [item[0] for item in ranked][:TOPIC_RESULTS]
 
     async def taxonomy(self, parent_id: str | None = None) -> Sequence[TaxonomyNode]:
         """One level of the OpenAlex taxonomy; kept 30 days, since it changes rarely and B4 asks per view."""

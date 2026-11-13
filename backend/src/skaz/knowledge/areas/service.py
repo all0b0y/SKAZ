@@ -403,6 +403,12 @@ class ExploreAreasService:
         self._ensure_ready()
         return await disk_call(self.topic_store.move, material_id, body.area_id)
 
+    def on_start(self) -> None:
+        """At app start: topics still waiting for their hidden label (new while SKAZ was closed, a stop of
+        the last run, or the pre-v3 no-match labels) get it in the background, once; mapped topics and
+        kept no-match reasons are never asked again. Nothing runs without consent or a decision model."""
+        self.mapper.schedule()
+
     async def map_topics(self, area_ids: Sequence[str] | None = None) -> int:
         """Make the missing hidden labels now (X2 may call it before a search inside a topic)."""
         return await self.mapper.map_pending(area_ids)
