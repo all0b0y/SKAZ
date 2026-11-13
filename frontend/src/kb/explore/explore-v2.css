@@ -1,0 +1,981 @@
+/*
+ * Explore v2 (EX3, UX-1…UX-16): the find bar, the map of the wiki, one search full page, the paper's reader
+ * slot and the side list of searches. The look is the approved prototype (.dev/prototypes/explore-v2)
+ * drawn with SKAZ tokens — theme, text size and density reach everything through tokens.css.
+ *
+ * UX-14: nothing slides in and nothing moves when you act. The topic panel has a fixed width, the reader
+ * slot is always there (a hint until a paper is picked), tiles and rows have no transitions, and the
+ * find bar has no frame or highlight (UX-4).
+ */
+
+.kb-ex {
+  --kb-ex-line: color-mix(in srgb, var(--kb-line) 60%, transparent);
+  /* A tile, a field and a panel sit a quiet step off the sheet in both themes. */
+  --kb-ex-tint: color-mix(in srgb, var(--kb-accent-soft) 55%, transparent);
+  /* Where a row's text starts, to line things up under it: the dot column plus its gaps. */
+  --kb-ex-text-start: calc(var(--kb-sp-10) + var(--kb-sp-14) + var(--kb-sp-6));
+  flex: 1 1 360px;
+  min-width: 340px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--kb-pane);
+  color: var(--kb-text);
+  border-radius: var(--kb-r-xl);
+  overflow: hidden;
+  container: kb-ex / inline-size;
+}
+
+.kb-ex[hidden] {
+  display: none;
+}
+
+.kb-ex-muted {
+  color: var(--kb-muted);
+}
+
+.kb-ex-small {
+  font-size: var(--t-sm);
+}
+
+.kb-ex-pad {
+  padding: var(--kb-sp-12) var(--kb-sp-16);
+}
+
+.kb-ex-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+}
+
+.kb-ex-link:hover {
+  text-decoration-color: currentColor;
+}
+
+.kb-ex-link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- Find bar: the one place a search starts (UX-14). No frame, no highlight (UX-4). ---- */
+.kb-ex-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--kb-sp-8);
+  padding: var(--kb-sp-10) var(--kb-sp-14);
+  border-bottom: 1px solid var(--kb-ex-line);
+}
+
+.kb-ex-bar__field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--kb-sp-8);
+  height: calc(var(--kb-control-h) + var(--kb-sp-4));
+  padding: 0 var(--kb-sp-6) 0 var(--kb-sp-10);
+  border-radius: var(--kb-r-md);
+  background: var(--kb-ex-tint);
+  color: var(--kb-muted);
+}
+
+.kb-ex-bar__scope {
+  flex: none;
+  max-width: 260px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-sp-4);
+  height: var(--kb-control-h-sm);
+  padding: 0 var(--kb-sp-8);
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-accent-soft);
+  color: var(--kb-text);
+  font-size: var(--t-sm);
+}
+
+.kb-ex-bar__scope > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-ex-bar__clear {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  padding: var(--kb-sp-2);
+  border-radius: var(--kb-r-xs);
+  color: var(--kb-muted);
+}
+
+.kb-ex-bar__clear:hover {
+  color: var(--kb-text);
+  background: var(--kb-accent-press);
+}
+
+.kb-ex-bar__input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--kb-text);
+}
+
+.kb-ex-bar__input::placeholder {
+  color: var(--kb-muted);
+}
+
+/* The field is calm by design: the caret says where you type. */
+.kb-ex-bar__input:focus-visible {
+  outline: none;
+}
+
+.kb-ex-bar__go {
+  flex: none;
+  height: var(--kb-control-h);
+  padding: 0 var(--kb-sp-14);
+  border: 1px solid var(--kb-fill-border);
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-fill);
+  color: var(--kb-on-fill);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.kb-ex-bar__go:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--kb-fill) 86%, var(--kb-bg));
+}
+
+.kb-ex-bar__go:active:not(:disabled) {
+  background: color-mix(in srgb, var(--kb-fill) 74%, var(--kb-bg));
+}
+
+.kb-ex-bar__go:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.kb-ex-bar__note {
+  flex: none;
+  font-size: var(--t-sm);
+  color: var(--kb-muted);
+  white-space: nowrap;
+}
+
+/* ---- A stop or an error, said once and plainly ---- */
+.kb-ex-stop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kb-sp-8) var(--kb-sp-10);
+  padding: var(--kb-sp-8) var(--kb-sp-12);
+  border-radius: var(--kb-r-md);
+  background: var(--kb-warn-soft);
+  font-size: var(--t-sm);
+}
+
+.kb-ex-stop--page {
+  flex: none;
+  margin: var(--kb-sp-8) var(--kb-sp-14) 0;
+}
+
+.kb-ex-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--kb-sp-10);
+  padding: var(--kb-sp-34) var(--kb-sp-24);
+  text-align: center;
+  color: var(--kb-muted);
+}
+
+.kb-ex-empty strong {
+  color: var(--kb-text);
+  font-size: var(--t-md);
+}
+
+.kb-ex-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kb-sp-6);
+  font-size: var(--t-sm);
+}
+
+.kb-ex-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-sp-4);
+  min-height: 22px;
+  padding: var(--kb-sp-2) var(--kb-sp-8);
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  font-size: var(--t-xs);
+  line-height: 1.35;
+  text-align: left;
+}
+
+button.kb-ex-chip:hover {
+  background: var(--kb-accent-soft);
+}
+
+button.kb-ex-chip:active {
+  background: var(--kb-accent-press);
+}
+
+/* ---- The map of the wiki: tiles sized by concepts, the topic panel beside it ---- */
+.kb-ex-map {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.kb-ex-map__main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-sp-8);
+  padding: var(--kb-sp-10) var(--kb-sp-12) var(--kb-sp-12) var(--kb-sp-14);
+}
+
+.kb-ex-map__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--kb-sp-10);
+  min-height: 28px;
+}
+
+.kb-ex-map__head strong {
+  font-size: var(--t-lg);
+}
+
+.kb-ex-treemap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.kb-ex-treemap__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.kb-ex-tile {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-sp-2);
+  padding: var(--kb-sp-10) var(--kb-sp-12);
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--kb-r-md);
+  background: var(--kb-ex-tint);
+  text-align: left;
+}
+
+.kb-ex-tile:hover {
+  background: var(--kb-accent-soft);
+}
+
+.kb-ex-tile.is-picked {
+  border-color: var(--kb-text);
+  background: var(--kb-accent-soft);
+}
+
+.kb-ex-tile__name {
+  padding-right: calc(var(--kb-sp-24) + var(--kb-sp-20));
+  font-size: var(--t-md);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.kb-ex-tile__count {
+  font-size: var(--t-xs);
+  color: var(--kb-muted);
+}
+
+.kb-ex-tile__new {
+  position: absolute;
+  top: var(--kb-sp-8);
+  right: var(--kb-sp-8);
+  padding: 0 var(--kb-sp-6);
+  border-radius: var(--kb-r-pill);
+  background: var(--kb-fill);
+  color: var(--kb-on-fill);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.kb-ex-tile.is-tiny {
+  padding: var(--kb-sp-6) var(--kb-sp-8);
+}
+
+.kb-ex-tile.is-tiny .kb-ex-tile__name {
+  padding-right: 0;
+  font-size: var(--t-sm);
+  overflow-wrap: anywhere;
+}
+
+.kb-ex-tile.is-tiny .kb-ex-tile__count {
+  display: none;
+}
+
+/* A small tile has no corner to spare: its «+N» sits under the name. */
+.kb-ex-tile.is-tiny .kb-ex-tile__new {
+  position: static;
+  align-self: flex-start;
+  margin-top: var(--kb-sp-2);
+}
+
+/* The last level: the topic's materials, each as big as the concepts it gave the wiki. */
+.kb-ex-tile.is-material .kb-ex-tile__name {
+  padding-right: 0;
+  font-size: var(--t-sm);
+  font-weight: 500;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.kb-ex-map__main .kb-topic-labelling {
+  flex: none;
+  padding: var(--kb-sp-8) var(--kb-sp-10);
+  border: 0;
+  border-radius: var(--kb-r-md);
+  background: var(--kb-warn-soft);
+}
+
+.kb-ex-map__main .kb-topic-labelling > p + .kb-explore-btn {
+  margin-left: auto;
+}
+
+/* The topic panel: a fixed width, so no level ever moves the map (UX-14). */
+.kb-ex-detail {
+  flex: none;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-sp-8);
+  padding: var(--kb-sp-14) var(--kb-sp-16);
+  border-left: 1px solid var(--kb-ex-line);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.kb-ex-detail h3 {
+  font-size: var(--t-lg);
+}
+
+.kb-ex-detail__head {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-sp-6);
+}
+
+.kb-ex-detail__head h3 {
+  flex: 1;
+  min-width: 0;
+}
+
+.kb-ex-detail__sub {
+  margin-top: var(--kb-sp-8);
+  font-size: var(--t-xs);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--kb-muted);
+}
+
+.kb-ex-detail__searches {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.kb-ex-detail__searches button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--kb-sp-8);
+  padding: var(--kb-sp-6) var(--kb-sp-8);
+  border-radius: var(--kb-r-sm);
+  text-align: left;
+}
+
+.kb-ex-detail__searches button:hover {
+  background: var(--kb-accent-soft);
+}
+
+/* ---- One search, full page: the papers on the left, the paper itself on the right ---- */
+.kb-ex-search {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.kb-ex-list {
+  flex: 0 0 460px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--kb-ex-line);
+}
+
+.kb-ex-list__head {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-sp-4);
+  padding: var(--kb-sp-12) var(--kb-sp-16) var(--kb-sp-6);
+}
+
+.kb-ex-list__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kb-sp-10);
+  min-width: 0;
+}
+
+.kb-ex-list__title h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-xl);
+  font-weight: 600;
+}
+
+.kb-ex-funnel {
+  font-size: var(--t-sm);
+  color: var(--kb-muted);
+}
+
+.kb-ex-funnel .kb-ex-link {
+  color: var(--kb-muted-strong);
+}
+
+.kb-ex-steps {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--kb-sp-2) var(--kb-sp-14);
+  margin: var(--kb-sp-6) 0 0;
+  padding: var(--kb-sp-8) var(--kb-sp-10);
+  border-radius: var(--kb-r-md);
+  background: var(--kb-ex-tint);
+  font-size: var(--t-sm);
+}
+
+.kb-ex-steps dt {
+  color: var(--kb-muted-strong);
+}
+
+.kb-ex-steps dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.kb-ex-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-sp-10);
+  font-size: var(--t-sm);
+  color: var(--kb-muted-strong);
+}
+
+.kb-ex-progress progress {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  border: 0;
+  border-radius: var(--kb-r-pill);
+  background: var(--kb-accent-soft);
+  overflow: hidden;
+  appearance: none;
+}
+
+.kb-ex-progress progress::-webkit-progress-bar {
+  background: var(--kb-accent-soft);
+}
+
+.kb-ex-progress progress::-webkit-progress-value {
+  background: var(--kb-text);
+  border-radius: var(--kb-r-pill);
+}
+
+.kb-ex-filters {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kb-sp-6);
+  padding: var(--kb-sp-6) var(--kb-sp-16) var(--kb-sp-8);
+  border-bottom: 1px solid var(--kb-ex-line);
+}
+
+.kb-ex-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-sp-4);
+  height: var(--kb-control-h-sm);
+  padding: 0 var(--kb-sp-10);
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  font-size: var(--t-sm);
+  color: var(--kb-muted-strong);
+  white-space: nowrap;
+}
+
+.kb-ex-filter:hover,
+.kb-ex-filter[aria-expanded='true'] {
+  background: var(--kb-accent-soft);
+}
+
+.kb-ex-filter:active {
+  background: var(--kb-accent-press);
+}
+
+.kb-ex-filter.is-on {
+  color: var(--kb-text);
+  border-color: var(--kb-text);
+}
+
+.kb-ex-rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: var(--kb-sp-4) var(--kb-sp-8) var(--kb-sp-20);
+}
+
+.kb-ex-row {
+  border-radius: var(--kb-r-md);
+}
+
+.kb-ex-row:hover {
+  background: color-mix(in srgb, var(--kb-accent-soft) 70%, transparent);
+}
+
+.kb-ex-row.is-open {
+  background: var(--kb-accent-soft);
+}
+
+.kb-ex-row__main {
+  width: 100%;
+  display: grid;
+  grid-template-columns: var(--kb-sp-14) minmax(0, 1fr);
+  column-gap: var(--kb-sp-6);
+  padding: var(--kb-sp-8) var(--kb-sp-10);
+  border-radius: var(--kb-r-md);
+  text-align: left;
+}
+
+.kb-ex-row__dot {
+  grid-column: 1;
+  grid-row: 1;
+  width: 7px;
+  height: 7px;
+  margin-top: var(--kb-sp-6);
+  border-radius: 50%;
+  background: var(--kb-text);
+  visibility: hidden;
+}
+
+.kb-ex-row.is-new .kb-ex-row__dot {
+  visibility: visible;
+}
+
+.kb-ex-row__title {
+  grid-column: 2;
+  font-size: var(--t-md);
+  line-height: 1.3;
+}
+
+.kb-ex-row.is-new .kb-ex-row__title {
+  font-weight: 600;
+}
+
+.kb-ex-row__meta {
+  grid-column: 2;
+  margin-top: var(--kb-sp-2);
+  font-size: var(--t-sm);
+  color: var(--kb-muted);
+}
+
+.kb-ex-row__abstract {
+  grid-column: 2;
+  margin-top: var(--kb-sp-4);
+  font-size: var(--t-sm);
+  color: var(--kb-muted-strong);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.kb-ex-row__abstract.is-none {
+  font-style: italic;
+  color: var(--kb-muted);
+}
+
+.kb-ex-row__restore {
+  margin: 0 0 var(--kb-sp-8) var(--kb-ex-text-start);
+}
+
+.kb-ex-tag {
+  display: inline-block;
+  padding: 0 var(--kb-sp-6);
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  font-size: var(--t-xs);
+  line-height: 1.35;
+}
+
+.kb-ex-tag.is-free {
+  color: var(--kb-ok);
+  border-color: color-mix(in srgb, var(--kb-ok) 50%, transparent);
+}
+
+.kb-ex-tag.is-paid {
+  color: var(--kb-warn);
+  border-color: color-mix(in srgb, var(--kb-warn) 50%, transparent);
+}
+
+/* ---- The reader: the paper's head, then its own page (a native view laid over the slot) ---- */
+.kb-ex-reader {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.kb-ex-reader__head {
+  flex: none;
+  max-height: 55%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-sp-6);
+  padding: var(--kb-sp-14) var(--kb-sp-18) var(--kb-sp-12);
+  border-bottom: 1px solid var(--kb-ex-line);
+}
+
+.kb-ex-reader__top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kb-sp-10);
+}
+
+.kb-ex-reader__top h3 {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--t-lg);
+  line-height: 1.3;
+}
+
+.kb-ex-reader__head > .kb-ex-muted {
+  font-size: var(--t-sm);
+}
+
+.kb-ex-reader__new {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-sm);
+}
+
+.kb-ex-reader__new b {
+  font-weight: 600;
+}
+
+.kb-ex-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--kb-r-sm);
+  color: var(--kb-muted-strong);
+}
+
+.kb-ex-icon:hover {
+  background: var(--kb-accent-soft);
+  color: var(--kb-text);
+}
+
+.kb-ex-paid {
+  padding: var(--kb-sp-8) var(--kb-sp-10);
+  border-radius: var(--kb-r-md);
+  background: var(--kb-warn-soft);
+  font-size: var(--t-sm);
+}
+
+.kb-ex-instate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kb-sp-8) var(--kb-sp-10);
+  padding: var(--kb-sp-8) var(--kb-sp-10);
+  border-radius: var(--kb-r-md);
+  background: var(--kb-ok-soft);
+  font-size: var(--t-sm);
+}
+
+.kb-ex-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kb-sp-6);
+  margin-top: var(--kb-sp-4);
+}
+
+.kb-ex-reader__frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--kb-bg);
+}
+
+.kb-ex-reader__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--kb-sp-8);
+  padding: var(--kb-sp-4) var(--kb-sp-12);
+  border-bottom: 1px solid var(--kb-ex-line);
+  font-size: var(--t-xs);
+  color: var(--kb-muted);
+}
+
+.kb-ex-reader__nav {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--kb-r-sm);
+  color: var(--kb-muted-strong);
+}
+
+.kb-ex-reader__nav:hover:not(:disabled) {
+  background: var(--kb-accent-soft);
+  color: var(--kb-text);
+}
+
+.kb-ex-reader__nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.kb-ex-reader__url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-ex-reader__note {
+  flex: none;
+  white-space: nowrap;
+}
+
+.kb-ex-reader__error {
+  flex: none;
+  color: var(--kb-danger);
+}
+
+/* The page is drawn over this box by the app; the box only holds its place, with a size of its own. */
+.kb-ex-reader__slot {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.kb-ex-reader__outside,
+.kb-ex-reader__none,
+.kb-ex-reader__empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--kb-sp-10);
+  padding: var(--kb-sp-30);
+  text-align: center;
+  color: var(--kb-muted);
+}
+
+.kb-ex-reader__outside a {
+  color: var(--kb-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---- The side list: the map, then the searches, like the chat list ---- */
+.kb-ex-side {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 var(--kb-sp-8) var(--kb-sp-12);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.kb-ex-side__sub {
+  margin: var(--kb-sp-14) var(--kb-sp-8) var(--kb-sp-4);
+  font-size: var(--t-xs);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--kb-muted);
+}
+
+.kb-ex-side__note {
+  padding: var(--kb-sp-2) var(--kb-sp-8) var(--kb-sp-6);
+  font-size: var(--t-sm);
+}
+
+.kb-ex-side__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.kb-ex-side__row {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--kb-sp-8);
+  height: var(--kb-row-h);
+  padding: 0 var(--kb-sp-8);
+  border-radius: var(--kb-r-sm);
+  color: var(--kb-muted-strong);
+  text-align: left;
+}
+
+.kb-ex-side__row:hover {
+  background: color-mix(in srgb, var(--kb-accent-soft) 70%, transparent);
+}
+
+.kb-ex-side__row.is-on,
+.kb-ex-side__item.is-on .kb-ex-side__row {
+  background: var(--kb-accent-soft);
+  color: var(--kb-text);
+}
+
+.kb-ex-side__item {
+  display: flex;
+  align-items: center;
+  gap: var(--kb-sp-2);
+  min-width: 0;
+}
+
+.kb-ex-side__item .kb-ex-side__row {
+  flex: 1;
+}
+
+.kb-ex-side__mark {
+  flex: none;
+  width: var(--kb-sp-14);
+  text-align: center;
+  font-size: var(--t-xs);
+  color: var(--kb-muted);
+}
+
+.kb-ex-side__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-ex-side__status {
+  flex: none;
+  font-size: var(--t-xs);
+  color: var(--kb-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.kb-ex-side__status.is-new {
+  padding: 0 var(--kb-sp-6);
+  border-radius: var(--kb-r-pill);
+  background: var(--kb-fill);
+  color: var(--kb-on-fill);
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.kb-ex-side__status.is-stop {
+  color: var(--kb-warn);
+}
+
+/* The actions button takes the status's place while you point at the row (or use the menu), so the name
+   keeps its width and nothing shifts. */
+.kb-ex-side__item {
+  position: relative;
+}
+
+/* Two classes: the shared .kb-iconbtn (loaded after this file) sets position too. */
+.kb-ex-side__item .kb-ex-side__more {
+  position: absolute;
+  top: 50%;
+  right: var(--kb-sp-2);
+  translate: 0 -50%;
+  opacity: 0;
+}
+
+.kb-ex-side__item:hover .kb-ex-side__more,
+.kb-ex-side__item .kb-ex-side__more:focus-visible,
+.kb-ex-side__item .kb-ex-side__more[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.kb-ex-side__item:hover .kb-ex-side__status,
+.kb-ex-side__item:has(.kb-ex-side__more:focus-visible) .kb-ex-side__status,
+.kb-ex-side__item:has(.kb-ex-side__more[aria-expanded='true']) .kb-ex-side__status {
+  visibility: hidden;
+}
+
+/* ---- Narrower than a wide window: fewer columns, never a panel that slides in ---- */
+@container kb-ex (max-width: 960px) {
+  .kb-ex-list {
+    flex-basis: 360px;
+  }
+}
+
+@container kb-ex (max-width: 700px) {
+  .kb-ex-map,
+  .kb-ex-search {
+    flex-direction: column;
+  }
+
+  .kb-ex-detail {
+    width: auto;
+    max-height: 40%;
+    border-left: 0;
+    border-top: 1px solid var(--kb-ex-line);
+  }
+
+  .kb-ex-list {
+    flex: 0 0 46%;
+    border-right: 0;
+    border-bottom: 1px solid var(--kb-ex-line);
+  }
+}

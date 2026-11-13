@@ -60,7 +60,12 @@ export interface SearchFindingsQuery {
 }
 
 export function exploreSearchFindings(client: Pick<KbClient, "call">, query: SearchFindingsQuery): Promise<KbFindings> {
-  return client.call('GET /kb/explore/findings', { query });
+  // The bridge carries one scalar per query key (electron/ipc.ts buildUrl) and KbClient drops a list, so a list
+  // would never reach the backend. The Type filter is single-choice: its one type goes as `types=<it>`, which the
+  // backend reads back as a list of one.
+  const { types, ...rest } = query;
+  const only = types?.length === 1 ? { types: types[0] as unknown as typeof types } : {};
+  return client.call('GET /kb/explore/findings', { query: { ...rest, ...only } });
 }
 
 export function exploreSearches(client: Pick<KbClient, "call">): Promise<KbSearches> {

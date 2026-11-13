@@ -21,6 +21,8 @@ interface Tile {
 }
 
 const MIN_WEIGHT = 8;
+/** The «Other» tile never shrinks under this share of the level, so its name stays readable and clickable. */
+const OTHER_MIN_SHARE = 0.05;
 
 /** Up to nine tiles that each hold ≥ 4 % of the level; the rest share one «Other · N topics» tile. */
 function splitLevel(areas: KbArea[]): { big: KbArea[]; small: KbArea[] } {
@@ -71,7 +73,6 @@ export interface MapPageProps {
   onOpenDocument: (target: DocTarget) => void;
   onOpenSettings: (section?: SettingsSection) => void;
   onTopicAction: (action: 'rename' | 'merge' | 'pin', area: KbArea) => void;
-  onCovered: (covered: boolean) => void;
   /** The map of the shown level, once read (the top bar names the scope from it). */
   onMap: (map: KbAreaMap) => void;
 }
@@ -84,16 +85,20 @@ export function MapPage(props: MapPageProps) {
   const [other, setOther] = useState(false);
   const [sorting, setSorting] = useState(false);
   const onMap = props.onMap;
+  const generation = useRef(0);
 
   const load = useCallback(async () => {
+    // Only the newest read counts: a slow answer for a level the user already left must not replace this one.
+    const mine = ++generation.current;
     try {
       const next = await clients.areas.map(level ? { parent_id: level } : {});
       // A topic without subtopics opens into its materials (UX-15), sized by the concepts each gave the wiki.
       const leaf = level !== null && next.areas.length === 0;
       const mats = leaf ? (await clients.areas.materials(level, { limit: 100 })).materials : null;
+      if (mine !== generation.current) return;
       setMap(next); setMaterials(mats); setIssue(null); onMap(next);
     } catch (error) {
-      setIssue(exploreIssue(error).message);
+      if (mine === generation.current) setIssue(exploreIssue(error).message);
     }
   }, [clients, level, onMap]);
 
@@ -115,7 +120,8 @@ export function MapPage(props: MapPageProps) {
   const tiles: Tile[] = shownAreas.map(areaTile);
   if (!other && small.length > 0) {
     const concepts = small.reduce((s, a) => s + (a.concepts ?? 0), 0);
-    tiles.push({ key: '__other', weight: Math.max(concepts, MIN_WEIGHT), name: `Other · ${small.length} topics`, concepts,
+    const level = (map?.areas ?? []).reduce((sum, a) => sum + (a.concepts ?? 0), 0);
+    tiles.push({ key: '__other', weight: Math.max(concepts, MIN_WEIGHT, level * OTHER_MIN_SHARE), name: `Other · ${small.length} topics`, concepts,
       materials: small.reduce((s, a) => s + a.materials, 0), unseen: small.reduce((s, a) => s + a.new_findings, 0), pinned: false, area: null });
   }
   tiles.sort((a, b) => b.weight - a.weight);
@@ -206,8 +212,7 @@ function Treemap({ tiles, materials, picked, onTile, onMaterial }: {
 function Detail(props: MapPageProps & { map: KbAreaMap | null; area: KbArea | null }) {
   const { area, map, multi } = props;
   const more = useRef<HTMLButtonElement | null>(null);
-  const [menu, setMenuState] = useState(false);
-  const setMenu = (open: boolean) => { setMenuState(open); props.onCovered(open); };
+  const [menu, setMenu] = useState(false);
   if (multi.length > 1) {
     const names = multi.map((id) => map?.areas.find((a) => a.id === id)?.name ?? id);
     return <aside className="kb-ex-detail" aria-label="Picked topics">
@@ -248,6 +253,6 @@ function Detail(props: MapPageProps & { map: KbAreaMap | null; area: KbArea | nu
         </button>
       </li>)}
     </ul> : <p className="kb-ex-muted">None yet</p>}
-    <p className="kb-ex-muted kb-ex-small"><Icon name="search" size={12} /> “Find what&apos;s new” above searches {area ? 'this topic' : 'all your topics'}. ⌘-click tiles to search several at once.</p>
+    <div className="kb-ex-muted kb-ex-small"><Icon name="search" size={12} /> “Find what&apos;s new” above searches {area ? 'this topic' : 'all your topics'}. ⌘-click tiles to search several at once.</div>
   </aside>;
 }
