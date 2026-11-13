@@ -1,5 +1,4 @@
 export { ExploreSection } from './ExploreSection';
-export { FindingDetail, FindingClientsProvider } from './finding';
 export {
   squarify,
   type TreemapRect,
@@ -13,9 +12,6 @@ export {
   createExploreClients,
   type ExploreClients,
   type ExploreSectionProps,
-  type FindingHostComponent,
-  type FindingHostProps,
 } from './types';
 
-export { FunnelView } from './FunnelView';
 export { createDiscoveryClient, createTopicActions, type DiscoveryClient, type TopicActions } from './clients';

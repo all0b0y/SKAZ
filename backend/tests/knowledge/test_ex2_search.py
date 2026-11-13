@@ -153,13 +153,13 @@ class CardLayer(FakeLayer):
         ]
 
 
-async def test_research_50_works_use_russian_card_topics_not_own_library(parts: SimpleNamespace) -> None:
+async def test_explicit_search_plan_uses_russian_topics_not_own_library(parts: SimpleNamespace) -> None:
     topic(parts, "topic-comms", "Business communication", count=1)
     card = [KbSearchPlanItem(area_id=None, label="Память агентов", terms=["Память агентов", "harness"])]
     layer = CardLayer()
     parts.deciders._layer = layer
     parts.science.search_works = [work(n, title=f"Agent memory {n}") for n in range(50)]
-    started = await parts.funnel.start_for_task("task-ru", "Исследовать память", KbFunnelStart(plan=card))
+    started = await parts.funnel.start(KbFunnelStart(plan=card))
     run = await parts.funnel.settled(started.id)
     assert (run.counters.checked, run.counters.on_topic, run.counters.new) == (50, 50, 30)
     assert run.stop_reason == "budget"
@@ -175,7 +175,7 @@ async def test_changed_card_does_not_reuse_off_topic_forever(parts: SimpleNamesp
     first = await run_to_end(parts, KbFunnelStart(query="communication", channels=["search"]))
     assert first.counters.on_topic == 0
     parts.deciders._layer = CardLayer()
-    started = await parts.funnel.start_for_task("task-new", "Agents", KbFunnelStart(query="agents"))
+    started = await parts.funnel.start(KbFunnelStart(query="agents"))
     changed = await parts.funnel.settled(started.id)
     assert changed.counters.on_topic == 1 and changed.counters.new == 1
 
@@ -370,7 +370,9 @@ async def test_pause_keeps_plan_and_hidden_labels_and_skips_finished_search_item
     assert calls == [["agents", "T1"], ["learning", "T2"], ["learning", "T2"]]
 
 
-async def test_research_card_keeps_requested_channels_inside_picked_topics(parts: SimpleNamespace) -> None:
+async def test_explicit_search_plan_keeps_requested_channels_inside_picked_topics(
+    parts: SimpleNamespace,
+) -> None:
     from tests.knowledge.test_b2_funnel import add_material
 
     chosen = add_material(parts.kb, "Chosen seed", "https://doi.org/10.1000/chosen")
@@ -378,9 +380,7 @@ async def test_research_card_keeps_requested_channels_inside_picked_topics(parts
         db.execute("INSERT INTO explore_area_materials VALUES (?,'area-ai','agent','now')", (chosen,))
     parts.science.resolved["10.1000/chosen"] = work(10, title="Chosen seed", doi="10.1000/chosen")
     parts.science.citing_works = [work(11, title="Cites chosen seed")]
-    started = await parts.funnel.start_for_task(
-        "task-picked",
-        "Agents",
+    started = await parts.funnel.start(
         KbFunnelStart(
             plan=[KbSearchPlanItem(area_id="area-ai", label="AI", terms=["agents"])], channels=["continues"]
         ),

@@ -601,13 +601,12 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
     # N6 «Я»: the Me tools are in every chat turn (refused at call time when Me is off). Since batch B5 the
     # runtime registers them right after the chat service is built (no lazy attach on the first turn), so
     # they come before the study, ask and web tools. P2: the «Fix in wiki» proposal (shown to the user,
-    # written only on their click) comes next; 0.4.0 B3: the research card tool and the Explore read last.
+    # written only on their click) comes next.
     assert turn.tools is not None
     assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, *ME_TOOL_NAMES,
                                                        *STUDY_TOOL_NAMES, "skaz_ask_user", "skaz_web_search",
                                                        "skaz_web_read",
-                                                       "skaz_wiki_propose_fix",
-                                                       "skaz_research_start", "skaz_explore_read")
+                                                       "skaz_wiki_propose_fix")
     assert "⟦m:<material_id>:<seg>|<exact words>⟧" in turn.instructions
     assert "skaz-connection" in turn.instructions
     assert "analysis" in turn.instructions and "never as evidence" in turn.instructions

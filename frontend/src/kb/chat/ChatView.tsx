@@ -1,5 +1,4 @@
-import { useFinishedTaskRead, usePageVisible } from '../research/seen';
-import { getResearchStore, useResearch } from '../research/store';
+import { usePageVisible } from './usePageVisible';
 import { useMotionLevel, useReducedMotion, useStillIndicators } from '../ui/motionLevel';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
@@ -17,7 +16,6 @@ import { AssistantMessage, SystemMessage, UserMessage } from './Message';
 import { useQuestionActions } from './useQuestionActions';
 import { partsOf } from '../api/permissions';
 import { WebSearchChip } from './webSearch';
-import { isResearchPart, ResearchGrantChip } from '../research';
 import { ChatOverviewButton } from '../overview/ChatOverviewButton';
 import { savedText } from './saved';
 import type { KbChat } from '../../api/kb/types.gen';
@@ -32,7 +30,7 @@ import { ScrollEdges } from './ScrollEdges';
 function waitingHint(chat: KbChat | null): string | null {
   const parts = chat?.messages.flatMap((m) => partsOf(m)) ?? [];
   if (parts.some((p) => p.type === 'question' && p.status === 'pending')) return 'Pick an option above, or just type…';
-  if (parts.some((p) => (p.type === 'permission' || p.type === 'web_search' || isResearchPart(p)) && p.status === 'pending')) return 'You can keep typing — the request waits';
+  if (parts.some((p) => (p.type === 'permission' || p.type === 'web_search') && p.status === 'pending')) return 'You can keep typing — the request waits';
   return null;
 }
 
@@ -111,7 +109,7 @@ function useFirstMessageLeave(chats: ChatsStore, reduced: boolean): LeaveState {
  * Streamed text is shown as it comes, never animated (decision 36).
  */
 export function ChatView({ hidden }: { hidden: boolean }) {
-  const { client, chats } = useServices();
+  const { chats } = useServices();
   const currentId = useChats((s) => s.currentId);
   const open = useChats((s) => (s.currentId ? s.chats[s.currentId] : undefined));
   const summary = useChats((s) => (s.currentId ? s.list.find((c) => c.id === s.currentId) : undefined));
@@ -145,12 +143,6 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   }, [chats, currentId, open?.load]);
 
   const pageVisible = usePageVisible();
-  const researchTaskId = summary?.research_task_id;
-  const researchTask = useResearch((s) => researchTaskId ? s.tasksById[researchTaskId] : undefined);
-  useFinishedTaskRead(researchTask, !hidden);
-  useEffect(() => {
-    if (!hidden && pageVisible && researchTaskId) void getResearchStore(client).getState().loadTask(researchTaskId);
-  }, [client, hidden, pageVisible, researchTaskId]);
   useEffect(() => {
     if (!hidden && pageVisible && currentId && summary?.unread) void chats.getState().markRead(currentId);
   }, [chats, currentId, summary?.unread, hidden, pageVisible]);
@@ -216,7 +208,6 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         )}
         {recording && <span className="kb-tag kb-tag--static">during recording</span>}
         <span className="kb-head__spacer" />
-        {chat && <ResearchGrantChip chatId={chat.id} />}
         {chat && <WebSearchChip chatId={chat.id} messages={chat.messages} />}
         {chat && <ChatOverviewButton chatId={chat.id} />}
         {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)} />}

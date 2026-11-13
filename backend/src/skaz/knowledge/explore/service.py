@@ -1,4 +1,4 @@
-"""``runtime.kb_explore``: the funnel (``ExploreService`` + ``FunnelRunner``), 0.4.0 B2.
+"""``runtime.kb_explore``: the funnel (``ExploreService``), 0.4.0 B2.
 
 Stages (v3 "step N of 5"): collect → rules → decision → novelty → ready.
 
@@ -34,14 +34,10 @@ from ..api.schemas_areas import KbReadMark, KbSignalEntity
 from ..api.schemas_explore import (
     KbCandidateOutcome,
     KbDiscussion,
-    KbExploreStart,
-    KbExploring,
-    KbExploringList,
     KbFinding,
     KbFindingAccess,
     KbFindingChannel,
     KbFindingGroup,
-    KbFindingImport,
     KbFindingImported,
     KbFindings,
     KbFindingsShow,
@@ -77,7 +73,7 @@ from ..api.schemas_explore_common import (
     KbStopReason,
 )
 from ..api.schemas_science import KbSciencePayload, KbScienceResults, KbScienceSearch, KbScienceWork
-from ..areas.protocols import AreaDirectory, SignalDraft, SignalRecorder
+from ..areas.protocols import AreaDirectory, SignalRecorder
 from ..decisions.protocol import ChoiceAnswer, ChoiceQuestion, DecisionLayer
 from ..errors import KnowledgeError, NotFound
 from ..freshness.protocols import PublicationDates
@@ -91,7 +87,7 @@ from ..science.protocols import (
     ScienceUnavailable,
 )
 from ..service import KnowledgeService
-from .jobs import STATE_OF, ClaimLost, SqliteJobStore
+from .jobs import ClaimLost, SqliteJobStore
 from .novelty import (
     NoveltyUnavailable,
     WikiClaims,
@@ -100,7 +96,7 @@ from .novelty import (
     reason_for,
     work_state,
 )
-from .planning import SearchPlanner, terms_of
+from .planning import SearchPlanner
 from .protocols import NoveltyChecker
 from .reading import ReadingDesk
 from .rules import (
@@ -131,8 +127,8 @@ OFF_TOPIC = "None of these: off-topic"
 ON_TOPIC = "On topic"
 _CHANNEL_ORDER: dict[str, int] = {"continues": 0, "branches": 1, "search": 2}
 _USEFUL = frozenset({"new", "extends", "contradicts"})
-_RUN_OWNERS: tuple[KbJobOwner, ...] = ("explore", "research")
-_VERDICT_OWNERS: tuple[KbJobOwner, ...] = ("explore", "research", "weekly")
+_RUN_OWNERS: tuple[KbJobOwner, ...] = ("explore",)
+_VERDICT_OWNERS: tuple[KbJobOwner, ...] = ("explore", "weekly")
 _COLLECT_DONE = "@collect"
 _LOCAL_USER = KbSignalEntity(kind="user", id="local-user")
 DecisionChoice = Literal["download_local", "openrouter_jev"]
@@ -173,7 +169,7 @@ def _json(data: Mapping[str, Any]) -> str:
 
 
 class ExploreFunnel:
-    """Implements ``ExploreService`` and ``FunnelRunner``; ``jobs`` is the shared ``JobStore``.
+    """Implements ``ExploreService``; ``jobs`` is the shared ``JobStore``.
 
     ``science`` stays ``None`` until B1's client is wired (``runtime.kb_explore.science = …``); until
     then everything that would reach a science base answers ``not_ready``.
@@ -219,10 +215,6 @@ class ExploreFunnel:
         self._slots = asyncio.Semaphore(PARALLEL_LIMIT)
         #: Runs waiting for a free slot (shown ``queued`` in the side list).
         self._queued: set[str] = set()
-        #: B3 (wired at W4: ``runtime.kb_explore.task_chats = kb_research.chats_of``): research task id →
-        #: its chat, for ``KbJobSummary.chat_id``. Blocking.
-        self.task_chats: Callable[[Sequence[str]], Mapping[str, str]] | None = None
-
     # -- readiness ------------------------------------------------------------------------------------
 
     def _ensure_ready(self) -> None:
@@ -234,7 +226,7 @@ class ExploreFunnel:
             raise ContractFailure(503, "not_ready")
         return self.science
 
-    # -- ExploreService / FunnelRunner: runs -------------------------------------------------------
+    # -- ExploreService: runs -------------------------------------------------------
 
     async def plan(self, body: KbSearchPlanRequest) -> KbSearchPlan:
         self._ensure_ready()
@@ -259,11 +251,6 @@ class ExploreFunnel:
 
     async def start(self, body: KbFunnelStart, *, free_only: bool = False) -> KbFunnelRun:
         return await self._start("explore", None, None, body, free_only=free_only)
-
-    async def start_for_task(
-        self, task_id: str, title: str, body: KbFunnelStart, *, free_only: bool = False
-    ) -> KbFunnelRun:
-        return await self._start("research", task_id, title, body, free_only=free_only)
 
     async def run(self, run_id: str) -> KbFunnelRun:
         self._ensure_ready()
@@ -431,20 +418,6 @@ class ExploreFunnel:
         """Blocking: findings not opened, dismissed or added, per area (the tile's «+N», EX3)."""
         return self.store.unseen_by_area()
 
-    async def explore(self, finding_id: str, body: KbExploreStart) -> KbExploring:
-        self._ensure_ready()
-        finding = await self.finding(finding_id)
-        return await self.reading.explore(finding, body, self._client())
-
-    async def add_to_wiki(self, finding_id: str, body: KbFindingImport) -> KbFindingImported:
-        self._ensure_ready()
-        finding = await self.finding(finding_id)
-        return await self.reading.add_to_wiki(finding, body, self._client())
-
-    async def exploring(self) -> KbExploringList:
-        self._ensure_ready()
-        return await self.reading.list()
-
     # -- lifecycle -------------------------------------------------------------------------------------
 
     async def on_start(self) -> list[str]:
@@ -532,8 +505,6 @@ class ExploreFunnel:
             "today": self._today().isoformat(),
         }
         await disk_call(self.store.create_run, job.id, area_id=body.area_id, task_id=task_id, request=request)
-        if owner == "research":
-            await self._task_signal(job.id, "research_started")
         gate: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         self._gates[job.id] = gate
         task = self._spawn(job.id)
@@ -568,12 +539,6 @@ class ExploreFunnel:
             if len(items) > 8:
                 raise ContractFailure(422, "invalid_request")
             return items
-        # Transitional B3 caller joins the derived topics with OR; X3 passes the final card as plan.
-        if owner == "research" and body.query.strip():
-            words = terms_of(body.query.split(" OR "))
-            if len(words) > 4 or any(len(word) > 72 for word in words):
-                raise ContractFailure(422, "invalid_request")
-            return [KbSearchPlanItem(area_id=body.area_id, label=word, terms=[word]) for word in words]
         preview = self.planner.build(
             KbSearchPlanRequest(
                 area_id=body.area_id,
@@ -709,8 +674,6 @@ class ExploreFunnel:
             pending_ids=pending,
         )
         await disk_call(self.job_store.stop, run_id, reason, retry_at=retry_at)
-        if STATE_OF[reason] == "paused" and reason != "app_exit":
-            await self._task_signal(run_id, "research_paused")
 
     async def _progress(
         self, run: RunRow, stage: KbRunStage, budget: KbRunBudget | None = None
@@ -1099,7 +1062,7 @@ class ExploreFunnel:
                 "cites_materials": data.get("cites") or [],
                 "shared_source_count": int(data.get("shared") or 0),
                 "repeat_hint": (
-                    f"{covered} of {len(theses)} points repeat your wiki — Brief tour will skip them"
+                    f"{covered} of {len(theses)} points repeat your wiki"
                     if 0 < covered < len(theses)
                     else None
                 ),
@@ -1165,24 +1128,6 @@ class ExploreFunnel:
                 body=f"{counters.new} new · {counters.covered} repeat what you have",
                 payload={"job_id": run.id, "task_id": run.task_id, "area_id": run.area_id},
             )
-        await self._task_signal(run.id, "research_completed")
-
-    async def _task_signal(self, run_id: str, predicate: str) -> None:
-        """Research runs: the task's facts that only the runner sees (started, paused, completed)."""
-        run = await disk_call(self.store.run, run_id)
-        if run is None or run.task_id is None:
-            return
-        draft = SignalDraft(
-            subject=_LOCAL_USER,
-            predicate=predicate,
-            object=KbSignalEntity(kind="research_task", id=run.task_id),
-            origin="task_event",
-            evidence_id=run_id,
-        )
-        try:
-            await disk_call(self.recorder.record, draft)
-        except Exception as error:  # a fact that can't be written never stops the run
-            logger.warning("Signal %s for run %s not recorded: %s", predicate, run_id, type(error).__name__)
 
     # -- derived state (blocking) -----------------------------------------------------------------------
 
@@ -1337,8 +1282,6 @@ class ExploreFunnel:
     def _summaries(self, active: bool) -> KbJobs:
         jobs = list(self.job_store.active()) if active else list(self.job_store.recent(limit=50))
         runs = self.store.runs([job.id for job in jobs])
-        task_ids = [run.task_id for run in runs.values() if run.task_id is not None]
-        chats = self.task_chats(task_ids) if self.task_chats is not None and task_ids else {}
         summaries = []
         for job in jobs:
             run = runs.get(job.id)
@@ -1352,7 +1295,7 @@ class ExploreFunnel:
                     stop_reason=job.stop_reason,
                     budget=job.budget,
                     task_id=run.task_id if run else None,
-                    chat_id=chats.get(run.task_id) if run is not None and run.task_id else None,
+                    chat_id=None,
                     area_id=run.area_id if run else None,
                     updated_at=job.updated_at,
                 )

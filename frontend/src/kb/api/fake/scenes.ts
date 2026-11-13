@@ -1,9 +1,9 @@
 // Synthetic UI states for F1–F5: every state of the approved n4-v3 and of the v4 gallery. All titles,
 // authors and numbers are invented. These are examples, not model or API results.
 import type {
-  KbArea, KbAreaMap, KbAreaMaterial, KbAreaMaterials, KbExploring, KbFinding, KbFindings, KbFreshnessMark,
-  KbFreshnessMarks, KbFunnelRun, KbJobs, KbLinkCheck, KbMaterialRepeats, KbRepeatCheck, KbResearchPermission,
-  KbResearchTask, KbRunBudget, KbWeeklyCheck, KbWeeklySettings,
+  KbArea, KbAreaMap, KbAreaMaterial, KbAreaMaterials, KbFinding, KbFindings, KbFreshnessMark,
+  KbFreshnessMarks, KbFunnelRun, KbJobs, KbLinkCheck, KbMaterialRepeats, KbRepeatCheck,
+  KbRunBudget, KbWeeklyCheck, KbWeeklySettings,
 } from '../../../api/kb/types.gen';
 import { contractFixtures as f } from './fixtures';
 
@@ -14,9 +14,6 @@ export interface ExploreScene {
   jobs?: KbJobs;
   findings?: KbFindings;
   finding?: KbFinding;
-  exploring?: KbExploring;
-  task?: KbResearchTask;
-  permission?: KbResearchPermission;
   repeats?: KbMaterialRepeats;
   repeatCheck?: KbRepeatCheck;
   freshness?: KbFreshnessMarks;
@@ -111,16 +108,6 @@ const searching: KbFunnelRun = { ...baseRun, id: 'run-search', task_id: null, ar
 const done: KbFunnelRun = { ...searching, state: 'done', stage: 'ready', stop_reason: 'completed', active_area_ids: [],
   budget: candidateBudget(30),
   counters: { checked: 240, after_rules: 198, decided: 198, on_topic: 38, novelty_checked: 30, new: 9, covered: 12 } };
-const baseJob = f.KbResearchTask.run;
-const taskRun = (overrides: Partial<KbResearchTask['run']>): KbResearchTask['run'] => ({
-  ...baseJob, owner: 'research', state: 'running', stage: 'novelty', budget: candidateBudget(18), stop_reason: null,
-  counters: { checked: 240, after_rules: 198, decided: 198, on_topic: 38, novelty_checked: 18, new: 6, covered: 4 },
-  ...overrides,
-});
-const task = (run: KbResearchTask['run']): KbResearchTask => ({ ...f.KbResearchTask, id: 'task-rag',
-  title: 'Evidence for reliable RAG', description: 'Find recent work on evaluating RAG answers. Look for evidence that adds to Lecture 7.',
-  chat_id: 'chat-research-rag', finding_count: run.counters.new, run });
-
 // ---- findings --------------------------------------------------------------------------------------
 const baseFinding: KbFinding = f.KbFinding;
 const pageRef = (page_id: string, title: string) => ({ page_id, title, block_id: null });
@@ -135,7 +122,7 @@ function find(id: string, title: string, label: KbFinding['label'], channel: KbF
 const contradicts = find('finding-contradicts', 'Self-correction in LLMs does not improve factuality without external feedback',
   'contradicts', 'continues', ['Huang', 'Chen'], 2026, 'Self-review alone does not fix wrong answers — your page Self-check loops says it does.',
   { area_path: ['AI', 'LLM agents'], wiki_refs: [selfCheck], cites_materials: [{ material_id: 'material-reflexion', title: 'Reflexion' }],
-    repeat_hint: 'Sections 1–2 repeat your wiki — Brief tour will skip them', theses: [{ label: 'contradicts', wiki_refs: [selfCheck],
+    repeat_hint: 'Sections 1–2 repeat your wiki', theses: [{ label: 'contradicts', wiki_refs: [selfCheck],
       text: 'Self-review without outside signals rarely improves accuracy.' }] });
 const isNew = find('finding-new', 'Claim-level grounding for long-lived agent memory', 'new', 'search', ['Okafor', 'Lind'], 2026,
   'A way to re-check each wiki claim against its source on every update — nothing like it in your wiki.');
@@ -171,10 +158,6 @@ const grouped: KbFindings = {
   ],
   covered_count: 12, next_cursor: null, checked_at: '2026-11-09T10:00:00Z', full_text_key_hint_count: 1,
 };
-
-// ---- permission card -------------------------------------------------------------------------------
-const permission = (overrides: Partial<KbResearchPermission>): KbResearchPermission => ({ ...f.KbResearchPermission,
-  arguments: { description: 'Find recent evidence for reliable RAG' }, ...overrides });
 
 // ---- repeats ---------------------------------------------------------------------------------------
 const repeatJob: KbRepeatCheck = { ...f.KbRepeatCheck, area_id: rag.id, materials_checked: 2, materials_remaining: 5,
@@ -212,7 +195,7 @@ export const scenes = {
     title: 'Computer Science', stage: 'decision', task_id: null, chat_id: null, area_id: cs.id, budget: searching.budget }] } },
   done: { map: csMap, run: done, findings: grouped },
   find: { map: csMap, finding: contradicts },
-  explore: { map: csMap, finding: contradicts, exploring: f.KbExploring },
+  explore: { map: csMap, finding: contradicts },
   // Findings
   paid: { finding: paid },
   abstract_only: { finding: abstractOnly },
@@ -220,15 +203,6 @@ export const scenes = {
   contradicts: { finding: contradicts },
   extends: { finding: extendsWiki },
   branch: { finding: branch },
-  // Research task
-  research_running: { task: task(taskRun({})) },
-  research_paused: { task: task(taskRun({ state: 'paused', stop_reason: 'user_pause' })) },
-  research_budget: { task: task(taskRun({ state: 'paused', stop_reason: 'budget', budget: candidateBudget(30),
-    counters: { checked: 240, after_rules: 198, decided: 198, on_topic: 38, novelty_checked: 30, new: 9, covered: 12 } })) },
-  research_done: { task: task(taskRun({ state: 'done', stage: 'ready', stop_reason: 'completed', budget: candidateBudget(30) })) },
-  permission_pending: { permission: permission({}) },
-  permission_allowed: { permission: permission({ status: 'allowed', task_id: 'task-rag', task_title: 'Evidence for reliable RAG', task_state: 'running' }) },
-  permission_denied: { permission: permission({ status: 'denied' }) },
   // Honest stops
   no_decision_model: { run: { ...searching, state: 'paused', stop_reason: 'decision_model_required', decision_provider: null,
     decision_choices: ['download_local', 'openrouter_jev'] } },

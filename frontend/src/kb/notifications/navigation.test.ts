@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NAVIGATION_ACTIONS, runNavigation } from './navigation';
 
-const openTask = vi.fn();
-vi.mock('../research/store', () => ({ getResearchStore: () => ({ getState: () => ({ openTask }) }) }));
-
 function services(call: (route: string, options?: unknown) => Promise<unknown>) {
   const set = vi.fn();
   const client = { call: vi.fn(call) };
@@ -17,7 +14,7 @@ function services(call: (route: string, options?: unknown) => Promise<unknown>) 
 
 describe('navigation buttons of notifications (0.4.0 B2, B6)', () => {
   it('lists every navigation action the backend sends', () => {
-    expect([...NAVIGATION_ACTIONS].sort()).toEqual(['check_novelty', 'open_explore', 'open_research_task', 'review_updates', 'view_check']);
+    expect([...NAVIGATION_ACTIONS].sort()).toEqual(['check_novelty', 'open_explore', 'review_updates', 'view_check']);
   });
 
   it('Open in Explore and View check open Explore; Review source updates opens All materials; nothing is resolved', async () => {
@@ -52,17 +49,6 @@ describe('navigation buttons of notifications (0.4.0 B2, B6)', () => {
       .toEqual({ ok: false, error: 'This check wasn’t found.' });
     expect(await runNavigation(gone.svc, { payload: {} }, 'check_novelty'))
       .toEqual({ ok: false, error: 'This check is no longer available.' });
-  });
-
-  it('Open task opens the research task view in the chat centre, over an expanded document (R3-14)', async () => {
-    const s = services(async () => { throw new Error('no call expected'); });
-    expect(await runNavigation(s.svc, { payload: { task_id: 't-1', chat_id: 'chat-7' } }, 'open_research_task')).toEqual({ ok: true });
-    expect(s.set).toHaveBeenLastCalledWith({ section: 'chats', sideOpen: true });
-    expect(s.ui.showCenter).toHaveBeenCalledWith('chat');
-    expect(s.ui.toggleDocExpanded).toHaveBeenCalled();
-    expect(openTask).toHaveBeenCalledWith('t-1');
-    expect(await runNavigation(s.svc, { payload: {} }, 'open_research_task'))
-      .toEqual({ ok: false, error: 'This task is no longer available.' });
   });
 
   it('Review source updates shows All materials in the centre (R3-14)', async () => {

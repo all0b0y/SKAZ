@@ -1,7 +1,8 @@
 import { SelectionHeader, SelectionHeaderProvider } from '../ui/listSelection';
 import { LibraryPanel } from '../library/LibraryPanel';
 import { ChatList } from '../chat/ChatList';
-import { ChatsPlusMenu } from '../research';
+import { IconButton } from '../ui';
+import { useServices } from '../state/context';
 import { NotificationsFeed } from '../notifications/Feed';
 import { StudyShelf } from '../study/StudyShelf';
 import { GraphSide, WikiSide } from '../wiki/WikiSide';
@@ -32,6 +33,7 @@ const TITLES: Record<Section, string> = {
  * item (v39): it opens from the Wiki section; `graph` stays a section only for a saved choice.
  */
 export function SidePanel({ width }: { width: number }) {
+  const { chats, ui } = useServices();
   const section = usePrefs((s) => s.section);
   const level = useMotionLevel();
   const body = useRef<HTMLDivElement | null>(null);
@@ -50,7 +52,7 @@ export function SidePanel({ width }: { width: number }) {
       <SelectionHeader className="kb-head kb-head--side">
         <h2 className="kb-side__title">{TITLES[section]}</h2>
         <span className="kb-head__spacer" />
-        {section === 'chats' && <ChatsPlusMenu />}
+        {section === 'chats' && <IconButton icon="plus" label="New chat" size="sm" onClick={() => { ui.getState().showCenter('chat'); chats.getState().open(null); }} />}
       </SelectionHeader>
       <div className="kb-side__body" data-section={section} ref={body}>
         {section === 'chats' && <ChatList />}

@@ -128,7 +128,7 @@ class KbFinding(BaseModel):
     cites_materials: list[KbMaterialRef]
     #: Branches: how many of the user's sources it shares ("shares 3 of your sources").
     shared_source_count: int
-    #: N2: shown in the mode menu ("Sections 1–2 repeat your wiki — Brief tour will skip them").
+    #: N2: summary of the points already covered by the wiki.
     repeat_hint: str | None
     read_mark: KbReadMarkValue | None
     material_id: str | None
@@ -162,29 +162,6 @@ class KbFindings(BaseModel):
     next_cursor: str | None
     checked_at: datetime | None
     full_text_key_hint_count: int
-
-
-class KbExploreStart(KbContractRequest):
-    mode: Literal["brief_tour", "deep_dive", "notes"]
-    add_to_wiki: bool = False
-
-
-class KbExploring(BaseModel):
-    id: KbEntityId
-    finding_id: KbEntityId
-    chat_id: str
-    mode: Literal["brief_tour", "deep_dive", "notes"]
-    text_kind: Literal["tei", "arxiv_html", "open_page", "abstract_only"]
-    material_id: str | None
-    started_at: datetime
-
-
-class KbExploringList(BaseModel):
-    items: list[KbExploring]
-
-
-class KbFindingImport(KbContractRequest):
-    content: Literal["full_text", "abstract_only"]
 
 
 class KbFindingImported(BaseModel):

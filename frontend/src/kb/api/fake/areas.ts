@@ -12,8 +12,6 @@ export function createFakeAreasClient(): AreasClient {
     read_mark: async () => structuredClone(f.KbReadMark),
     set_read_mark: async () => structuredClone(f.KbReadMark),
     remove_read_mark: async () => structuredClone(f.KbReadMark),
-    set_finding_mark: async () => structuredClone(f.KbReadMark),
-    remove_finding_mark: async () => structuredClone(f.KbReadMark),
     signals: async () => structuredClone(f.KbSignals),
   };
 }

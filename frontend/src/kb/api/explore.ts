@@ -1,6 +1,6 @@
 // 0.4.0 explore client. All wire shapes come from OpenAPI.
 import type { KbClient } from './client';
-import type { KbAcknowledged, KbContinue, KbDiscussion, KbExploreStart, KbExploring, KbExploringList, KbFinding, KbFindingImport, KbFindingImported, KbFindings, KbFunnelRun, KbFunnelStart, KbJobs, KbSearch, KbSearches } from '../../api/kb/types.gen';
+import type { KbAcknowledged, KbContinue, KbDiscussion, KbFinding, KbFindingImported, KbFindings, KbFunnelRun, KbFunnelStart, KbJobs, KbSearch, KbSearches } from '../../api/kb/types.gen';
 
 export function exploreStart(client: Pick<KbClient, "call">, body: KbFunnelStart): Promise<KbFunnelRun> {
   return client.call('POST /kb/explore/runs', { body });
@@ -32,18 +32,6 @@ export function exploreFindings(client: Pick<KbClient, "call">, query: { area_id
 
 export function exploreFinding(client: Pick<KbClient, "call">, finding_id: string): Promise<KbFinding> {
   return client.call('GET /kb/explore/findings/{finding_id}', { path: { finding_id } });
-}
-
-export function exploreExplore(client: Pick<KbClient, "call">, finding_id: string, body: KbExploreStart): Promise<KbExploring> {
-  return client.call('POST /kb/explore/findings/{finding_id}/explore', { path: { finding_id }, body });
-}
-
-export function exploreAddToWiki(client: Pick<KbClient, "call">, finding_id: string, body: KbFindingImport): Promise<KbFindingImported> {
-  return client.call('POST /kb/explore/findings/{finding_id}/wiki', { path: { finding_id }, body });
-}
-
-export function exploreExploring(client: Pick<KbClient, "call">): Promise<KbExploringList> {
-  return client.call('GET /kb/explore/exploring');
 }
 
 /** EX3: one search page — its findings filtered and sorted (Show, Free only, Year, Type; Sort). */
@@ -110,9 +98,6 @@ export function createExploreClient(client: Pick<KbClient, "call">) {
     jobs: (query: { active?: boolean } = {}) => exploreJobs(client, query),
     findings: (query: { area_id?: string; task_id?: string; include_covered?: boolean; cursor?: string; limit?: number } = {}) => exploreFindings(client, query),
     finding: (finding_id: string) => exploreFinding(client, finding_id),
-    explore: (finding_id: string, body: KbExploreStart) => exploreExplore(client, finding_id, body),
-    add_to_wiki: (finding_id: string, body: KbFindingImport) => exploreAddToWiki(client, finding_id, body),
-    exploring: () => exploreExploring(client),
     searches: () => exploreSearches(client),
     search_findings: (query: SearchFindingsQuery) => exploreSearchFindings(client, query),
     rename_search: (run_id: string, name: string) => exploreRenameSearch(client, run_id, name),

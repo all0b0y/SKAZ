@@ -33,7 +33,7 @@ async def test_runtime_exposes_the_job_store_and_routes_go_live_with_a_library(
     response = await kb_client.get("/kb/explore/findings")
     assert response.status_code == 200
     assert response.json()["groups"] == [] and response.json()["covered_count"] == 0
-    assert (await kb_client.get("/kb/explore/exploring")).json() == {"items": []}
+    assert (await kb_client.get("/kb/explore/exploring")).status_code == 404
     missing = await kb_client.get("/kb/explore/findings/finding-missing")
     assert (missing.status_code, missing.json()) == (404, {"code": "not_found"})
     # B1's science client is wired, but the integration is off: a run can't start, and nothing is created.

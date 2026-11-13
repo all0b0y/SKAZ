@@ -9,9 +9,6 @@ import type {
   KbAreaMap,
   KbAreaMaterials,
   KbDatedMaterials,
-  KbExploreSnapshot,
-  KbExploring,
-  KbExploringList,
   KbFinding,
   KbFindingImported,
   KbFindings,
@@ -24,10 +21,6 @@ import type {
   KbMaterialRepeats,
   KbReadMark,
   KbRepeatCheck,
-  KbResearchGrant,
-  KbResearchPermission,
-  KbResearchTask,
-  KbResearchTasks,
   KbScienceJournal,
   KbScienceResults,
   KbScienceSettings,
@@ -39,7 +32,6 @@ import type {
   KbFunnelCandidate,
   KbFunnelCandidates,
   KbMaterialTopic,
-  KbResearchProposal,
   KbSearchPlan,
   KbTopicLabelling,
 } from '../../../api/kb/types.gen';
@@ -51,7 +43,6 @@ interface ContractFixtures {
   KbDiscussion: KbDiscussion;
   KbTopicLabelling: KbTopicLabelling;
   KbSearchPlan: KbSearchPlan;
-  KbResearchProposal: KbResearchProposal;
   KbMaterialTopic: KbMaterialTopic;
   KbFunnelCandidates: KbFunnelCandidates;
   KbFunnelCandidate: KbFunnelCandidate;
@@ -60,9 +51,6 @@ interface ContractFixtures {
   KbAreaMap: KbAreaMap;
   KbAreaMaterials: KbAreaMaterials;
   KbDatedMaterials: KbDatedMaterials;
-  KbExploreSnapshot: KbExploreSnapshot;
-  KbExploring: KbExploring;
-  KbExploringList: KbExploringList;
   KbFinding: KbFinding;
   KbFindingImported: KbFindingImported;
   KbFindings: KbFindings;
@@ -75,10 +63,6 @@ interface ContractFixtures {
   KbMaterialRepeats: KbMaterialRepeats;
   KbReadMark: KbReadMark;
   KbRepeatCheck: KbRepeatCheck;
-  KbResearchGrant: KbResearchGrant;
-  KbResearchPermission: KbResearchPermission;
-  KbResearchTask: KbResearchTask;
-  KbResearchTasks: KbResearchTasks;
   KbScienceJournal: KbScienceJournal;
   KbScienceResults: KbScienceResults;
   KbScienceSettings: KbScienceSettings;
@@ -111,7 +95,8 @@ export const contractFixtures = {
     "updated_at": "2026-11-09T10:05:00Z"
   },
   "KbSearches": {
-    "items": [{
+    "items": [
+      {
         "id": "run-1",
         "name": "MoE routing",
         "owner": "explore",
@@ -129,7 +114,8 @@ export const contractFixtures = {
         "unseen": 3,
         "created_at": "2026-11-09T10:00:00Z",
         "updated_at": "2026-11-09T10:05:00Z"
-      }],
+      }
+    ],
     "parallel_limit": 3
   },
   "KbDiscussion": {
@@ -495,28 +481,6 @@ export const contractFixtures = {
     "repeat_hint": null,
     "read_mark": null
   },
-  "KbExploring": {
-    "id": "reading-1",
-    "finding_id": "finding-1",
-    "chat_id": "chat-reading-1",
-    "mode": "brief_tour",
-    "text_kind": "open_page",
-    "material_id": null,
-    "started_at": "2026-11-09T10:00:00Z"
-  },
-  "KbExploringList": {
-    "items": [
-      {
-        "id": "reading-1",
-        "finding_id": "finding-1",
-        "chat_id": "chat-reading-1",
-        "mode": "brief_tour",
-        "text_kind": "open_page",
-        "material_id": null,
-        "started_at": "2026-11-09T10:00:00Z"
-      }
-    ]
-  },
   "KbFindingImported": {
     "finding_id": "finding-1",
     "material_id": "material-1",
@@ -644,385 +608,6 @@ export const contractFixtures = {
       }
     ],
     "next_cursor": null
-  },
-  "KbResearchTask": {
-    "id": "task-1",
-    "title": "Verify wiki claims",
-    "description": "Find methods to verify wiki claims",
-    "chat_id": "chat-research-1",
-    "origin_chat_id": null,
-    "area_id": "area-ai",
-    "topics": [
-      {
-        "text": "LLM agents",
-        "source": "proposed",
-        "area_id": null
-      }
-    ],
-    "run": {
-      "id": "run-1",
-      "state": "running",
-      "stage": "novelty",
-      "stop_reason": null,
-      "budget": {
-        "unit": "candidate",
-        "limit": 30,
-        "used": 9,
-        "remaining": 21,
-        "total_used": 9,
-        "batch": 1,
-        "free_only": false
-      },
-      "counters": {
-        "checked": 240,
-        "after_rules": 198,
-        "on_topic": 38,
-        "novelty_checked": 9,
-        "new": 9,
-        "covered": 0,
-        "decided": 198
-      },
-      "checkpoint": {
-        "id": "checkpoint-1",
-        "revision": 1,
-        "stage": "novelty",
-        "cursor": "fixture-cursor",
-        "completed_ids": [
-          "work-1"
-        ],
-        "pending_ids": [
-          "work-2"
-        ],
-        "saved_at": "2026-11-09T10:00:00Z"
-      },
-      "created_at": "2026-11-09T10:00:00Z",
-      "updated_at": "2026-11-09T10:00:00Z",
-      "decision_choices": [],
-      "owner": "research",
-      "decision_provider": "local",
-      "retry_at": null
-    },
-    "finding_count": 9,
-    "created_at": "2026-11-09T10:00:00Z",
-    "updated_at": "2026-11-09T10:00:00Z"
-  },
-  "KbResearchTasks": {
-    "tasks": [
-      {
-        "id": "task-1",
-        "title": "Verify wiki claims",
-        "description": "Find methods to verify wiki claims",
-        "chat_id": "chat-research-1",
-        "origin_chat_id": null,
-        "area_id": "area-ai",
-        "topics": [
-          {
-            "text": "LLM agents",
-            "source": "proposed",
-            "area_id": null
-          }
-        ],
-        "run": {
-          "id": "run-1",
-          "state": "running",
-          "stage": "novelty",
-          "stop_reason": null,
-          "budget": {
-            "unit": "candidate",
-            "limit": 30,
-            "used": 9,
-            "remaining": 21,
-            "total_used": 9,
-            "batch": 1,
-            "free_only": false
-          },
-          "counters": {
-            "checked": 240,
-            "after_rules": 198,
-            "on_topic": 38,
-            "novelty_checked": 9,
-            "new": 9,
-            "covered": 0,
-            "decided": 198
-          },
-          "checkpoint": {
-            "id": "checkpoint-1",
-            "revision": 1,
-            "stage": "novelty",
-            "cursor": "fixture-cursor",
-            "completed_ids": [
-              "work-1"
-            ],
-            "pending_ids": [
-              "work-2"
-            ],
-            "saved_at": "2026-11-09T10:00:00Z"
-          },
-          "created_at": "2026-11-09T10:00:00Z",
-          "updated_at": "2026-11-09T10:00:00Z",
-          "decision_choices": [],
-          "owner": "research",
-          "decision_provider": "local",
-          "retry_at": null
-        },
-        "finding_count": 9,
-        "created_at": "2026-11-09T10:00:00Z",
-        "updated_at": "2026-11-09T10:00:00Z"
-      }
-    ],
-    "next_cursor": null
-  },
-  "KbResearchPermission": {
-    "id": "permission-1",
-    "kind": "research_start",
-    "chat_id": "chat-1",
-    "arguments": {
-      "description": "Find methods to verify wiki claims"
-    },
-    "topics": [
-      "claim verification methods",
-      "fact-checking knowledge bases"
-    ],
-    "status": "pending",
-    "auto": false,
-    "task_id": null,
-    "created_at": "2026-11-09T10:00:00Z",
-    "type": "research",
-    "engine": "claude_code",
-    "reason": null,
-    "task_title": null,
-    "task_state": null
-  },
-  "KbResearchGrant": {
-    "chat_id": "chat-1",
-    "kind": "research_start",
-    "allowed": false,
-    "granted_at": null
-  },
-  "KbExploreSnapshot": {
-    "map": {
-      "parent_id": null,
-      "breadcrumbs": [],
-      "areas": [
-        {
-          "id": "field-cs",
-          "parent_id": null,
-          "taxonomy_id": "17",
-          "level": "field",
-          "name": "Computer Science",
-          "original_name": "Computer Science",
-          "hidden": false,
-          "pinned": true,
-          "topic_ids": [],
-          "has_children": true,
-          "pages": 128,
-          "sources": 34,
-          "newest_source_year": 2026,
-          "recent_activity_at": "2026-11-09T10:00:00Z",
-          "new_findings": 9,
-          "marked_materials": 12,
-          "materials": 12,
-          "wiki_share": 0.4,
-          "depth": "dense",
-          "children_covered": 0,
-          "children_total": 0,
-          "gap_reason": null
-        }
-      ],
-      "total_pages": 320,
-      "worth_closing": [],
-      "unsorted_materials": 0,
-      "labelling": {
-        "state": "idle",
-        "job_id": null,
-        "done": 0,
-        "total": 0,
-        "reason_code": null,
-        "engine": null
-      },
-      "total_sources": 131
-    },
-    "findings": {
-      "groups": [
-        {
-          "task_id": "task-1",
-          "task_title": "Verify wiki claims",
-          "findings": [
-            {
-              "id": "finding-1",
-              "run_id": "run-1",
-              "task_id": "task-1",
-              "area_id": "topic-rag",
-              "channel": "search",
-              "label": "new",
-              "work": {
-                "id": "work-1",
-                "provider": "openalex",
-                "provider_id": "W-fixture-1",
-                "doi": "10.1234/fixture",
-                "arxiv_id": null,
-                "title": "Fixture: claim-level grounding for agent memory",
-                "authors": [
-                  "Sample Author"
-                ],
-                "publication": {
-                  "year": 2026,
-                  "date": "2026-10-15",
-                  "precision": "day",
-                  "origin": "crossref",
-                  "evidence_url": "https://example.org/fixture-paper"
-                },
-                "venue": "Fixture Journal",
-                "abstract": "Synthetic sample: check each stored claim against its cited evidence.",
-                "topic_ids": [
-                  "T-fixture-rag"
-                ],
-                "referenced_ids": [
-                  "W-fixture-root"
-                ],
-                "cited_by_count": 12,
-                "locations": [
-                  {
-                    "url": "https://example.org/fixture-paper",
-                    "kind": "open_page",
-                    "open_access": true
-                  }
-                ],
-                "access": {
-                  "paid": false,
-                  "alternatives_checked": true,
-                  "free_alternative_ids": [],
-                  "suggestion_shown_at": null,
-                  "recommendation": null,
-                  "publisher_url": null
-                },
-                "publication_type": "article"
-              },
-              "reason": "The library has retrieval methods but no claim verification method.",
-              "theses": [
-                {
-                  "text": "Synthetic sample: verify a claim when its source changes.",
-                  "label": "new",
-                  "wiki_refs": [
-                    {
-                      "page_id": "page-rag",
-                      "title": "Retrieval-augmented generation",
-                      "block_id": "statement-1"
-                    }
-                  ]
-                }
-              ],
-              "material_id": null,
-              "text_available": "full_text",
-              "created_at": "2026-11-09T10:00:00Z",
-              "area_path": [
-                "Artificial Intelligence",
-                "Retrieval-augmented generation"
-              ],
-              "wiki_refs": [],
-              "cites_materials": [],
-              "shared_source_count": 0,
-              "repeat_hint": null,
-              "read_mark": null
-            }
-          ],
-          "task_state": "running",
-          "updated_at": "2026-11-09T10:00:00Z"
-        }
-      ],
-      "covered_count": 12,
-      "next_cursor": null,
-      "checked_at": "2026-11-09T10:00:00Z",
-      "full_text_key_hint_count": 2
-    },
-    "signals": {
-      "signals": [
-        {
-          "id": "signal-1",
-          "subject": {
-            "kind": "user",
-            "id": "local-user"
-          },
-          "predicate": "read_mark_set",
-          "object": {
-            "kind": "material",
-            "id": "material-1"
-          },
-          "occurred_at": "2026-11-09T10:00:00Z",
-          "origin": "user_action",
-          "value": "useful_method",
-          "evidence_id": "read-mark-material-1",
-          "supersedes_id": null
-        }
-      ],
-      "next_cursor": null
-    },
-    "tasks": {
-      "tasks": [
-        {
-          "id": "task-1",
-          "title": "Verify wiki claims",
-          "description": "Find methods to verify wiki claims",
-          "chat_id": "chat-research-1",
-          "origin_chat_id": null,
-          "area_id": "area-ai",
-          "topics": [
-            {
-              "text": "LLM agents",
-              "source": "proposed",
-              "area_id": null
-            }
-          ],
-          "run": {
-            "id": "run-1",
-            "state": "running",
-            "stage": "novelty",
-            "stop_reason": null,
-            "budget": {
-              "unit": "candidate",
-              "limit": 30,
-              "used": 9,
-              "remaining": 21,
-              "total_used": 9,
-              "batch": 1,
-              "free_only": false
-            },
-            "counters": {
-              "checked": 240,
-              "after_rules": 198,
-              "on_topic": 38,
-              "novelty_checked": 9,
-              "new": 9,
-              "covered": 0,
-              "decided": 198
-            },
-            "checkpoint": {
-              "id": "checkpoint-1",
-              "revision": 1,
-              "stage": "novelty",
-              "cursor": "fixture-cursor",
-              "completed_ids": [
-                "work-1"
-              ],
-              "pending_ids": [
-                "work-2"
-              ],
-              "saved_at": "2026-11-09T10:00:00Z"
-            },
-            "created_at": "2026-11-09T10:00:00Z",
-            "updated_at": "2026-11-09T10:00:00Z",
-            "decision_choices": [],
-            "owner": "research",
-            "decision_provider": "local",
-            "retry_at": null
-          },
-          "finding_count": 9,
-          "created_at": "2026-11-09T10:00:00Z",
-          "updated_at": "2026-11-09T10:00:00Z"
-        }
-      ],
-      "next_cursor": null
-    }
   },
   "KbMaterialPublication": {
     "material_id": "material-1",
@@ -1354,8 +939,8 @@ export const contractFixtures = {
     "jobs": [
       {
         "id": "run-1",
-        "owner": "research",
-        "title": "Verify wiki claims",
+        "owner": "explore",
+        "title": "Wiki claim verification papers",
         "state": "running",
         "stage": "novelty",
         "stop_reason": null,
@@ -1368,8 +953,8 @@ export const contractFixtures = {
           "batch": 1,
           "free_only": false
         },
-        "task_id": "task-1",
-        "chat_id": "chat-research-1",
+        "task_id": null,
+        "chat_id": null,
         "area_id": "area-ai",
         "updated_at": "2026-11-09T10:00:00Z"
       }
@@ -1504,15 +1089,5 @@ export const contractFixtures = {
       }
     ],
     "next_cursor": null
-  },
-  "KbResearchProposal": {
-    "title": "Methods for AI harness",
-    "topics": [
-      {
-        "text": "AI agent evaluation harness",
-        "source": "proposed",
-        "area_id": null
-      }
-    ]
   }
 } satisfies ContractFixtures;

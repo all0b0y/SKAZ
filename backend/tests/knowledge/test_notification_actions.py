@@ -48,14 +48,14 @@ def test_a_kind_is_registered_once() -> None:
 
 
 def test_one_notification_can_be_read_without_reading_the_others(tmp_path: Path) -> None:
-    """EX2: opening a finished Research task reads its own notification only (the bell keeps the rest)."""
+    """Reading one notification leaves every other notification unread."""
     from skaz.knowledge.store.database import KnowledgeDatabase
     from skaz.knowledge.store.repositories import NotificationRepository
 
     db = KnowledgeDatabase(tmp_path / "k.sqlite3")
     try:
         repo = NotificationRepository(db)
-        first = repo.add("research_finished", "Task", body="0 new")
+        first = repo.add("explore_finished", "First search", body="0 new")
         second = repo.add("explore_finished", "Search", body="0 new")
         assert repo.mark_one_read(first.id) is True
         assert repo.mark_one_read(first.id) is False

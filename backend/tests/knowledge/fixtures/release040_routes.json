@@ -170,40 +170,6 @@
     "query": []
   },
   {
-    "area": "explore",
-    "method": "POST",
-    "path": "/kb/explore/findings/{finding_id}/explore",
-    "name": "explore",
-    "body": "KbExploreStart",
-    "response": "KbExploring",
-    "example": {
-      "mode": "brief_tour"
-    },
-    "query": []
-  },
-  {
-    "area": "explore",
-    "method": "POST",
-    "path": "/kb/explore/findings/{finding_id}/wiki",
-    "name": "add_to_wiki",
-    "body": "KbFindingImport",
-    "response": "KbFindingImported",
-    "example": {
-      "content": "full_text"
-    },
-    "query": []
-  },
-  {
-    "area": "explore",
-    "method": "GET",
-    "path": "/kb/explore/exploring",
-    "name": "exploring",
-    "body": null,
-    "response": "KbExploringList",
-    "example": null,
-    "query": []
-  },
-  {
     "area": "areas",
     "method": "GET",
     "path": "/kb/explore/map",
@@ -322,116 +288,6 @@
       "cursor: str | None = None",
       "limit: int = 50"
     ]
-  },
-  {
-    "area": "research",
-    "method": "POST",
-    "path": "/kb/research/tasks",
-    "name": "create",
-    "body": "KbResearchCreate",
-    "response": "KbResearchTask",
-    "example": {
-      "description": "Find methods to verify wiki claims"
-    },
-    "query": []
-  },
-  {
-    "area": "research",
-    "method": "GET",
-    "path": "/kb/research/tasks",
-    "name": "tasks",
-    "body": null,
-    "response": "KbResearchTasks",
-    "example": null,
-    "query": [
-      "cursor: str | None = None",
-      "limit: int = 30"
-    ]
-  },
-  {
-    "area": "research",
-    "method": "GET",
-    "path": "/kb/research/tasks/{task_id}",
-    "name": "task",
-    "body": null,
-    "response": "KbResearchTask",
-    "example": null,
-    "query": []
-  },
-  {
-    "area": "research",
-    "method": "POST",
-    "path": "/kb/research/tasks/{task_id}/pause",
-    "name": "pause",
-    "body": null,
-    "response": "KbResearchTask",
-    "example": null,
-    "query": []
-  },
-  {
-    "area": "research",
-    "method": "POST",
-    "path": "/kb/research/tasks/{task_id}/continue",
-    "name": "resume",
-    "body": "KbContinue",
-    "response": "KbResearchTask",
-    "example": {
-      "checkpoint_id": "checkpoint-1",
-      "revision": 1
-    },
-    "query": []
-  },
-  {
-    "area": "research",
-    "method": "POST",
-    "path": "/kb/research/tasks/{task_id}/cancel",
-    "name": "cancel",
-    "body": null,
-    "response": "KbResearchTask",
-    "example": null,
-    "query": []
-  },
-  {
-    "area": "research",
-    "method": "POST",
-    "path": "/kb/research/permissions/{request_id}/decide",
-    "name": "decide",
-    "body": "KbResearchDecide",
-    "response": "KbResearchPermission",
-    "example": {
-      "decision": "allow"
-    },
-    "query": []
-  },
-  {
-    "area": "research",
-    "method": "GET",
-    "path": "/kb/chats/{chat_id}/research-grant",
-    "name": "grant",
-    "body": null,
-    "response": "KbResearchGrant",
-    "example": null,
-    "query": []
-  },
-  {
-    "area": "research",
-    "method": "DELETE",
-    "path": "/kb/chats/{chat_id}/research-grant",
-    "name": "revoke_grant",
-    "body": null,
-    "response": "KbResearchGrant",
-    "example": null,
-    "query": []
-  },
-  {
-    "area": "research",
-    "method": "POST",
-    "path": "/kb/explore/read",
-    "name": "read",
-    "body": "KbExploreRead",
-    "response": "KbExploreSnapshot",
-    "example": {},
-    "query": []
   },
   {
     "area": "freshness",
@@ -767,18 +623,6 @@
     "body": null,
     "response": "KbFunnelCandidate",
     "example": null,
-    "query": []
-  },
-  {
-    "area": "research",
-    "method": "POST",
-    "path": "/kb/research/proposals",
-    "name": "propose",
-    "body": "KbResearchCreate",
-    "response": "KbResearchProposal",
-    "example": {
-      "description": "Find methods for AI harness"
-    },
     "query": []
   },
   {
