@@ -1,13 +1,6 @@
-export { AreaColumn, type AreaColumnProps } from './AreaColumn';
-export { ExploreMap, type ExploreMapProps } from './ExploreMap';
 export { ExploreSection } from './ExploreSection';
 export {
-  formatWikiShare,
-  isGapArea,
-  layoutAreaTiles,
   squarify,
-  tileWeight,
-  type AreaTileLayout,
   type TreemapRect,
   type WeightedItem,
 } from './treemap';

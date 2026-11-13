@@ -8,7 +8,6 @@ import type {
   KbFindingImport,
   KbFinding,
   KbFunnelRun,
-  KbRepeatCheck,
 } from '../../api/kb/types.gen';
 import { createAreasClient, type AreasClient } from '../api/areas';
 import { createExploreClient, type ExploreClient } from '../api/explore';
@@ -61,21 +60,9 @@ export interface FindingHostProps {
 
 export type FindingHostComponent = ComponentType<FindingHostProps>;
 
-/** Seeds the section with a screen state (tests and previews use the fake scenes); the live app omits it. */
-export interface ExploreInitialState {
-  parentId?: string;
-  /** A leaf topic to select in place; opens Your materials. */
-  topicId?: string;
-  run?: KbFunnelRun;
-  finding?: KbFinding;
-  repeatCheck?: KbRepeatCheck;
-}
-
 export interface ExploreSectionProps {
   hidden?: boolean;
-  initial?: ExploreInitialState;
   clients?: ExploreClients;
-  FindingComponent?: FindingHostComponent;
   onOpenDocument?: (target: DocTarget) => void;
   onOpenSettings?: (section?: SettingsSection) => void;
 }

@@ -221,6 +221,9 @@ class Runtime:
         )
         #: EX2 (X1): the wiki agent gives each material its topic at the end of its processing.
         self.kb_ingest.topics = self.kb_areas.labeller
+        from .knowledge.library.activity import MaterialActivity
+
+        self.kb_material_activity = MaterialActivity(self.kb)
 
         #: Publication dates, N7-5 library date filter and manual link checks (0.4.0 B5).
         from .knowledge.freshness import build_freshness_service

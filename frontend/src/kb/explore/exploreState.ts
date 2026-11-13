@@ -19,6 +19,13 @@ export interface ExploreState {
   parallelLimit: number;
   /** The searches could not be read; the side list says so and keeps the last list. */
   searchesFailed: boolean;
+  /**
+   * How many menus, dialogs or other overlays are over the page right now. The paper opens in a native view
+   * that is drawn above everything in the window, so it stays out of sight while any of them is up.
+   */
+  covers: number;
+  /** One more overlay is up; call the result once when it is gone. */
+  cover: () => () => void;
   showMap: () => void;
   showSearch: (id: string) => void;
   goToLevel: (level: string | null, selected?: string | null) => void;
@@ -35,36 +42,55 @@ type ReadSearches = () => Promise<KbSearches>;
 
 function createExploreState(readSearches: ReadSearches): StoreApi<ExploreState> {
   let reading: Promise<void> | null = null;
-  const store = createStore<ExploreState>((set, get) => ({
-    page: { kind: 'map' },
-    level: null,
-    selected: null,
-    multi: [],
-    searches: [],
-    parallelLimit: 3,
-    searchesFailed: false,
-    showMap: () => set({ page: { kind: 'map' } }),
-    showSearch: (id) => set({ page: { kind: 'search', id }, multi: [] }),
-    goToLevel: (level, selected = level) => set({ level, selected, multi: [] }),
-    toggleMulti: (id) => set((s) => {
-      const base = s.multi.length === 0 && s.selected ? [s.selected] : s.multi;
-      const multi = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
-      return multi.length === 1 ? { multi: [], selected: multi[0] ?? null } : { multi };
-    }),
-    clearMulti: () => set({ multi: [] }),
-    refresh: () => {
-      if (reading) return reading;
-      reading = readSearches().then(
-        (res) => {
-          const page = get().page;
-          const gone = page.kind === 'search' && !res.items.some((s) => s.id === page.id);
-          set({ searches: res.items, parallelLimit: res.parallel_limit, searchesFailed: false, ...(gone ? { page: { kind: 'map' } } : {}) });
-        },
-        () => set({ searchesFailed: true }),
-      ).finally(() => { reading = null; });
-      return reading;
-    },
-  }));
+  let rerun: Promise<void> | null = null;
+  const store = createStore<ExploreState>((set, get) => {
+    const apply = (res: KbSearches): void => {
+      const page = get().page;
+      const gone = page.kind === 'search' && !res.items.some((s) => s.id === page.id);
+      set({ searches: res.items, parallelLimit: res.parallel_limit, searchesFailed: false, ...(gone ? { page: { kind: 'map' } } : {}) });
+    };
+    const read = (): Promise<void> => {
+      const p: Promise<void> = readSearches().then(apply, () => set({ searchesFailed: true }))
+        .finally(() => { if (reading === p) reading = null; });
+      reading = p;
+      return p;
+    };
+    return {
+      page: { kind: 'map' },
+      level: null,
+      selected: null,
+      multi: [],
+      searches: [],
+      parallelLimit: 3,
+      searchesFailed: false,
+      covers: 0,
+      cover: () => {
+        set((s) => ({ covers: s.covers + 1 }));
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          set((s) => ({ covers: Math.max(0, s.covers - 1) }));
+        };
+      },
+      showMap: () => set({ page: { kind: 'map' } }),
+      showSearch: (id) => set({ page: { kind: 'search', id }, multi: [] }),
+      goToLevel: (level, selected = level) => set({ level, selected, multi: [] }),
+      toggleMulti: (id) => set((s) => {
+        const base = s.multi.length === 0 && s.selected ? [s.selected] : s.multi;
+        const multi = base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
+        return multi.length === 1 ? { multi: [], selected: multi[0] ?? null } : { multi };
+      }),
+      clearMulti: () => set({ multi: [] }),
+      refresh: () => {
+        if (!reading) return read();
+        // A read that began before this call can predate the change that asked for it (a search just started,
+        // renamed or deleted): one more read runs as soon as it ends, and this call waits for that one.
+        rerun ??= reading.then(() => { rerun = null; return read(); });
+        return rerun;
+      },
+    };
+  });
   return store;
 }
 

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useStore } from 'zustand';
 import type { KbArea, KbAreaMap } from '../../api/kb/types.gen';
-import { useServices, type KbServices } from '../state/context';
+import { useOptionalServices } from '../state/context';
 import type { DocTarget } from '../state/document';
-import type { SettingsSection } from '../state/ui';
+import { createUiStore, type SettingsSection, type UiState } from '../state/ui';
 import type { ToastData } from '../ui/Toast';
 import { Icon } from '../ui';
 import { exploreIssue } from './errors';
@@ -13,16 +13,20 @@ import { SearchPage } from './SearchPage';
 import { TopicDialog, type TopicEdit } from './TopicDialog';
 import { TOPICS_CHANGED } from './topicEvents';
 import { createExploreClients, weekdayShort, type ExploreClients, type ExploreSectionProps } from './types';
+import { useCover } from './useCover';
 import './explore.css';
 import './explore-v2.css';
 
-function useOptionalServices(): KbServices | null {
-  try {
-    return useServices();
-  } catch {
-    return null;
-  }
-}
+/** Stands in for the window's UI state when the section is shown without the app's services (tests, previews). */
+const NO_UI = createUiStore();
+
+/**
+ * Something of the window sits over the page: a dialog, the ⌘K palette, or the toast. The paper's native view
+ * is drawn above all of them, so it steps aside until they are gone.
+ */
+const overlayUp = (s: UiState): boolean =>
+  s.settingsOpen || s.librarySetupOpen || s.addMaterialOpen || s.searchOpen || s.decisionId !== null
+  || s.editModels !== null || s.toast !== null;
 
 /**
  * EX3 (Explore v2, UX-1…UX-16). Explore finds papers to read and add. The page is either the map of the
@@ -46,6 +50,10 @@ export function ExploreSection({
   const nav = useStore(store);
   useEffect(() => (hidden ? undefined : watchSearches(store)), [store, hidden]);
 
+  const pageCover = useCover(store);
+  const overlay = useStore(services?.ui ?? NO_UI, overlayUp);
+  const covered = hidden || overlay || nav.covers > 0;
+
   const openDocument = useCallback((target: DocTarget) => {
     if (onOpenDocumentProp) onOpenDocumentProp(target);
     else services?.ui.getState().openDocument(target);
@@ -60,7 +68,6 @@ export function ExploreSection({
   const [busy, setBusy] = useState(false);
   const [issue, setIssue] = useState<string | null>(null);
   const [edit, setEdit] = useState<TopicEdit | null>(null);
-  const [covered, setCovered] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const names = useRef(new Map<string, string>());
   const [, setNamesVersion] = useState(0);
@@ -96,6 +103,16 @@ export function ExploreSection({
   const page = nav.page;
   const search = page.kind === 'search' ? nav.searches.find((s) => s.id === page.id) ?? null : null;
   const nameOf = (id: string | null) => (id ? names.current.get(id) ?? 'this topic' : 'All your topics');
+
+  // A search opened from the side list names a topic this session has not met on the map yet: read its level,
+  // whose path carries the name.
+  const searchArea = search?.area_id ?? null;
+  useEffect(() => {
+    if (hidden || !searchArea || names.current.has(searchArea)) return undefined;
+    let live = true;
+    void clients.areas.map({ parent_id: searchArea }).then((map) => { if (live) onMap(map); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [clients, hidden, onMap, searchArea]);
   const scopeIds: Array<string | null> = search ? [search.area_id] : nav.multi.length > 1 ? nav.multi : [nav.selected];
   const scopeLabel = nav.multi.length > 1 && !search ? `${nav.multi.length} topics` : nameOf(scopeIds[0] ?? null);
 
@@ -140,32 +157,37 @@ export function ExploreSection({
       });
       return;
     }
-    setCovered(true);
     setEdit({ mode: action, area });
   };
 
+  /** Discuss opens the chat the backend made from the paper's card — the chat itself, not the section behind it. */
   const discuss = (chatId: string) => {
     if (!services) return;
-    services.prefs.getState().set({ section: 'chats', sideOpen: true });
-    void services.chats.getState().loadList();
-    services.chats.getState().open(chatId);
+    const { prefs, ui, chats } = services;
+    prefs.getState().set({ section: 'chats', sideOpen: true });
+    if (ui.getState().docExpanded) ui.getState().toggleDocExpanded();
+    ui.getState().showCenter('chat');
+    void chats.getState().loadList();
+    chats.getState().open(chatId);
   };
 
   return (
-    <main className="kb-explore kb-ex" data-pane="explore" hidden={hidden}>
+    <main className="kb-ex" data-pane="explore" hidden={hidden}>
       <form className="kb-ex-bar" onSubmit={find} role="search">
-        <Icon name="search" size={14} />
-        <span className="kb-ex-bar__scope" title={scopeLabel}>
-          <span>{scopeLabel}</span>
-          {!search && (nav.selected || nav.multi.length > 1) && (
-            <button type="button" className="kb-ex-bar__clear" aria-label="Search all your topics"
-              onClick={() => { store.getState().clearMulti(); store.getState().goToLevel(null, null); }}>
-              <Icon name="close" size={12} />
-            </button>
-          )}
-        </span>
-        <input className="kb-ex-bar__input" aria-label="What exactly? (optional)" value={query} maxLength={200}
-          placeholder="What exactly? Optional — e.g. evaluating RAG answers" onChange={(e) => setQuery(e.target.value)} />
+        <div className="kb-ex-bar__field">
+          <Icon name="search" size={14} />
+          <span className="kb-ex-bar__scope" title={scopeLabel}>
+            <span>{scopeLabel}</span>
+            {!search && (nav.selected || nav.multi.length > 1) && (
+              <button type="button" className="kb-ex-bar__clear" aria-label="Search all your topics"
+                onClick={() => { store.getState().clearMulti(); store.getState().goToLevel(null, null); }}>
+                <Icon name="close" size={12} />
+              </button>
+            )}
+          </span>
+          <input className="kb-ex-bar__input" aria-label="What exactly? (optional)" value={query} maxLength={200}
+            placeholder="What exactly? Optional — e.g. evaluating RAG answers" onChange={(e) => setQuery(e.target.value)} />
+        </div>
         <button type="submit" className="kb-ex-bar__go" disabled={busy}>
           {nav.multi.length > 1 && !search ? `Find in ${nav.multi.length} topics` : "Find what's new"}
         </button>
@@ -182,14 +204,14 @@ export function ExploreSection({
           searches={nav.searches} reloadKey={reloadKey} onLevel={(level, selected) => store.getState().goToLevel(level, selected)}
           onToggleMulti={(id) => store.getState().toggleMulti(id)} onClearMulti={() => store.getState().clearMulti()}
           onOpenSearch={(id) => store.getState().showSearch(id)} onOpenDocument={openDocument} onOpenSettings={openSettings}
-          onTopicAction={topicAction} onCovered={setCovered} onMap={onMap} />
+          onTopicAction={topicAction} onMap={onMap} />
       ) : (
         <SearchPage key={search.id} search={search} scopeName={nameOf(search.area_id)} explore={clients.explore}
-          parallelLimit={nav.parallelLimit} covered={covered || hidden} onCovered={setCovered}
+          parallelLimit={nav.parallelLimit} covered={covered} onCovered={pageCover}
           onChanged={() => void store.getState().refresh()} onDiscuss={discuss} onOpenDocument={openDocument}
           onOpenSettings={openSettings} toast={toast} />
       )}
-      {edit && <TopicDialog edit={edit} clients={clients} onClose={() => { setEdit(null); setCovered(false); }} onSaved={(area, mode) => {
+      {edit && <TopicDialog edit={edit} clients={clients} onClose={() => setEdit(null)} onSaved={(area, mode) => {
         if (mode === 'merge') store.getState().goToLevel(area.has_children ? area.id : area.parent_id, area.id);
         setReloadKey((k) => k + 1);
       }} />}

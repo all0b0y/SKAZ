@@ -1220,6 +1220,10 @@ export interface KbJobs {
   jobs: KbJobSummary[];
 }
 
+export interface KbKeepExploreMaterials {
+  material_ids: string[];
+}
+
 export interface KbKeyNumber {
   id: string;
   src: number[];
@@ -1482,6 +1486,11 @@ export interface KbMaterialTopic {
   material_id: string;
   area_id: string | null;
   origin: "agent" | "user" | null;
+}
+
+export interface KbMaterialTopicCreate {
+  name: string;
+  parent_id?: string | null;
 }
 
 /** EX2: the user moves a material to one of their topics (wins over the agent's label). */
@@ -2682,6 +2691,10 @@ export interface KbTranslationFragment {
   text: string;
 }
 
+export interface KbUnusedExploreMaterials {
+  material_ids: string[];
+}
+
 export interface KbVerdict {
   id: string;
   src: number[];
@@ -3767,6 +3780,20 @@ export interface KbEndpoints {
     response: KbMaterialSummary[];
     status: 200;
   };
+  "GET /kb/materials-activity/explore-unused": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbUnusedExploreMaterials;
+    status: 200;
+  };
+  "POST /kb/materials-activity/explore-unused/keep": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbKeepExploreMaterials;
+    response: KbAcknowledged;
+    status: 200;
+  };
   "POST /kb/materials/by-publication": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -3865,12 +3892,26 @@ export interface KbEndpoints {
     response: KbJob;
     status: 202;
   };
+  "POST /kb/materials/{material_id}/new-topic": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: KbMaterialTopicCreate;
+    response: KbMaterialTopic;
+    status: 200;
+  };
   "POST /kb/materials/{material_id}/notes": {
     path: { material_id: string };
     query: Record<string, never>;
     body: never;
     response: KbJob;
     status: 202;
+  };
+  "POST /kb/materials/{material_id}/opened": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbAcknowledged;
+    status: 200;
   };
   "GET /kb/materials/{material_id}/publication": {
     path: { material_id: string };

@@ -1,6 +1,7 @@
 // Synthetic contract fixtures; no real papers, external APIs or model results.
 import type {
   KbAcknowledged,
+  KbUnusedExploreMaterials,
   KbDiscussion,
   KbSearch,
   KbSearches,
@@ -36,6 +37,7 @@ import type {
 } from '../../../api/kb/types.gen';
 
 interface ContractFixtures {
+  KbUnusedExploreMaterials: KbUnusedExploreMaterials;
   KbSearch: KbSearch;
   KbSearches: KbSearches;
   KbDiscussion: KbDiscussion;
@@ -72,6 +74,7 @@ interface ContractFixtures {
 }
 
 export const contractFixtures = {
+  "KbUnusedExploreMaterials": { "material_ids": [] },
   "KbSearch": {
     "id": "run-1",
     "name": "MoE routing",

@@ -14,6 +14,7 @@ import { UnreadableText } from './UnreadableText';
 import { FailedMaterial } from './FailedMaterial';
 import { isWithoutSpeech, NoSpeech } from './NoSpeech';
 import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './MaterialDialogs';
+import { requestWikiIngest } from './AddToWiki';
 import { MoveTopicDialog } from './MoveTopicDialog';
 import { StatusChips } from './StatusChips';
 import { OverlapLine } from './OverlapLine';
@@ -135,7 +136,7 @@ function useContinuable(material: KbMaterial | null): boolean {
 
 /** Material in the right panel (v10, decision 24). */
 export function MaterialView({ target, nonce }: { target: DocTarget; nonce: number }) {
-  const { client, recording } = useServices();
+  const { client, recording, library } = useServices();
   const askAbout = useAskAbout();
   const make = useMakeStudy();
   const expanded = useUi((s) => s.docExpanded);
@@ -159,6 +160,11 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
   const repeatsData = useMaterialRepeats(target.id);
   const repeatMarks = useRepeatView(material && SPEECH.has(material.kind) ? null : repeatsData, material?.fragments ?? NO_FRAGMENTS, target.id);
 
+  useEffect(() => {
+    void client.call('POST /kb/materials/{material_id}/opened', { path: { material_id: target.id } })
+      .then(() => library.getState().loadContent()).catch(() => undefined);
+  }, [client, library, target.id]);
+
   // Decision 24: translation by default when the recording was made with one.
   useEffect(() => { setView('original'); setNote(null); }, [target.id]);
   useEffect(() => { if (hasTranslation && !target.seg) setView('translation'); }, [hasTranslation, target.id, target.seg]);
@@ -175,8 +181,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
     setAdding(true);
     setAddError(null);
     try {
-      await client.call(notesOnly ? 'POST /kb/materials/{material_id}/notes' : 'POST /kb/materials/{material_id}/ingest',
-        { path: { material_id: material.id } });
+      await requestWikiIngest(client, material.id, notesOnly);
       reload();
     } catch (e) {
       setAddError(errorText(e));
@@ -206,7 +211,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
                 disabled={!material} onClick={() => setMenuOpen((v) => !v)} />
               <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Material actions" items={[
                 { id: 'move', label: 'Move to folder', icon: 'folder', onSelect: () => setDialog('move') },
-                { id: 'topic', label: 'Move to topic…', icon: 'compass', onSelect: () => setDialog('topic') },
+                { id: 'topic', label: 'Topic ▸', icon: 'compass', onSelect: () => setDialog('topic') },
                 { id: 'rename', label: 'Rename', icon: 'pencil', onSelect: () => setDialog('rename') },
                 ...(material ? [
                   { id: 'cards', label: 'Make cards from this', icon: 'deck' as const, onSelect: () => make('cards', [{ type: 'material', id: material.id, title: material.title }]) },

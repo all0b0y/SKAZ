@@ -78,7 +78,11 @@ def test_route_delegates_to_own_service_and_fixture_is_valid(case: dict[str, Any
         return payload
 
     service = type("FixtureService", (), {})()
-    setattr(service, case["name"], handler)
+    def sync_handler(*args: Any, **kwargs: Any) -> BaseModel:
+        calls.append((args, kwargs))
+        return payload
+
+    setattr(service, case["name"], sync_handler if case["area"] == "material_activity" else handler)
     setattr(app.state, "kb_" + case["area"], service)
     url = re.sub(r"\{[^}]+\}", "fixture-1", case["path"])
     with TestClient(app) as client:
@@ -89,7 +93,9 @@ def test_route_delegates_to_own_service_and_fixture_is_valid(case: dict[str, Any
     args, _ = calls[0]
     if "{" in case["path"]:
         assert args[0] == "fixture-1"
-    if case["body"]:
+    if case["area"] == "material_activity" and case["name"] == "keep":
+        assert args == (["fixture-1"],)
+    elif case["body"]:
         assert isinstance(args[-1], BaseModel)
         assert args[-1].model_dump(mode="json", exclude_unset=True) == (
             {"key": "**********"} if case["body"] == "KbOpenAlexKeyUpdate" else case["example"]
@@ -99,7 +105,7 @@ def test_route_delegates_to_own_service_and_fixture_is_valid(case: dict[str, Any
 def test_route_manifest_covers_current_routers() -> None:
     expected = {(row["method"], row["path"]) for row in CASES}
     actual: set[tuple[str, str]] = set()
-    for area in AREAS:
+    for area in (*AREAS, "material_activity"):
         router = importlib.import_module(f"skaz.knowledge.api.{area}").router
         for route in router.routes:
             actual.update((method, route.path) for method in route.methods)
@@ -117,8 +123,10 @@ def test_schema_append_is_idempotent_and_preserves_existing_database(existing: b
     apply_schemas(connection)
     apply_schemas(connection)
     versions = applied_versions(connection)
-    # EX2 step 0: areas is at v2 (own topics); the other 0.4.0 modules are at v1.
-    assert all(versions[area] == (2 if area in ("areas", "explore") else 1) for area in AREAS)
+    # EX2 step 0: areas v2 (own topics), EX3 S4: areas v3 (why a topic has no OpenAlex label);
+    # explore is at v2; the other 0.4.0 modules are at v1.
+    expected = {"areas": 3, "explore": 2}
+    assert all(versions[area] == expected.get(area, 1) for area in AREAS)
     if existing:
         assert connection.execute("SELECT value FROM settings WHERE key='c0_sentinel'").fetchone() == (
             '"keep me"',

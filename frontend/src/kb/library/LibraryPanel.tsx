@@ -3,6 +3,9 @@ import type { KbFolder, KbMaterialSummary } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../ui';
 import { useLibrary, useServices, useUi } from '../state/context';
 import { KIND_ICON, folderTone } from './materialMeta';
+import { AddToWiki } from '../material/AddToWiki';
+import { orderedFolders } from './folderOrder';
+import { ExploreReminder } from '../materials/ExploreReminder';
 import { NameField } from './NameField';
 import { SelectionCheckbox, hasDragFiles, hasDragItems, markItemsDropped, readDragItems, useItemsDrag, type ListSelection } from '../ui/listSelection';
 import { useMaterialBatch, useMaterialSelection, type DragRowProps } from '../materials/materialBatch';
@@ -103,7 +106,9 @@ function MaterialRow({ material, tone, meta, sel, drag }: {
           <span className="kb-row__text">{material.title}</span>
           {tone && <span className="kb-fdot" style={{ background: tone }} aria-hidden="true" />}
           {meta && <span className="kb-row__meta">{meta}</span>}
+          {material.folder_id === 'fld-explore' && material.wiki_state === 'not_in_wiki' && <span className="kb-row__meta">Not in wiki</span>}
         </button>
+        {material.folder_id === 'fld-explore' && material.wiki_state === 'not_in_wiki' && material.status === 'ready' && <AddToWiki materialId={material.id} />}
       </div>
     </li>
   );
@@ -187,7 +192,7 @@ function Overview() {
       </div>
       <DropNote />
       <ul className="kb-list" aria-labelledby="kb-folders">
-        {folders.map((folder) => (
+        {orderedFolders(folders).map((folder) => (
           <FolderRow key={folder.id} folder={folder} tone={toneOf(folder.id)} materialsHere={materials.some((m) => m.folder_id === folder.id) || folder.material_count > 0} />
         ))}
       </ul>
@@ -298,6 +303,10 @@ function FolderView({ folderId }: { folderId: string }) {
         <Icon name={folder?.system ? 'inbox' : 'folder'} size={14} />
         <span className="kb-subhead__text">{folder?.name ?? 'Folder'}</span>
       </h3>
+      {folderId === 'fld-explore' && <>
+        <p className="kb-side__note kb-muted">Papers you add from Explore land here, apart from your folders.</p>
+        <ExploreReminder />
+      </>}
       {load === 'loading' && <div className="kb-side__wait"><Spinner label="Loading the folder" size="sm" /></div>}
       {load === 'error' && (
         <div className="kb-side__pad">
