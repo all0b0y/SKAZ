@@ -7,7 +7,7 @@ import type { ToastData } from '../ui/Toast';
 import { Button, Icon, Menu, type MenuItem } from '../ui';
 import { exploreIssue } from './errors';
 import {
-  DEFAULT_FILTERS, SHOW_LABEL, SORT_LABEL, TYPE_LABEL, YEAR_LABEL, filtersQuery, readFilters, writeFilters,
+  DEFAULT_FILTERS, SHOW_LABEL, SORT_LABEL, TYPE_LABEL, YEAR_LABEL, filtersActive, filtersQuery, readFilters, writeFilters,
   type FindingFilters,
 } from './filters';
 import { PaperReader } from './PaperReader';
@@ -21,13 +21,14 @@ const TYPE_TEXT: Record<string, string> = {
   dissertation: 'Dissertation', 'book-chapter': 'Book chapter',
 };
 
-const STOP_TEXT: Record<string, { text: string; settings?: boolean; resume?: string }> = {
+/** What a paused or failed search says, and what can be done about it. */
+export const STOP_TEXT: Record<string, { text: string; settings?: boolean; resume?: string }> = {
   decision_model_required: { text: 'Set up a decision model to check which papers fit the topic.', settings: true },
-  science_consent_required: { text: 'SKAZ needs your OK to send the topic words to OpenAlex.', resume: 'Allow and continue' },
-  openalex_daily_limit: { text: "OpenAlex's free daily limit is reached. Continue tomorrow.", resume: 'Continue' },
+  science_consent_required: { text: 'SKAZ needs your OK to send the topic words to OpenAlex. Turn it on in Settings, then continue.', settings: true, resume: 'Continue' },
+  openalex_daily_limit: { text: "OpenAlex's free daily limit is reached. Continue tomorrow, or add a free key in Settings.", settings: true, resume: 'Continue' },
   budget: { text: 'Paused at the step limit of this search.', resume: 'Continue' },
   user_pause: { text: 'Paused.', resume: 'Continue' },
-  app_exit: { text: 'Stopped when SKAZ closed.', resume: 'Continue' },
+  app_exit: { text: 'Stopped when SKAZ closed. Free steps go on by themselves; paid checks wait for your Continue.', resume: 'Continue' },
   provider_unavailable: { text: "OpenAlex didn't answer.", resume: 'Try again' },
   failed: { text: 'This search failed.' },
 };
@@ -43,17 +44,23 @@ function authorsLine(f: KbFinding): string {
     .filter((x) => x !== null && x !== undefined && x !== '').join(' · ');
 }
 
-function lowerFirst(text: string): string {
-  return text.replace(/\.$/, '').replace(/^./, (c) => c.toLowerCase());
+/** «The library has…» → «the library has…» — but a name or acronym (MoE, RAG, GPT-4) keeps its capitals. */
+export function lowerFirst(text: string): string {
+  const clean = text.replace(/\.$/, '');
+  const word = clean.split(/\s/, 1)[0] ?? '';
+  return /[A-Z]/.test(word.slice(1)) ? clean : clean.replace(/^./, (c) => c.toLowerCase());
 }
+
+const pageUrl = (f: KbFinding): string | null => f.read_url ?? (f.work.doi ? `https://doi.org/${f.work.doi}` : null);
 
 export interface SearchPageProps {
   search: KbSearch;
   scopeName: string;
   explore: ExploreClient;
   parallelLimit: number;
-  /** A menu or dialog of the Explore page is open: the reader's native view steps aside. */
+  /** Something sits over the page (a menu, a dialog, the toast): the reader's native view steps aside. */
   covered: boolean;
+  /** A menu of this page is open (true) or closed (false); it switches itself off when the page goes away. */
   onCovered: (covered: boolean) => void;
   onChanged: () => void;
   onDiscuss: (chatId: string) => void;
@@ -63,14 +70,17 @@ export interface SearchPageProps {
 }
 
 export function SearchPage(props: SearchPageProps) {
-  const { search, explore, onChanged, toast } = props;
+  const { search, explore, onChanged, onCovered, toast } = props;
   const [filters, setFiltersState] = useState<FindingFilters>(() => readFilters());
   const [rows, setRows] = useState<KbFinding[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  /** The paper being read. It is kept on its own: the list is filtered, and opening a paper changes its state. */
+  const [open, setOpen] = useState<KbFinding | null>(null);
   const [steps, setSteps] = useState(false);
   const [busy, setBusy] = useState(false);
   const generation = useRef(0);
+
+  useEffect(() => () => onCovered(false), [onCovered]);
 
   const setFilters = (next: FindingFilters) => { setFiltersState(next); writeFilters(next); };
 
@@ -88,11 +98,11 @@ export function SearchPage(props: SearchPageProps) {
 
   // New findings arrive while the search runs; a finished search is read once per change.
   useEffect(() => { void load(); }, [load, search.state, search.new, search.unseen]);
-  useEffect(() => { setOpenId(null); setRows(null); setSteps(false); }, [search.id]);
 
-  const open = rows?.find((f) => f.id === openId) ?? null;
-
-  const replace = (next: KbFinding) => setRows((old) => old?.map((f) => (f.id === next.id ? next : f)) ?? old);
+  const replace = (next: KbFinding) => {
+    setRows((old) => old?.map((f) => (f.id === next.id ? next : f)) ?? old);
+    setOpen((now) => (now && now.id === next.id ? next : now));
+  };
 
   const act = async (action: () => Promise<void>) => {
     if (busy) return;
@@ -101,7 +111,7 @@ export function SearchPage(props: SearchPageProps) {
   };
 
   const openRow = (f: KbFinding) => {
-    setOpenId(f.id);
+    setOpen(f);
     if ((f.state ?? 'new') === 'new') {
       void explore.seen(f.id).then((next) => { replace(next); onChanged(); }).catch(() => undefined);
     }
@@ -117,7 +127,7 @@ export function SearchPage(props: SearchPageProps) {
   const dismiss = (f: KbFinding) => act(async () => {
     const next = await explore.dismiss(f.id);
     if (filters.show === 'dismissed') replace(next); else setRows((old) => old?.filter((x) => x.id !== f.id) ?? old);
-    if (openId === f.id) setOpenId(null);
+    if (open?.id === f.id) setOpen(null);
     onChanged();
     toast({ text: 'Hidden. Show → Not for me brings it back.', action: { label: 'Undo', run: () => void explore.restore(f.id).then(() => { void load(); onChanged(); }) } });
   });
@@ -125,6 +135,7 @@ export function SearchPage(props: SearchPageProps) {
   const restore = (f: KbFinding) => act(async () => {
     await explore.restore(f.id);
     setRows((old) => old?.filter((x) => x.id !== f.id) ?? old);
+    if (open?.id === f.id) setOpen(null);
     onChanged();
   });
 
@@ -135,7 +146,7 @@ export function SearchPage(props: SearchPageProps) {
   });
 
   const openInBrowser = (f: KbFinding) => {
-    const url = f.read_url ?? (f.work.doi ? `https://doi.org/${f.work.doi}` : null);
+    const url = pageUrl(f);
     if (url) window.open(url, '_blank', 'noopener,noreferrer');
   };
 
@@ -151,26 +162,29 @@ export function SearchPage(props: SearchPageProps) {
       <section className="kb-ex-list" aria-label="Papers found">
         <header className="kb-ex-list__head">
           <div className="kb-ex-list__title">
-            <h2>{search.name}</h2>
+            <h2 title={search.name}>{search.name}</h2>
             {search.query && <span className="kb-ex-muted">in {props.scopeName}</span>}
           </div>
           <Progress search={search} limit={props.parallelLimit} steps={steps} onSteps={() => setSteps((s) => !s)}
             busy={busy} onResume={() => void resume()} onPause={() => void pause()} onOpenSettings={props.onOpenSettings} />
         </header>
-        <Filters filters={filters} onChange={setFilters} onCovered={props.onCovered} />
+        <Filters filters={filters} onChange={setFilters} onCovered={onCovered} />
         <div className="kb-ex-rows" role="list">
           {failed && <div className="kb-ex-empty" role="alert"><p>{failed}</p><Button size="sm" onClick={() => void load()}>Try again</Button></div>}
           {!failed && rows === null && <p className="kb-ex-muted kb-ex-pad" role="status">Loading…</p>}
-          {!failed && rows !== null && rows.length === 0 && <Empty search={search} filters={filters} onClear={() => setFilters({ ...DEFAULT_FILTERS, sort: filters.sort })} />}
-          {rows?.map((f) => <Row key={f.id} f={f} open={f.id === openId} onOpen={() => openRow(f)} onRestore={() => void restore(f)} />)}
+          {!failed && rows !== null && rows.length === 0 && (
+            <Empty search={search} filters={filters} onClear={() => setFilters({ ...DEFAULT_FILTERS, sort: filters.sort })}
+              onShowPaid={() => setFilters({ ...filters, free: false })} />
+          )}
+          {rows?.map((f) => <Row key={f.id} f={f} open={f.id === open?.id} onOpen={() => openRow(f)} onRestore={() => void restore(f)} />)}
         </div>
       </section>
       <section className="kb-ex-reader" aria-label="Paper">
         {open ? <>
-          <ReaderHead f={open} busy={busy} onClose={() => setOpenId(null)} onAdd={() => void addToMaterials(open)}
+          <ReaderHead f={open} busy={busy} onClose={() => setOpen(null)} onAdd={() => void addToMaterials(open)}
             onDiscuss={() => void discuss(open)} onBrowser={() => openInBrowser(open)} onDismiss={() => void dismiss(open)}
             onRestore={() => void restore(open)} onOpenDocument={props.onOpenDocument} />
-          <PaperReader url={open.read_url ?? (open.work.doi ? `https://doi.org/${open.work.doi}` : null)} covered={props.covered} />
+          <PaperReader url={pageUrl(open)} covered={props.covered} />
         </> : <div className="kb-ex-reader__empty">Pick a paper on the left — it opens here.</div>}
       </section>
     </div>
@@ -215,13 +229,26 @@ function Progress({ search, limit, steps, onSteps, busy, onResume, onPause, onOp
   </>;
 }
 
-function Empty({ search, filters, onClear }: { search: KbSearch; filters: FindingFilters; onClear: () => void }) {
+function Empty({ search, filters, onClear, onShowPaid }: {
+  search: KbSearch; filters: FindingFilters; onClear: () => void; onShowPaid: () => void;
+}) {
   if (search.state === 'running' || search.state === 'queued') return <p className="kb-ex-muted kb-ex-pad">Papers appear here as they are checked.</p>;
-  const filtered = filters.year !== 'any' || filters.type !== 'any' || filters.show !== 'active' || filters.free;
-  if (search.new === 0) return <div className="kb-ex-empty"><strong>Nothing new for you</strong><span className="kb-ex-muted">Every paper that fit is already covered by your wiki.</span></div>;
+  if (search.state === 'paused' || search.state === 'error') return <p className="kb-ex-muted kb-ex-pad">Nothing to show yet.</p>;
+  if (search.found === 0) {
+    return <div className="kb-ex-empty"><strong>Nothing found</strong><span className="kb-ex-muted">No papers came back for these words.</span></div>;
+  }
+  if (search.new === 0) {
+    return <div className="kb-ex-empty"><strong>Nothing new for you</strong><span className="kb-ex-muted">
+      {search.no_text > 0
+        ? `Every paper that fit is already in your wiki, or had no text to read (${search.no_text}).`
+        : 'Every paper that fit is already covered by your wiki.'}
+    </span></div>;
+  }
   return <div className="kb-ex-empty">
     <strong>Nothing matches the filters</strong>
-    {filtered && <Button size="sm" onClick={onClear}>Clear filters</Button>}
+    {filtersActive(filters) || !filters.free
+      ? <Button size="sm" onClick={onClear}>Clear filters</Button>
+      : <Button size="sm" onClick={onShowPaid}>Show paid papers too</Button>}
   </div>;
 }
 
@@ -233,7 +260,10 @@ function Row({ f, open, onOpen, onRestore }: { f: KbFinding; open: boolean; onOp
       <button type="button" className="kb-ex-row__main" aria-current={open || undefined} onClick={onOpen}>
         <span className="kb-ex-row__dot" aria-label={state === 'new' ? 'New' : undefined} />
         <span className="kb-ex-row__title">{f.work.title}</span>
-        <span className="kb-ex-row__meta">{meta} · <span className={`kb-ex-tag ${f.access === 'paid' ? 'is-paid' : 'is-free'}`}>{f.access === 'paid' ? 'Paid' : 'Free'}</span></span>
+        <span className="kb-ex-row__meta">{meta}
+          {f.access === 'paid' && <>{' · '}<span className="kb-ex-tag is-paid">Paid</span></>}
+          {f.access === 'open' && <>{' · '}<span className="kb-ex-tag is-free">Free</span></>}
+        </span>
         {f.has_abstract === false || !f.work.abstract
           ? <span className="kb-ex-row__abstract is-none">No abstract from the source — open it to read.</span>
           : <span className="kb-ex-row__abstract">{f.work.abstract}</span>}
@@ -289,16 +319,19 @@ function ReaderHead({ f, busy, onClose, onAdd, onDiscuss, onBrowser, onDismiss, 
   );
 }
 
+type FilterKey = 'year' | 'type' | 'show' | 'sort';
+
 function Filters({ filters, onChange, onCovered }: { filters: FindingFilters; onChange: (f: FindingFilters) => void; onCovered: (c: boolean) => void }) {
   const year = useRef<HTMLButtonElement | null>(null);
   const type = useRef<HTMLButtonElement | null>(null);
   const show = useRef<HTMLButtonElement | null>(null);
   const sort = useRef<HTMLButtonElement | null>(null);
-  const [menu, setMenuState] = useState<'year' | 'type' | 'show' | 'sort' | null>(null);
-  const setMenu = (m: typeof menu) => { setMenuState(m); onCovered(m !== null); };
+  const [menu, setMenu] = useState<FilterKey | null>(null);
+  // A menu is drawn in the page, so the paper's native view must not sit over it.
+  useEffect(() => { onCovered(menu !== null); }, [menu, onCovered]);
   const pick = (patch: Partial<FindingFilters>) => { onChange({ ...filters, ...patch }); setMenu(null); };
   const year0 = new Date().getFullYear();
-  const items = useMemo<Record<'year' | 'type' | 'show' | 'sort', MenuItem[]>>(() => ({
+  const items = useMemo<Record<FilterKey, MenuItem[]>>(() => ({
     year: [
       { id: 'any', label: 'Any year', onSelect: () => pick({ year: 'any' }) },
       { id: '1y', label: 'Last 12 months', onSelect: () => pick({ year: '1y' }) },
@@ -314,7 +347,7 @@ function Filters({ filters, onChange, onCovered }: { filters: FindingFilters; on
     sort: (['for_you', 'newest', 'cited'] as const).map((s) => ({ id: s, label: SORT_LABEL[s], onSelect: () => pick({ sort: s }) })),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [filters]);
-  const btn = (key: 'year' | 'type' | 'show' | 'sort', ref: typeof year, label: string, on: boolean) => (
+  const btn = (key: FilterKey, ref: typeof year, label: string, on: boolean) => (
     <button ref={ref} type="button" className={`kb-ex-filter${on ? ' is-on' : ''}`} aria-haspopup="menu" aria-expanded={menu === key}
       onClick={() => setMenu(menu === key ? null : key)}>{label}<Icon name="chevronDown" size={12} /></button>
   );

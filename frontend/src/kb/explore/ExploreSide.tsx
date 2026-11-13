@@ -6,10 +6,14 @@ import { useServices } from '../state/context';
 import { Button, Icon, IconButton, Menu, Modal, TextField } from '../ui';
 import { exploreIssue } from './errors';
 import { exploreState, searchStatus, watchSearches } from './exploreState';
+import { useCover } from './useCover';
+
+const busy = (s: KbSearch): boolean => s.state === 'running' || s.state === 'queued';
 
 /**
  * EX3 (UX-12): the Explore side list — «Map of your wiki», then the searches like the chat list: each with
  * its live status (running, waiting, +N new). Find above the map creates them; a search opens full page.
+ * A row's menu: Rename, Run again (a new search with the same topic and words), Delete.
  */
 export function ExploreSide() {
   const { client, ui } = useServices();
@@ -21,15 +25,30 @@ export function ExploreSide() {
   useEffect(() => watchSearches(store), [store]);
   const [renaming, setRenaming] = useState<KbSearch | null>(null);
   const [deleting, setDeleting] = useState<KbSearch | null>(null);
+  // A dialog is centred over the window, where the paper's native view would be drawn above it.
+  const cover = useCover(store);
+  useEffect(() => { cover(renaming !== null || deleting !== null); }, [cover, renaming, deleting]);
+
+  const problem = (error: unknown) => ui.getState().showToast({ text: exploreIssue(error).message, tone: 'problem' });
 
   const remove = async (search: KbSearch) => {
     try {
       await api.delete_search(search.id);
-      store.getState().showMap();
+      // If it was the open one, the page falls back to the map when the list is read again.
       await store.getState().refresh();
       ui.getState().showToast({ text: 'Search deleted. Papers you added stay in Materials.' });
     } catch (error) {
-      ui.getState().showToast({ text: exploreIssue(error).message, tone: 'problem' });
+      problem(error);
+    }
+  };
+
+  const runAgain = async (search: KbSearch) => {
+    try {
+      const started = await api.start({ area_id: search.area_id, query: search.query, all_topics: !search.area_id && !search.query });
+      await store.getState().refresh();
+      store.getState().showSearch(started.id);
+    } catch (error) {
+      problem(error);
     }
   };
 
@@ -44,7 +63,8 @@ export function ExploreSide() {
       {searches.length === 0 && !failed && <p className="kb-ex-muted kb-ex-side__note">None yet. Pick a topic on the map and press “Find what&apos;s new”.</p>}
       <ul className="kb-ex-side__list">
         {searches.map((s) => <SearchRow key={s.id} search={s} on={page.kind === 'search' && page.id === s.id}
-          onOpen={() => store.getState().showSearch(s.id)} onRename={() => setRenaming(s)} onDelete={() => setDeleting(s)} />)}
+          onOpen={() => store.getState().showSearch(s.id)} onRename={() => setRenaming(s)} onRunAgain={() => void runAgain(s)}
+          onDelete={() => setDeleting(s)} />)}
       </ul>
       {renaming && <RenameDialog search={renaming} onClose={() => setRenaming(null)} onSave={async (name) => {
         await api.rename_search(renaming.id, name);
@@ -61,8 +81,8 @@ export function ExploreSide() {
   );
 }
 
-function SearchRow({ search, on, onOpen, onRename, onDelete }: {
-  search: KbSearch; on: boolean; onOpen: () => void; onRename: () => void; onDelete: () => void;
+function SearchRow({ search, on, onOpen, onRename, onRunAgain, onDelete }: {
+  search: KbSearch; on: boolean; onOpen: () => void; onRename: () => void; onRunAgain: () => void; onDelete: () => void;
 }) {
   const more = useRef<HTMLButtonElement | null>(null);
   const [menu, setMenu] = useState(false);
@@ -75,9 +95,10 @@ function SearchRow({ search, on, onOpen, onRename, onDelete }: {
         <span className="kb-ex-side__name">{search.owner === 'weekly' ? 'Weekly · ' : ''}{search.name}</span>
         <span className={`kb-ex-side__status is-${status.tone}`}>{status.text}</span>
       </button>
-      <IconButton ref={more} icon="more" label="Search actions" className="kb-ex-side__more" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} />
+      <IconButton ref={more} icon="more" label="Search actions" size="sm" className="kb-ex-side__more" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} />
       <Menu open={menu} onClose={() => setMenu(false)} anchorRef={more} label="Search actions" items={[
         { id: 'rename', label: 'Rename…', icon: 'pencil', onSelect: () => { setMenu(false); onRename(); } },
+        { id: 'again', label: 'Run again', icon: 'retry', disabled: busy(search), note: busy(search) ? 'Running' : undefined, onSelect: () => { setMenu(false); onRunAgain(); } },
         { id: 'delete', label: 'Delete', icon: 'trash', danger: true, onSelect: () => { setMenu(false); onDelete(); } },
       ]} />
     </li>
@@ -86,23 +107,23 @@ function SearchRow({ search, on, onOpen, onRename, onDelete }: {
 
 function RenameDialog({ search, onClose, onSave }: { search: KbSearch; onClose: () => void; onSave: (name: string) => Promise<void> }) {
   const [name, setName] = useState(search.name);
-  const [busy, setBusy] = useState(false);
+  const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const clean = name.trim();
-    if (!clean || busy) return;
-    setBusy(true);
-    try { await onSave(clean); onClose(); } catch (e) { setError(exploreIssue(e).message); setBusy(false); }
+    if (!clean || working) return;
+    setWorking(true);
+    try { await onSave(clean); onClose(); } catch (e) { setError(exploreIssue(e).message); setWorking(false); }
   };
   return (
     <Modal open onClose={onClose} title="Rename search">
       <form onSubmit={(e) => void submit(e)}>
-        <TextField label="Name" value={name} maxLength={120} autoFocus disabled={busy} onChange={(e) => setName(e.target.value)} />
+        <TextField label="Name" value={name} maxLength={120} autoFocus disabled={working} onChange={(e) => setName(e.target.value)} />
         {error && <p className="kb-inline-error" role="alert">{error}</p>}
         <div className="kb-modal__foot">
-          <Button variant="quiet" disabled={busy} onClick={onClose}>Cancel</Button>
-          <Button variant="fill" type="submit" disabled={busy || !name.trim()}>Rename</Button>
+          <Button variant="quiet" disabled={working} onClick={onClose}>Cancel</Button>
+          <Button variant="fill" type="submit" disabled={working || !name.trim()}>Rename</Button>
         </div>
       </form>
     </Modal>
