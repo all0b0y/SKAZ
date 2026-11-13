@@ -25,6 +25,7 @@ from . import (
     freshness,
     ingest,
     maintenance,
+    material_activity,
     repeats,
     research,
     science,
@@ -66,6 +67,7 @@ MODULES: tuple[SchemaModule, ...] = (
     maintenance,
     repeats,
     study_shelf,
+    material_activity,
 )
 
 _VERSIONS_SQL = """

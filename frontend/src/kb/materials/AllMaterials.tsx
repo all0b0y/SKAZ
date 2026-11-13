@@ -12,6 +12,10 @@ import { useMaterialSelection } from './materialBatch';
 import { StippleStrip } from '../fx/stipple';
 import { useSpotlight } from '../fx/spotlight';
 import { HalftoneArt } from '../fx/halftone/HalftoneArt';
+import { AddToWiki } from '../material/AddToWiki';
+import { ExploreReminder } from './ExploreReminder';
+import { OlderMaterials } from './OlderMaterials';
+import { orderedFolders } from '../library/folderOrder';
 import { DateFilter } from './DateFilter';
 import { useDatedMaterials, type YearWindow } from './publicationWindow';
 import { enginePauseText } from '../material/enginePause';
@@ -162,6 +166,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
             Retry failed ({failedCount})
           </Button>
         )}
+        <OlderMaterials />
         <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add</Button>
         <IconButton icon="close" label="Close all materials" onClick={() => showCenter('chat')} />
       </SelectionHeader>
@@ -174,7 +179,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
             <span className="kb-visually-hidden">Folder</span>
             <select value={folderId} onChange={(e) => setFolderId(e.target.value)} aria-label="Folder">
               <option value="">Folder: all</option>
-              {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              {orderedFolders(folders).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
             </select>
             <Icon name="chevronDown" size={12} className="kb-select__chev" />
           </label>
@@ -192,6 +197,8 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
             { value: 'cards', label: <Icon name="cards" size={14} />, name: 'Cards' },
           ]} />
         </div>
+        <ExploreReminder active={!hidden} />
+        {folderId === 'fld-explore' && <p className="kb-side__note kb-muted">Papers you add from Explore land here, apart from your folders.</p>}
         {state.load === 'loading' && !state.value && <div className="kb-doc__wait"><Spinner label="Loading materials" /></div>}
         {state.load === 'error' && (
           <Banner tone="error" title="Couldn’t load materials." actions={<Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
@@ -230,7 +237,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
                   </td>
                   <td className="kb-amt__folder-col"><span className="kb-amt__folder"><span className="kb-fdot" style={{ background: tone(m.folder_id) ?? 'var(--kb-line)' }} aria-hidden="true" /><span className="kb-amt__cell">{folderName(m)}</span></span></td>
                   <td className="kb-amt__added kb-muted"><span className="kb-amt__cell">{addedLabel(m.created_at)}</span></td>
-                  <td><WikiCell material={m} enginePause={enginePauses.get(m.id)} /></td>
+                  <td><WikiCell material={m} enginePause={enginePauses.get(m.id)} />{m.folder_id === 'fld-explore' && m.wiki_state === 'not_in_wiki' && m.status === 'ready' && <AddToWiki materialId={m.id} onAdded={reload} />}</td>
                 </tr>
               ))}
             </tbody>
@@ -260,6 +267,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
                   <span className="kb-amc__meta"><span className="kb-fdot" style={{ background: tone(m.folder_id) ?? 'var(--kb-line)' }} aria-hidden="true" />{folderName(m)}</span>
                   <span className="kb-amc__meta kb-muted">{addedLabel(m.created_at)}</span>
                 </button>
+                {m.folder_id === 'fld-explore' && m.wiki_state === 'not_in_wiki' && m.status === 'ready' && <AddToWiki materialId={m.id} onAdded={reload} />}
                 </div>
               </li>
             ))}

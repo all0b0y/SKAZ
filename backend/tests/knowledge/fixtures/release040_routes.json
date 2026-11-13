@@ -862,5 +862,47 @@
     "response": "KbDiscussion",
     "example": null,
     "query": []
+  },
+  {
+    "area": "material_activity",
+    "name": "unused",
+    "method": "GET",
+    "path": "/kb/materials-activity/explore-unused",
+    "body": null,
+    "response": "KbUnusedExploreMaterials",
+    "example": null
+  },
+  {
+    "area": "material_activity",
+    "name": "keep",
+    "method": "POST",
+    "path": "/kb/materials-activity/explore-unused/keep",
+    "body": "KbKeepExploreMaterials",
+    "response": "KbAcknowledged",
+    "example": {
+      "material_ids": [
+        "fixture-1"
+      ]
+    }
+  },
+  {
+    "area": "material_activity",
+    "name": "opened",
+    "method": "POST",
+    "path": "/kb/materials/{material_id}/opened",
+    "body": null,
+    "response": "KbAcknowledged",
+    "example": null
+  },
+  {
+    "area": "material_activity",
+    "name": "new_topic",
+    "method": "POST",
+    "path": "/kb/materials/{material_id}/new-topic",
+    "body": "KbMaterialTopicCreate",
+    "response": "KbMaterialTopic",
+    "example": {
+      "name": "Topic"
+    }
   }
 ]

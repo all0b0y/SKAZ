@@ -21,11 +21,30 @@ async function openMove(failure = false) {
   const doc = await screen.findByRole('complementary', { name: 'Document' });
   await within(doc).findByRole('heading', { level: 2 });
   fireEvent.click(screen.getByRole('button', { name: 'Material actions' }));
-  fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to topic…' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Topic ▸' }));
   return { ...r, dialog: await screen.findByRole('dialog', { name: 'Move to topic' }) };
 }
 
 describe('EX2 Move to topic', () => {
+  it('searches topics and creates a nonempty topic inside an existing top-level topic atomically', async () => {
+    const { dialog, fake } = await openMove();
+    await within(dialog).findByRole('option', { name: 'AI agents › Agent harnesses' });
+    const original = fake.requestMock.getMockImplementation()!;
+    fake.requestMock.mockImplementation(async (request) => request.path.endsWith('/new-topic')
+      ? { ok: true, status: 200, data: { material_id: 'm-txt', area_id: 'new', origin: 'user' } } : original(request));
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Search topics' }), { target: { value: 'Agent harnesses' } });
+    expect(within(dialog).queryByRole('option', { name: 'Learning' })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'New topic…' }));
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Name' }), { target: { value: 'Local tools' } });
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Inside' }), { target: { value: 'ai' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create topic' }));
+    await waitFor(() => expect(fake.requestMock).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST', path: '/kb/materials/m-txt/new-topic', body: { name: 'Local tools', parent_id: 'ai' },
+    })));
+    expect(fake.calls.some((c) => c.path === '/kb/explore/areas' && c.method === 'POST')).toBe(false);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Move to topic' })).not.toBeInTheDocument());
+  });
+
   it('chooses any depth of own topics and sends only the material id and chosen topic id on Move', async () => {
     const { dialog, fake } = await openMove();
     await within(dialog).findByRole('option', { name: 'AI agents › Agent harnesses' });
