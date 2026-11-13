@@ -653,24 +653,11 @@ async def test_free_only_run_leaves_candidates_waiting_and_check_novelty_reuses_
     assert check.state == "done" and check.counters.new == 2
 
 
-async def test_a_task_reuses_an_earlier_verdict_without_budget(parts: SimpleNamespace) -> None:
+async def test_a_search_does_not_offer_an_earlier_work_twice(parts: SimpleNamespace) -> None:
     parts.science.search_works = [work(1, topics=["T1"])]
     await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
     again = await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
     assert again.counters.after_rules == 0  # Explore doesn't show the same work twice
-    started = await parts.funnel.start_for_task(
-        "task-1", "LLM agents", KbFunnelStart(query="agents", channels=["search"])
-    )
-    task_run = await parts.funnel.settled(started.id)
-    assert task_run.owner == "research" and task_run.task_id == "task-1"
-    assert task_run.counters.new == 1 and task_run.budget.used == 0
-    assert parts.novelty.checked == ["work-1"]
-    groups = (await parts.funnel.findings()).groups
-    titled = [g for g in groups if g.task_id == "task-1"]
-    assert titled[0].task_title == "LLM agents" and titled[0].task_state == "done"
-    predicates = [d.predicate for d in parts.recorder.drafts]
-    assert predicates == ["research_started", "research_completed"]
-    assert parts.recorder.drafts[0].object.id == "task-1"
 
 
 async def test_covered_findings_are_hidden_and_counted(parts: SimpleNamespace) -> None:

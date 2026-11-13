@@ -179,4 +179,3 @@ class ReadingDesk:
         return KbFindingImported(
             finding_id=finding.id, material_id=material_id, content=content, to_wiki=to_wiki
         )
-

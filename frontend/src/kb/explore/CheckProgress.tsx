@@ -1,6 +1,6 @@
-import type { KbContinue, KbExploreJob, KbRepeatCheck, KbWeeklyCheck } from '../../api/kb/types.gen';
+import type { KbContinue, KbRepeatCheck, KbWeeklyCheck } from '../../api/kb/types.gen';
 
-export function stopExplanation(job: KbExploreJob): string {
+export function stopExplanation(job: Pick<KbRepeatCheck, 'stop_reason' | 'retry_at'>): string {
   switch (job.stop_reason) {
     case 'science_consent_required': return 'Science search needs your permission. Enable it in Settings → Search, then Continue.';
     case 'openalex_daily_limit': return `OpenAlex daily limit reached. Add a key in Settings or Continue after ${job.retry_at ?? 'the limit resets'}.`;

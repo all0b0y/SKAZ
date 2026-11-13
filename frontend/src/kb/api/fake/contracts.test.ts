@@ -63,7 +63,7 @@ describe('0.4.0 fake contract', () => {
       Object.values(value).forEach(walk);
     };
     walk(scenes);
-    expect(budgets.length).toBeGreaterThan(10);
+    expect(budgets.length).toBeGreaterThan(0);
     for (const budget of budgets) {
       expect(budget.used + budget.remaining).toBe(budget.limit);
       expect(budget.total_used).toBeGreaterThanOrEqual(budget.used);

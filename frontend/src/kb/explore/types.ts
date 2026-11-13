@@ -1,11 +1,6 @@
-import type { ComponentType } from 'react';
 import { createDiscoveryClient, createTopicActions, type DiscoveryClient, type TopicActions } from './clients';
 import type {
   KbAreaMaterial,
-  KbContinue,
-  KbExploreStart,
-  KbExploring,
-  KbFindingImport,
   KbFinding,
   KbFunnelRun,
 } from '../../api/kb/types.gen';
@@ -40,25 +35,6 @@ export function createExploreClients(client: Pick<KbClient, 'call'>): ExploreCli
     maintenance: createMaintenanceClient(client),
   };
 }
-
-/** What F3's finding component sends when the user picks Brief tour / Deep dive / Notes. */
-export type ExploreFindingStart = KbExploreStart;
-/** What F3's finding component sends for Add to wiki. */
-export type FindingToWikiBody = KbFindingImport;
-/** Continue from a checkpoint; `decision_choice` answers `decision_model_required`. */
-export type ExploreResumeBody = Pick<KbContinue, 'decision_choice'>;
-
-export interface FindingHostProps {
-  finding: KbFinding;
-  scopeName: string;
-  initialMenuOpen?: boolean;
-  onBack: () => void;
-  onExplore: (findingId: string, body: ExploreFindingStart) => Promise<KbExploring | void>;
-  onAddToWiki: (findingId: string, body: FindingToWikiBody) => Promise<void>;
-  onOpenDocument?: (target: DocTarget) => void;
-}
-
-export type FindingHostComponent = ComponentType<FindingHostProps>;
 
 export interface ExploreSectionProps {
   hidden?: boolean;

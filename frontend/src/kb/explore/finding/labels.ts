@@ -1,7 +1,7 @@
 // Material read-mark vocabulary remains shared while the retired finding UI is removed.
-import type { KbReadMarkValue } from '../../../api/kb/types.gen';
+import type { KbReadMark } from '../../../api/kb/types.gen';
 
-export type ReadMarkValue = KbReadMarkValue;
+export type ReadMarkValue = NonNullable<KbReadMark['value']>;
 export const READ_MARKS: readonly ReadMarkValue[] = ['useful_method', 'changed_my_view', 'already_knew', 'not_for_me'];
 export const READ_MARK_TEXT: Record<ReadMarkValue, string> = {
   useful_method: 'Useful method',

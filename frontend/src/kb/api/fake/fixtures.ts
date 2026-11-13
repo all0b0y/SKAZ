@@ -939,8 +939,8 @@ export const contractFixtures = {
     "jobs": [
       {
         "id": "run-1",
-        "owner": "research",
-        "title": "Verify wiki claims",
+        "owner": "explore",
+        "title": "Wiki claim verification papers",
         "state": "running",
         "stage": "novelty",
         "stop_reason": null,
@@ -953,8 +953,8 @@ export const contractFixtures = {
           "batch": 1,
           "free_only": false
         },
-        "task_id": "task-1",
-        "chat_id": "chat-research-1",
+        "task_id": null,
+        "chat_id": null,
         "area_id": "area-ai",
         "updated_at": "2026-11-09T10:00:00Z"
       }

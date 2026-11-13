@@ -350,25 +350,6 @@ class ChatService:
     def _on_study(self, block: StudyBlock) -> None:
         self._on_part(block.chat_id, block.message_id, StudyPart(block.id, block.kind, block.title))
 
-    async def post_messages(self, chat_id: str, messages: Sequence[Message], *,
-                            unread: bool = False) -> list[Message]:
-        """0.4.0 B3: SKAZ's own messages in a chat (a research task's request, progress notes and report),
-        numbered after the chat's last one; no agent runs. ``unread`` marks a report the user hasn't seen."""
-        if not messages:
-            return []
-        updates: dict[str, Any] = {"updated_at": utc_now()}
-        shown = [message for message in messages if message.role != "system"]
-        if shown:
-            updates["last_preview"] = preview(shown[-1].parts)
-        if unread:
-            updates["unread"] = True
-        added = await disk_call(self.repo.add_messages, list(messages), updates)
-        feed = self._feed(chat_id)
-        for message in added:
-            feed.emit("message", message.id, message=message)
-        self._list.touch(chat_id)
-        return added
-
     # -- parts that SKAZ tools add to or change in an answer (N6 «Я», P2 «Fix in wiki») ------------
 
     async def add_part(self, chat_id: str, message_id: str, part: Part) -> None:

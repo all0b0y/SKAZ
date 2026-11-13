@@ -30,14 +30,6 @@ export function areasRemoveReadMark(client: Pick<KbClient, "call">, material_id:
   return client.call('DELETE /kb/materials/{material_id}/read-mark', { path: { material_id } });
 }
 
-export function areasSetFindingMark(client: Pick<KbClient, "call">, finding_id: string, body: KbReadMarkUpdate): Promise<KbReadMark> {
-  return client.call('PUT /kb/explore/findings/{finding_id}/read-mark', { path: { finding_id }, body });
-}
-
-export function areasRemoveFindingMark(client: Pick<KbClient, "call">, finding_id: string): Promise<KbReadMark> {
-  return client.call('DELETE /kb/explore/findings/{finding_id}/read-mark', { path: { finding_id } });
-}
-
 export function areasSignals(client: Pick<KbClient, "call">, query: { cursor?: string; limit?: number } = {}): Promise<KbSignals> {
   return client.call('GET /kb/explore/signals', { query });
 }
@@ -61,8 +53,6 @@ export function createAreasClient(client: Pick<KbClient, "call">) {
     read_mark: (material_id: string) => areasReadMark(client, material_id),
     set_read_mark: (material_id: string, body: KbReadMarkUpdate) => areasSetReadMark(client, material_id, body),
     remove_read_mark: (material_id: string) => areasRemoveReadMark(client, material_id),
-    set_finding_mark: (finding_id: string, body: KbReadMarkUpdate) => areasSetFindingMark(client, finding_id, body),
-    remove_finding_mark: (finding_id: string) => areasRemoveFindingMark(client, finding_id),
     signals: (query: { cursor?: string; limit?: number } = {}) => areasSignals(client, query),
   };
 }

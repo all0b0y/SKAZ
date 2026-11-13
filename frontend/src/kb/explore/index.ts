@@ -12,8 +12,6 @@ export {
   createExploreClients,
   type ExploreClients,
   type ExploreSectionProps,
-  type FindingHostComponent,
-  type FindingHostProps,
 } from './types';
 
 export { createDiscoveryClient, createTopicActions, type DiscoveryClient, type TopicActions } from './clients';

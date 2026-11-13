@@ -1062,7 +1062,7 @@ class ExploreFunnel:
                 "cites_materials": data.get("cites") or [],
                 "shared_source_count": int(data.get("shared") or 0),
                 "repeat_hint": (
-                    f"{covered} of {len(theses)} points repeat your wiki — Brief tour will skip them"
+                    f"{covered} of {len(theses)} points repeat your wiki"
                     if 0 < covered < len(theses)
                     else None
                 ),

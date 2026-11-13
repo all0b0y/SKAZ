@@ -48,7 +48,7 @@ describe('The open chat runs into its window (decisions 24–25)', () => {
     const { services } = renderKb({ world: chatWorld() });
     await within(side()).findByRole('button', { name: /Why is there a logarithm/ });
     expect(tabOf()).toHaveAttribute('hidden');
-    expect(within(side()).queryByRole('button', { name: 'New chat' })).toBeNull();
+    expect(side().querySelector('.kb-side__scroll button[aria-label="New chat"]')).toBeNull();
     await user.click(within(side()).getByRole('button', { name: /Why is there a logarithm/ }));
     act(() => services.ui.getState().openDocument({ type: 'material', id: 'm3' }));
     expect(tabOf()).toHaveAttribute('data-tab-for', 'c1');
@@ -65,7 +65,7 @@ describe('The open chat runs into its window (decisions 24–25)', () => {
     const user = userEvent.setup();
     const { services } = renderKb({ world: chatWorld() });
     await within(side()).findByRole('button', { name: /What did I miss in lecture 8/ });
-    expect(within(side()).queryByRole('button', { name: 'New chat' })).toBeNull();
+    expect(side().querySelector('.kb-side__scroll button[aria-label="New chat"]')).toBeNull();
     expect(tabOf()).toHaveAttribute('hidden');
     const working = within(side()).getByRole('button', { name: /What did I miss in lecture 8/ });
     await user.click(working);
@@ -123,8 +123,8 @@ describe('Chats in the side panel', () => {
     renderKb({ world: chatWorld() });
     await within(side()).findByRole('button', { name: /^All chats/ });
     expect(within(side()).queryByRole('button', { name: 'Find in chats' })).toBeNull();
-    expect(within(side()).queryByRole('button', { name: 'New chat' })).toBeNull();
-    expect(within(side()).getByRole('button', { name: 'New' })).toBeInTheDocument();
+    expect(within(side()).getByRole('button', { name: 'New chat' })).toBeInTheDocument();
+    expect(within(side()).queryByRole('button', { name: 'New' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Search' }));
     expect(await screen.findByRole('dialog', { name: 'Search' })).toBeInTheDocument();
     await user.keyboard('{Escape}');

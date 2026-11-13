@@ -36,10 +36,6 @@ NAVIGATION_ACTIONS = frozenset(
     {OPEN_MATERIAL.id, "open_explore", "view_check", "check_novelty", "review_updates"}
 )
 ALREADY_RESOLVED = "This notification is already resolved."
-#: EX2: kinds that stay unread until the user sees their subject; only ``POST /kb/notifications/{id}/read``
-#: reads them, never the bell's read up to a cursor. ``research_finished`` (B3): read when the user opens
-#: the finished task (G2: it was read 1 s after it was created, as soon as the bell's feed showed it).
-SELF_READ_KINDS: frozenset[str] = frozenset()
 
 
 class AlreadyResolved(KnowledgeError):
@@ -134,15 +130,12 @@ class NotificationFeed:
             return resolved
 
     def mark_read(self, up_to_seq: int) -> int:
-        """The bell's read: everything up to ``up_to_seq``, except the kinds only their own read reads
-        (``SELF_READ_KINDS``); returns how many became read."""
+        """Read every notification up to ``up_to_seq``; return how many became read."""
         repo = self.kb.notification_repo
-        marks = ",".join("?" for _ in SELF_READ_KINDS)
         with repo.db.write() as connection:
             cursor = connection.execute(
-                "UPDATE notifications SET read_at = ? WHERE read_at IS NULL AND seq <= ?"
-                f" AND kind NOT IN ({marks})",
-                (utc_now(), up_to_seq, *sorted(SELF_READ_KINDS)),
+                "UPDATE notifications SET read_at = ? WHERE read_at IS NULL AND seq <= ?",
+                (utc_now(), up_to_seq),
             )
             return int(cursor.rowcount)
 
