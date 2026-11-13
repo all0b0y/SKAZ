@@ -166,7 +166,6 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
             Retry failed ({failedCount})
           </Button>
         )}
-        <OlderMaterials />
         <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add</Button>
         <IconButton icon="close" label="Close all materials" onClick={() => showCenter('chat')} />
       </SelectionHeader>
@@ -174,6 +173,8 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
         <div className="kb-amf">
           <Segmented label="Type" size="sm" value={type} options={TYPE_OPTIONS} onChange={setType} />
           <DateFilter window={pubWindow} onChange={setPubWindow} />
+          {/* N3 moved here from Explore (EX3); in the filter row it wraps instead of crowding the header. */}
+          <OlderMaterials />
           <span className="kb-head__spacer" />
           <label className="kb-select kb-select--sm">
             <span className="kb-visually-hidden">Folder</span>

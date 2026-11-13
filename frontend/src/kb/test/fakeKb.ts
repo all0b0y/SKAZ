@@ -915,6 +915,9 @@ const ROUTES: FakeRoutes = {
   'GET /kb/materials/{material_id}/read-mark': [200, (_w, { path }) => ({
     material_id: path.material_id, finding_id: null, value: null, updated_at: null,
   })],
+  // EX3 S2: opening a material is recorded; nothing from Explore sits unused in this world.
+  'POST /kb/materials/{material_id}/opened': [200, () => ({ ok: true })],
+  'GET /kb/materials-activity/explore-unused': [200, () => ({ material_ids: [] })],
   // -- library, folders --
   'GET /kb/library': [200, (w) => w.library],
   'POST /kb/library': [200, (w, { body }) => {
