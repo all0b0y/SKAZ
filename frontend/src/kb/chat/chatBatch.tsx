@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from 'react';
 import type { KbChatSummary } from '../../api/kb/types.gen';
-import { getResearchStore } from '../research/store';
 import { useServices } from '../state/context';
 import { useExportItems } from '../document/exportItems';
 import {
@@ -30,7 +29,7 @@ export function useChatSelection({ chats: list, onOpen, variant = 'compact', res
   /** Another search, filter or folder: the selection starts over. */
   resetKey?: unknown;
 }): { sel: ListSelection; overlays: ReactNode } {
-  const { chats, ui, client } = useServices();
+  const { chats, ui } = useServices();
   const exp = useExportItems();
   const exportMd = exp.run ? (picked: KbChatSummary[]) => { exp.run!(picked.map((c) => ({ type: 'chat' as const, id: c.id }))); } : null;
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
@@ -101,7 +100,7 @@ export function useChatSelection({ chats: list, onOpen, variant = 'compact', res
       ids: list.filter((c) => Date.parse(c.updated_at) < cutoff).map((c) => c.id) },
   ];
   const doomed = pick(deleteIds ?? []);
-  const answering = doomed.filter((c) => c.state === 'answering' && !c.research_task_id);
+  const answering = doomed.filter((c) => c.state === 'answering');
   const overlays = (
     <>
       <SelectionBar selection={sel} entry={variant !== 'compact'} sets={sets} hintKey="list-selection" count={sel.selected.size} variant={variant} actions={actions} more={more} onClear={sel.clear} />
@@ -114,7 +113,6 @@ export function useChatSelection({ chats: list, onOpen, variant = 'compact', res
           <ul className="kb-delprev__list">
             <li>{namesList(doomed.map((c) => c.title))} and {doomed.length === 1 ? 'its messages' : 'their messages'}</li>
             <li>Wiki pages saved from them stay</li>
-            {doomed.some((c) => c.research_task_id) && <li>Deleting a research chat stops its task; findings stay in Explore</li>}
             <li>{answering.length
               ? <>{namesList(answering.map((c) => c.title))} {answering.length === 1 ? 'is' : 'are'} still answering — skipped</>
               : 'A chat that is still answering is skipped — it says so'}</li>
@@ -123,9 +121,9 @@ export function useChatSelection({ chats: list, onOpen, variant = 'compact', res
         onDelete={async () => {
           const res: BatchResult = { done: [], skipped: [] };
           for (const c of doomed) {
-            if (c.state === 'answering' && !c.research_task_id) { res.skipped.push({ id: c.id, reason: `“${c.title}” is still answering` }); continue; }
+            if (c.state === 'answering') { res.skipped.push({ id: c.id, reason: `“${c.title}” is still answering` }); continue; }
             const r = await chats.getState().remove(c.id);
-            if (r.ok) { res.done.push(c.id); if (c.research_task_id) getResearchStore(client).getState().forgetChat(c.id); } else res.skipped.push({ id: c.id, reason: r.error });
+            if (r.ok) { res.done.push(c.id); } else res.skipped.push({ id: c.id, reason: r.error });
           }
           setDeleteIds(null);
           sel.clear();

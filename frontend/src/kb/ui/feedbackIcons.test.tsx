@@ -142,11 +142,12 @@ describe('Feedback motion of the six buttons', () => {
     expect(iconPlays).toEqual([]);
   });
 
-  it('new chat: "+" → New chat opens a fresh chat and moves nothing (EX2, G2-5: the side row with the pen is gone)', async () => {
+  it('new chat: the sidebar button opens a fresh chat directly without a Research menu', async () => {
     const user = userEvent.setup();
     const { services } = renderKb({ world: chatWorld() });
-    await user.click(await within(side()).findByRole('button', { name: 'New' }));
-    await user.click(await screen.findByRole('menuitem', { name: 'New chat' }));
+    await user.click(await within(side()).findByRole('button', { name: 'New chat' }));
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.queryByText('Research')).toBeNull();
     expect(services.chats.getState().currentId).toBeNull();
     expect(iconPlays).toEqual([]);
   });

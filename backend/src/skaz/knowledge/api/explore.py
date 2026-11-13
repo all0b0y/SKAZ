@@ -11,11 +11,7 @@ from .contract_routes import ERROR_RESPONSES, ContractRoute, service_for
 from .schemas_explore import (
     KbCandidateOutcome,
     KbDiscussion,
-    KbExploreStart,
-    KbExploring,
-    KbExploringList,
     KbFinding,
-    KbFindingImport,
     KbFindingImported,
     KbFindings,
     KbFindingsShow,
@@ -110,23 +106,6 @@ async def findings(
 @router.get("/explore/findings/{finding_id}", response_model=KbFinding)
 async def finding(finding_id: EntityPath, service: ServiceDep) -> KbFinding:
     return await service.finding(finding_id)
-
-
-@router.post("/explore/findings/{finding_id}/explore", response_model=KbExploring)
-async def explore(finding_id: EntityPath, body: KbExploreStart, service: ServiceDep) -> KbExploring:
-    return await service.explore(finding_id, body)
-
-
-@router.post("/explore/findings/{finding_id}/wiki", response_model=KbFindingImported)
-async def add_to_wiki(
-    finding_id: EntityPath, body: KbFindingImport, service: ServiceDep
-) -> KbFindingImported:
-    return await service.add_to_wiki(finding_id, body)
-
-
-@router.get("/explore/exploring", response_model=KbExploringList)
-async def exploring(service: ServiceDep) -> KbExploringList:
-    return await service.exploring()
 
 
 # -- EX2: "Will search" plan and the funnel on view ----------------------------------------------------

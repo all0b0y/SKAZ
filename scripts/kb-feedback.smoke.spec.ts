@@ -184,7 +184,7 @@ for (const theme of ['light', 'dark'] as const) {
     const side = page.getByRole('region', { name: 'Chats', exact: true });
     await expect(side.getByRole('button', { name: /^All chats/ })).toBeVisible();
     await expect(side.getByRole('button', { name: 'Find in chats', exact: true })).toHaveCount(0);
-    await expect(side.getByRole('button', { name: 'New', exact: true })).toBeVisible(); // EX2 (G2-5): "+" holds New chat and New research task
+    await expect(side.getByRole('button', { name: 'New chat', exact: true })).toBeVisible(); // EX3: New chat opens directly; the Research menu is retired.
     await page.screenshot({ path: path.join(shots, `sidebar-no-duplicate-search-${theme}.png`) });
     await page.getByRole('button', { name: 'Search', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'Search', exact: true })).toBeVisible();

@@ -154,23 +154,6 @@ class Presenter:
         #: Reads study blocks for their parts (no writes: saving goes through the app's service).
         self.study = StudyService(kb, None, language=lambda: "en")
         self._folders: dict[str, str] = {}
-        self._research: Callable[[str], KbMessagePart | None] | None = None
-
-    def research(self, permission_id: str) -> KbMessagePart | None:
-        """0.4.0 B3: the research card or task pointer (imported here: ``research`` imports the API)."""
-        if self._research is None:
-            from ..explore.jobs import SqliteJobStore
-            from ..research.parts import research_part
-            from ..research.store import ResearchStore
-
-            store, jobs = ResearchStore(self.kb.db), SqliteJobStore(self.kb.db)
-
-            def view(card_id: str) -> KbMessagePart | None:
-                found = research_part(store, jobs.get, card_id)
-                return KbMessagePart(found) if found is not None else None
-
-            self._research = view
-        return self._research(permission_id)
 
     def citation(self, material_id: str, seg: int, quote: str | None) -> KbCitation:
         found = self.kb.material_repo.fragment_map({(material_id, seg)}).get((material_id, seg))
@@ -207,8 +190,8 @@ class Presenter:
             return KbMessagePart(web_search_part(search) if search is not None
                                  else KbTextPart(type="text", text=""))
         if isinstance(part, ResearchPart):
-            card = self.research(part.permission_id)
-            return card if card is not None else KbMessagePart(KbTextPart(type="text", text=""))
+            # Legacy stored cards remain in the database but no longer offer research actions.
+            return KbMessagePart(KbTextPart(type="text", text=""))
         if isinstance(part, StudyPart):
             block = self.study.store.block(part.study_id)
             return KbMessagePart(study_part(self.study, block, self.citation) if block is not None

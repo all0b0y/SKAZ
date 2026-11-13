@@ -31,15 +31,15 @@ POLL_INTERVAL_S = 0.2
 OPEN_MATERIAL = ActionSpec("open_material", "Open material")
 #: Actions that only navigate; they never mark a notification resolved.
 #: Buttons that only navigate: the client carries them out; resolving one changes nothing and keeps the notice
-#: open. 0.4.0: B2 Open in Explore; B3 Open task; B6 View check / Check novelty / Review source updates.
+#: open. 0.4.0: B2 Open in Explore; B6 View check / Check novelty / Review source updates.
 NAVIGATION_ACTIONS = frozenset(
-    {OPEN_MATERIAL.id, "open_explore", "open_research_task", "view_check", "check_novelty", "review_updates"}
+    {OPEN_MATERIAL.id, "open_explore", "view_check", "check_novelty", "review_updates"}
 )
 ALREADY_RESOLVED = "This notification is already resolved."
 #: EX2: kinds that stay unread until the user sees their subject; only ``POST /kb/notifications/{id}/read``
 #: reads them, never the bell's read up to a cursor. ``research_finished`` (B3): read when the user opens
 #: the finished task (G2: it was read 1 s after it was created, as soon as the bell's feed showed it).
-SELF_READ_KINDS = frozenset({"research_finished"})
+SELF_READ_KINDS: frozenset[str] = frozenset()
 
 
 class AlreadyResolved(KnowledgeError):

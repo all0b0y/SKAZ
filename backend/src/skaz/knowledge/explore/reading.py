@@ -1,11 +1,4 @@
-"""Exploring a finding (Brief tour / Deep dive / Notes) and Add to wiki (N4 decision 9).
-
-Exploring opens a chat on the finding's text: the full text when a free one exists, else the abstract,
-always said honestly. Add to wiki saves that text as a library material through the existing intake
-(``sources``: the same duplicate rule, the same guard, ingest with ``to_wiki``), labelled "abstract only"
-when that is all there is; a read mark on the finding moves to the new material (open question 5).
-"""
-
+"""EX3: add a finding to Materials or discuss its card in an ordinary chat."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -16,11 +9,7 @@ from ..agents.prompting import untrusted_block
 from ..api.contract_routes import ContractFailure
 from ..api.schemas_explore import (
     KbDiscussion,
-    KbExploreStart,
-    KbExploring,
-    KbExploringList,
     KbFinding,
-    KbFindingImport,
     KbFindingImported,
 )
 from ..api.schemas_science import KbScienceText
@@ -42,24 +31,6 @@ from ..sources.service import IntakeResult
 from .rules import work_urls
 from .store import ExploreStore
 
-#: Text put into the first message of an Exploring chat; longer full texts are cut (and the agent told).
-MAX_INLINE_CHARS = 60_000
-Mode = Literal["brief_tour", "deep_dive", "notes"]
-MODE_TITLES: dict[str, str] = {"brief_tour": "Brief tour", "deep_dive": "Deep dive", "notes": "Notes"}
-MODE_ASKS: dict[str, str] = {
-    "brief_tour": (
-        "Give me a brief tour of this paper: what it claims, what is new compared with my wiki, and which "
-        "parts I can skip because my wiki already covers them. Keep it short."
-    ),
-    "deep_dive": (
-        "Walk me through this paper in depth: the problem, the method, the evidence and its limits. Compare "
-        "each point with my wiki and say where it is new, extends or contradicts what I have."
-    ),
-    "notes": (
-        "Write concise notes on this paper: its key claims, method, results and limits, each with where it "
-        "sits relative to my wiki."
-    ),
-}
 FULL_TEXT_KINDS = frozenset({"tei", "arxiv_html", "open_page"})
 
 
@@ -103,73 +74,6 @@ class ReadingDesk:
         available = "full_text" if text.kind in FULL_TEXT_KINDS and text.text.strip() else "abstract_only"
         await disk_call(self.store.update_details, finding.id, {"text_available": available})
         return text
-
-    async def explore(self, finding: KbFinding, body: KbExploreStart, science: ScienceClient) -> KbExploring:
-        text = await self._text(finding, science)
-        full = text.kind in FULL_TEXT_KINDS and bool(text.text.strip())
-        body_text = (
-            text.text.strip() if full else (text.text.strip() or (finding.work.abstract or "").strip())
-        )
-        if not body_text:
-            raise ContractFailure(409, "conflict")
-        material_id = None
-        if body.add_to_wiki:
-            imported = await self._import(finding, "full_text" if full else "abstract_only", body_text)
-            material_id = imported.material_id
-        title = f"{MODE_TITLES[body.mode]}: {finding.work.title}"[:120]
-        view = await self.chats.create(title=title)
-        chat_id = str(view.chat.id)
-        await self.chats.send(chat_id, self._message(finding, body.mode, body_text, full, material_id))
-        reading = await disk_call(
-            self.store.add_reading,
-            finding_id=finding.id,
-            chat_id=chat_id,
-            mode=body.mode,
-            text_kind=text.kind if full else "abstract_only",
-            material_id=material_id,
-        )
-        return _reading(reading)
-
-    @staticmethod
-    def _message(
-        finding: KbFinding, mode: str, text: str, full: bool, material_id: str | None
-    ) -> MessageInput:
-        lines = [MODE_ASKS[mode]]
-        if not full:
-            lines.append("Only the abstract is available: say so, and don't add details it doesn't contain.")
-        if finding.repeat_hint and mode == "brief_tour":
-            lines.append(f"SKAZ's check: {finding.repeat_hint}.")
-        cut = len(text) > MAX_INLINE_CHARS
-        if cut:
-            lines.append("The text below is cut to its first part; say where it stops.")
-        work = finding.work
-        header = f"Title: {work.title}\nAuthors: {', '.join(work.authors[:8])}\n"
-        if work.doi:
-            header += f"DOI: {work.doi}\n"
-        label = "paper full text" if full else "paper abstract"
-        message = "\n".join(lines) + "\n\n" + untrusted_block(label, header + "\n" + text[:MAX_INLINE_CHARS])
-        return MessageInput(text=message, attachments=(material_id,) if material_id else ())
-
-    async def add_to_wiki(
-        self, finding: KbFinding, body: KbFindingImport, science: ScienceClient
-    ) -> KbFindingImported:
-        if finding.material_id is not None:
-            content: Literal["full_text", "abstract_only"] = (
-                "full_text" if finding.text_available == "full_text" else "abstract_only"
-            )
-            return KbFindingImported(finding_id=finding.id, material_id=finding.material_id, content=content)
-        text = await self._text(finding, science)
-        full = text.kind in FULL_TEXT_KINDS and bool(text.text.strip())
-        if body.content == "full_text" and not full:
-            raise ContractFailure(409, "conflict")
-        body_text = (
-            text.text.strip()
-            if body.content == "full_text"
-            else ((finding.work.abstract or "").strip() or (text.text.strip() if not full else ""))
-        )
-        if not body_text:
-            raise ContractFailure(409, "conflict")
-        return await self._import(finding, body.content, body_text, source_url=text.source_url)
 
     async def add_to_materials(self, finding: KbFinding, science: ScienceClient) -> KbFindingImported:
         """EX3 (UX-11): the paper goes to «From Explore» without the wiki; full text when a free one answers,
@@ -276,20 +180,3 @@ class ReadingDesk:
             finding_id=finding.id, material_id=material_id, content=content, to_wiki=to_wiki
         )
 
-    async def list(self) -> KbExploringList:
-        rows = await disk_call(self.store.readings)
-        return KbExploringList(items=[_reading(row) for row in rows])
-
-
-def _reading(row: Any) -> KbExploring:
-    return KbExploring.model_validate(
-        {
-            "id": row.id,
-            "finding_id": row.finding_id,
-            "chat_id": row.chat_id,
-            "mode": row.mode,
-            "text_kind": row.text_kind,
-            "material_id": row.material_id,
-            "started_at": row.started_at,
-        }
-    )

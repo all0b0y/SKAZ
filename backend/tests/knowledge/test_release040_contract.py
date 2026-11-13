@@ -9,7 +9,7 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, cast, get_args
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -22,7 +22,7 @@ from skaz.knowledge.store.schema import MODULES, applied_versions, apply_schemas
 
 REPO = Path(__file__).resolve().parents[3]
 CASES = json.loads((Path(__file__).parent / "fixtures/release040_routes.json").read_text())
-AREAS = ("science", "explore", "areas", "research", "freshness", "maintenance", "repeats")
+AREAS = ("science", "explore", "areas", "freshness", "maintenance", "repeats")
 
 
 def app_for_contracts() -> FastAPI:
@@ -96,7 +96,7 @@ def test_route_delegates_to_own_service_and_fixture_is_valid(case: dict[str, Any
         )
 
 
-def test_route_manifest_covers_all_seven_routers() -> None:
+def test_route_manifest_covers_current_routers() -> None:
     expected = {(row["method"], row["path"]) for row in CASES}
     actual: set[tuple[str, str]] = set()
     for area in AREAS:
@@ -205,7 +205,7 @@ def test_boundary_rejects_ambiguous_dates_and_missing_consent() -> None:
 
 @pytest.mark.parametrize(
     "module",
-    [f"skaz.knowledge.{area}.protocols" for area in AREAS] + ["skaz.knowledge.research.tool_contracts"],
+    [f"skaz.knowledge.{area}.protocols" for area in AREAS],
 )
 def test_owner_can_import_its_protocol_first(module: str) -> None:
     """Each owning slice imports its own protocols before anything else has loaded the API package."""
@@ -302,13 +302,6 @@ def test_map_can_carry_every_v3_level_and_deep_gaps() -> None:
         KbArea.model_json_schema()["properties"]["level"]["enum"]
     )
     assert KbAreaMap.model_fields["worth_closing"].annotation == list[KbArea]
-
-
-def test_research_card_can_join_the_chat_part_union() -> None:
-    from skaz.knowledge.api.schemas_research import KbResearchPermission
-
-    field = KbResearchPermission.model_fields["type"]
-    assert field.is_required() and get_args(field.annotation) == ("research",)
 
 
 def test_retraction_is_per_statement_and_tray_text_is_exact() -> None:

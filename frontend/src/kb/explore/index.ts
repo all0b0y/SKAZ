@@ -1,7 +1,6 @@
 export { AreaColumn, type AreaColumnProps } from './AreaColumn';
 export { ExploreMap, type ExploreMapProps } from './ExploreMap';
 export { ExploreSection } from './ExploreSection';
-export { FindingDetail, FindingClientsProvider } from './finding';
 export {
   formatWikiShare,
   isGapArea,
@@ -24,5 +23,4 @@ export {
   type FindingHostProps,
 } from './types';
 
-export { FunnelView } from './FunnelView';
 export { createDiscoveryClient, createTopicActions, type DiscoveryClient, type TopicActions } from './clients';

@@ -14,7 +14,6 @@ from ..store.database import MAX_DB_INT
 from .schemas import KbCitation, KbPageRef
 from .schemas_agents import KbEngineId
 from .schemas_blocks import KbAnswerBlockPart
-from .schemas_research import KbResearchPermission
 from .schemas_search import KbChatSearchRulesUpdate
 from .schemas_study import KbStudyPart
 from .schemas_web import KbWebSearchPart
@@ -235,7 +234,7 @@ class KbMessagePart(RootModel[Annotated[KbKnowledgePart | KbTextPart | KbCitePar
                                         | KbConnectionPart | KbToolPart
                                         | KbPermissionPart | KbQuestionPart | KbStudyPart
                                         | KbWebSearchPart | KbMemoryPart
-                                        | KbAnswerBlockPart | KbWikiFixPart | KbResearchPermission,
+                                        | KbAnswerBlockPart | KbWikiFixPart,
                                         Field(discriminator="type")]]):
     pass
 

@@ -27,7 +27,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ...native_io import disk_call
 from ..agents import update_gate
@@ -147,25 +147,6 @@ if TYPE_CHECKING:  # the study service imports chats (C-17); only annotations na
     from ..study.service import StudyService
 
 log = logging.getLogger(__name__)
-
-
-class ResearchCard(Protocol):
-    """0.4.0 B3: a ``skaz_research_start`` card, as the chat needs it (which answer it belongs to)."""
-
-    @property
-    def id(self) -> str: ...
-    @property
-    def chat_id(self) -> str: ...
-    @property
-    def message_id(self) -> str: ...
-
-
-class ResearchCards(Protocol):
-    """0.4.0 B3: where research cards wait for the user (``research.service.ResearchTasks``)."""
-
-    def add_listener(self, listener: Callable[[ResearchCard], None]) -> None: ...
-    def waiting_chats(self) -> set[str]: ...
-    async def cancel_run(self, run_id: str, reason: str) -> int: ...
 
 
 ChatState = Literal["idle", "answering"]
@@ -313,8 +294,6 @@ class ChatService:
         if web is not None:
             web.recover()
             web.listeners.append(self._on_web)
-        #: 0.4.0 B3: ``skaz_research_start`` cards wait here like web searches (``attach_research``).
-        self.research: ResearchCards | None = None
         self._feeds: dict[str, ChatFeed] = {}
         self._list = ListFeed()
         self._runs: dict[str, _Run] = {}
@@ -342,8 +321,6 @@ class ChatService:
         store = self.permissions.store if self.permissions is not None else (
             self.questions.store if self.questions is not None else None)
         waiting = store.waiting_chats() if store is not None else set()
-        if self.research is not None:
-            waiting |= self.research.waiting_chats()
         return waiting | (self.web.store.waiting_chats() if self.web is not None else set())
 
     def _view(self, chat: Chat, waiting: set[str], messages: tuple[Message, ...] = (),
@@ -372,12 +349,6 @@ class ChatService:
 
     def _on_study(self, block: StudyBlock) -> None:
         self._on_part(block.chat_id, block.message_id, StudyPart(block.id, block.kind, block.title))
-
-    def attach_research(self, cards: ResearchCards) -> None:
-        """0.4.0 B3: research cards join the answer that asked (a new card) or change in place; Stop and
-        close cancel what still waits; a waiting card is "Waiting for you"."""
-        self.research = cards
-        cards.add_listener(lambda card: self._on_part(card.chat_id, card.message_id, ResearchPart(card.id)))
 
     async def post_messages(self, chat_id: str, messages: Sequence[Message], *,
                             unread: bool = False) -> list[Message]:
@@ -1530,8 +1501,6 @@ class ChatService:
             if self.web is not None:
                 await self.web.cancel_run(run_id, reason,
                                           execution="stopped" if stopped and not closing else "unknown")
-            if self.research is not None:
-                await self.research.cancel_run(run_id, reason)
         except Exception as error:
             log.error("Cancelling the requests of chat answer %s failed: %s", run_id, error_note(error))
 

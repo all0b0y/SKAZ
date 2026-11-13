@@ -4,7 +4,6 @@ import { createFakeExploreClient } from './explore';
 import { createFakeFreshnessClient } from './freshness';
 import { createFakeMaintenanceClient } from './maintenance';
 import { createFakeRepeatsClient } from './repeats';
-import { createFakeResearchClient } from './research';
 import { createFakeScienceClient } from './science';
 import { scenes, type ExploreScene, type SceneName } from './scenes';
 
@@ -19,14 +18,11 @@ export function createFakeKb(name?: SceneName) {
   const freshness = createFakeFreshnessClient();
   const maintenance = createFakeMaintenanceClient();
   const repeats = createFakeRepeatsClient();
-  const research = createFakeResearchClient();
   return {
     science: createFakeScienceClient(),
     areas: { ...areas, map: answer(scene.map, areas.map), materials: answer(scene.materials, areas.materials) },
     explore: { ...explore, run: answer(scene.run, explore.run), jobs: answer(scene.jobs, explore.jobs),
-      findings: answer(scene.findings, explore.findings), finding: answer(scene.finding, explore.finding),
-      explore: answer(scene.exploring, explore.explore) },
-    research: { ...research, task: answer(scene.task, research.task), decide: answer(scene.permission, research.decide) },
+      findings: answer(scene.findings, explore.findings), finding: answer(scene.finding, explore.finding) },
     freshness: { ...freshness, link_check: answer(scene.linkCheck, freshness.link_check) },
     maintenance: { ...maintenance, marks: answer(scene.freshness, maintenance.marks),
       page_marks: answer(scene.freshness, maintenance.page_marks), check: answer(scene.weekly, maintenance.check),

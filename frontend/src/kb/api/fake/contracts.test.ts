@@ -1,17 +1,15 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import type { KbFinding, KbFunnelRun, KbResearchTask, KbScienceSettings } from '../../../api/kb/types.gen';
+import type { KbFinding, KbFunnelRun, KbScienceSettings } from '../../../api/kb/types.gen';
 import { KbClient } from '../client';
 import { createScienceClient } from '../science';
 import { createExploreClient } from '../explore';
 import { createAreasClient } from '../areas';
-import { createResearchClient } from '../research';
 import { createFreshnessClient } from '../freshness';
 import { createMaintenanceClient } from '../maintenance';
 import { createRepeatsClient } from '../repeats';
 import { createFakeScienceClient } from './science';
 import { createFakeExploreClient } from './explore';
 import { createFakeAreasClient } from './areas';
-import { createFakeResearchClient } from './research';
 import { createFakeFreshnessClient } from './freshness';
 import { createFakeMaintenanceClient } from './maintenance';
 import { createFakeRepeatsClient } from './repeats';
@@ -24,20 +22,18 @@ describe('0.4.0 fake contract', () => {
     expectTypeOf(createFakeScienceClient()).toEqualTypeOf<ReturnType<typeof createScienceClient>>();
     expectTypeOf(createFakeExploreClient()).toEqualTypeOf<ReturnType<typeof createExploreClient>>();
     expectTypeOf(createFakeAreasClient()).toEqualTypeOf<ReturnType<typeof createAreasClient>>();
-    expectTypeOf(createFakeResearchClient()).toEqualTypeOf<ReturnType<typeof createResearchClient>>();
     expectTypeOf(createFakeFreshnessClient()).toEqualTypeOf<ReturnType<typeof createFreshnessClient>>();
     expectTypeOf(createFakeMaintenanceClient()).toEqualTypeOf<ReturnType<typeof createMaintenanceClient>>();
     expectTypeOf(createFakeRepeatsClient()).toEqualTypeOf<ReturnType<typeof createRepeatsClient>>();
     expectTypeOf(createFakeScienceClient().settings()).toEqualTypeOf<Promise<KbScienceSettings>>();
     expectTypeOf(createFakeExploreClient().run('run-1')).toEqualTypeOf<Promise<KbFunnelRun>>();
-    expectTypeOf(createFakeResearchClient().task('task-1')).toEqualTypeOf<Promise<KbResearchTask>>();
   });
 
-  it('provides all approved scenes and the new task/access states', () => {
+  it('provides all approved scenes and the current access states', () => {
     expect(Object.keys(scenes)).toEqual(expect.arrayContaining([
       'home', 'area', 'topic', 'searching', 'done', 'find', 'explore', 'paid', 'abstract_only',
-      'research_running', 'research_paused', 'research_budget', 'research_done', 'no_decision_model', 'daily_limit',
-      'permission_pending', 'permission_allowed', 'permission_denied', 'older_running', 'older_paused',
+      'no_decision_model', 'daily_limit',
+      'older_running', 'older_paused',
       'new_version', 'retracted', 'link_gone', 'couldnt_check', 'footnote', 'weekly_done', 'weekly_running',
     ]));
     expect(scenes.home.map.areas.map((area) => area.level)).toEqual(['domain', 'domain', 'domain', 'domain']);
@@ -46,7 +42,6 @@ describe('0.4.0 fake contract', () => {
       .toEqual(new Set(['new', 'extends', 'contradicts', 'branch']));
     expect(scenes.covered.finding.label).toBe('covered');
     expect(scenes.searching.run.counters).toMatchObject({ checked: 240, after_rules: 198, decided: 120 });
-    expect(scenes.research_budget.task.run.stop_reason).toBe('budget');
     const retractedClaims = scenes.retracted.freshness.marks[0]?.affected_statements ?? [];
     expect(retractedClaims.map((claim) => claim.sole_source)).toEqual([true, false]);
     expect(scenes.couldnt_check.freshness.marks).toEqual([]);
@@ -56,8 +51,6 @@ describe('0.4.0 fake contract', () => {
     expect(scenes.paid.finding.text_available).toBe('abstract_only');
     expect(scenes.topic.map.areas[0]?.level).toBe('topic');
     expect(scenes.topic.materials.not_checked_count).toBe(2);
-    expect(scenes.research_paused.task.run.budget.remaining).toBe(12);
-    expect(scenes.research_budget.task.run.budget.remaining).toBe(0);
     expect(scenes.not_checked.repeats.percent).toBeNull();
   });
 
@@ -86,7 +79,6 @@ describe('0.4.0 fake contract', () => {
     finding.work.access.paid = false;
     expect((await kb.explore.finding('finding-paid')).work.access.paid).toBe(true);
     expect((await createFakeKb('home').areas.map()).areas).toHaveLength(4);
-    expect((await createFakeKb('research_paused').research.task('task-rag')).run.state).toBe('paused');
     expect((await createFakeKb().explore.run('run-1')).id).toBe('run-1');
   });
 

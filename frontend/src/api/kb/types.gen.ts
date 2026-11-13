@@ -750,59 +750,10 @@ export interface KbExcludedFragment {
   detected_at: string;
 }
 
-export interface KbExploreJob {
-  id: string;
-  owner: "explore" | "research" | "links" | "weekly" | "repeats";
-  state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
-  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
-  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
-  budget: KbRunBudget;
-  counters: KbRunCounters;
-  checkpoint: KbCheckpoint | null;
-  created_at: string;
-  updated_at: string;
-  decision_choices: ("download_local" | "openrouter_jev")[];
-  decision_provider: "local" | "openrouter_jev" | null;
-  retry_at: string | null;
-}
-
 export interface KbExplorePageRef {
   page_id: string;
   title: string;
   block_id?: string | null;
-}
-
-export interface KbExploreRead {
-  area_id?: string | null;
-  task_id?: string | null;
-  cursor?: string | null;
-  limit?: number;
-}
-
-export interface KbExploreSnapshot {
-  map: KbAreaMap;
-  findings: KbFindings;
-  signals: KbSignals;
-  tasks: KbResearchTasks;
-}
-
-export interface KbExploreStart {
-  mode: "brief_tour" | "deep_dive" | "notes";
-  add_to_wiki?: boolean;
-}
-
-export interface KbExploring {
-  id: string;
-  finding_id: string;
-  chat_id: string;
-  mode: "brief_tour" | "deep_dive" | "notes";
-  text_kind: "tei" | "arxiv_html" | "open_page" | "abstract_only";
-  material_id: string | null;
-  started_at: string;
-}
-
-export interface KbExploringList {
-  items: KbExploring[];
 }
 
 export interface KbExportItem {
@@ -902,10 +853,6 @@ export interface KbFindingGroup {
   task_state: "queued" | "running" | "paused" | "done" | "cancelled" | "error" | null;
   updated_at: string | null;
   findings: KbFinding[];
-}
-
-export interface KbFindingImport {
-  content: "full_text" | "abstract_only";
 }
 
 export interface KbFindingImported {
@@ -1667,7 +1614,7 @@ export interface KbMessageInput {
   selection?: KbSelection | null;
 }
 
-export type KbMessagePart = KbKnowledgePart | KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart | KbWikiFixPart | KbResearchPermission;
+export type KbMessagePart = KbKnowledgePart | KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart | KbWikiFixPart;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
@@ -2041,76 +1988,6 @@ export interface KbRepeatCheckStart {
 
 export interface KbRescanResult {
   pages_changed: number;
-}
-
-export interface KbResearchCreate {
-  description: string;
-  area_id?: string | null;
-  dates?: KbDateWindow | null;
-  topics?: KbResearchTopic[] | null;
-  title?: string | null;
-}
-
-export interface KbResearchDecide {
-  decision: "allow" | "allow_chat" | "deny";
-  topics?: KbResearchTopic[] | null;
-}
-
-export interface KbResearchGrant {
-  chat_id: string;
-  kind?: "research_start";
-  allowed: boolean;
-  granted_at: string | null;
-}
-
-/** The ``skaz_research_start`` card and, once allowed, the compact task pointer in the chat. B3 adds this model to the ``KbMessagePart`` union, so ``type`` is its discriminator. */
-export interface KbResearchPermission {
-  type: "research";
-  id: string;
-  kind?: "research_start";
-  engine: "codex" | "claude_code" | "hermes" | "opencode";
-  chat_id: string;
-  arguments: KbResearchCreate;
-  topics: string[];
-  status: "pending" | "allowed" | "denied" | "cancelled";
-  auto: boolean;
-  reason: string | null;
-  task_id: string | null;
-  task_title: string | null;
-  task_state: "queued" | "running" | "paused" | "done" | "cancelled" | "error" | null;
-  created_at: string;
-}
-
-/** EX2: what "+ New research task" shows on its card before anything starts: the chat agent's title and proposed topics for the description (``POST /kb/research/proposals`` with a ``KbResearchCreate`` body whose ``topics`` is ``None``). Nothing leaves for science sources here; the description goes only to the chat agent. */
-export interface KbResearchProposal {
-  title: string;
-  topics: KbResearchTopic[];
-}
-
-export interface KbResearchTask {
-  id: string;
-  title: string;
-  description: string;
-  chat_id: string;
-  origin_chat_id: string | null;
-  area_id: string | null;
-  topics: KbResearchTopic[];
-  run: KbExploreJob;
-  finding_count: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface KbResearchTasks {
-  tasks: KbResearchTask[];
-  next_cursor: string | null;
-}
-
-/** EX2: one topic on the Research task card — proposed by the chat agent, typed, or picked from the map. Search and the fit decision use exactly the card's topics, never the user's areas. */
-export interface KbResearchTopic {
-  text: string;
-  source: "proposed" | "typed" | "picked";
-  area_id?: string | null;
 }
 
 export interface KbResolve {
@@ -3295,20 +3172,6 @@ export interface KbEndpoints {
     response: void;
     status: 204;
   };
-  "GET /kb/chats/{chat_id}/research-grant": {
-    path: { chat_id: string };
-    query: Record<string, never>;
-    body: never;
-    response: KbResearchGrant;
-    status: 200;
-  };
-  "DELETE /kb/chats/{chat_id}/research-grant": {
-    path: { chat_id: string };
-    query: Record<string, never>;
-    body: never;
-    response: KbResearchGrant;
-    status: 200;
-  };
   "POST /kb/chats/{chat_id}/save": {
     path: { chat_id: string };
     query: Record<string, never>;
@@ -3477,13 +3340,6 @@ export interface KbEndpoints {
     response: KbAcknowledged;
     status: 200;
   };
-  "GET /kb/explore/exploring": {
-    path: Record<string, never>;
-    query: Record<string, never>;
-    body: never;
-    response: KbExploringList;
-    status: 200;
-  };
   "GET /kb/explore/findings": {
     path: Record<string, never>;
     query: { area_id?: string | null; task_id?: string | null; include_covered?: boolean; cursor?: string | null; limit?: number; run_id?: string | null; show?: "active" | "new" | "seen" | "dismissed"; free_only?: boolean; year_from?: number | null; year_to?: number | null; types?: ("preprint" | "peer_reviewed" | "review" | "other")[] | null; sort?: "for_you" | "newest" | "cited" };
@@ -3510,13 +3366,6 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbFinding;
-    status: 200;
-  };
-  "POST /kb/explore/findings/{finding_id}/explore": {
-    path: { finding_id: string };
-    query: Record<string, never>;
-    body: KbExploreStart;
-    response: KbExploring;
     status: 200;
   };
   "POST /kb/explore/findings/{finding_id}/materials": {
@@ -3554,13 +3403,6 @@ export interface KbEndpoints {
     response: KbFinding;
     status: 200;
   };
-  "POST /kb/explore/findings/{finding_id}/wiki": {
-    path: { finding_id: string };
-    query: Record<string, never>;
-    body: KbFindingImport;
-    response: KbFindingImported;
-    status: 200;
-  };
   "GET /kb/explore/jobs": {
     path: Record<string, never>;
     query: { active?: boolean };
@@ -3580,13 +3422,6 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbSearchPlanRequest;
     response: KbSearchPlan;
-    status: 200;
-  };
-  "POST /kb/explore/read": {
-    path: Record<string, never>;
-    query: Record<string, never>;
-    body: KbExploreRead;
-    response: KbExploreSnapshot;
     status: 200;
   };
   "POST /kb/explore/repeat-checks": {
@@ -4259,62 +4094,6 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbSpeechMaterial;
-    status: 200;
-  };
-  "POST /kb/research/permissions/{request_id}/decide": {
-    path: { request_id: string };
-    query: Record<string, never>;
-    body: KbResearchDecide;
-    response: KbResearchPermission;
-    status: 200;
-  };
-  "POST /kb/research/proposals": {
-    path: Record<string, never>;
-    query: Record<string, never>;
-    body: KbResearchCreate;
-    response: KbResearchProposal;
-    status: 200;
-  };
-  "GET /kb/research/tasks": {
-    path: Record<string, never>;
-    query: { cursor?: string | null; limit?: number };
-    body: never;
-    response: KbResearchTasks;
-    status: 200;
-  };
-  "POST /kb/research/tasks": {
-    path: Record<string, never>;
-    query: Record<string, never>;
-    body: KbResearchCreate;
-    response: KbResearchTask;
-    status: 200;
-  };
-  "GET /kb/research/tasks/{task_id}": {
-    path: { task_id: string };
-    query: Record<string, never>;
-    body: never;
-    response: KbResearchTask;
-    status: 200;
-  };
-  "POST /kb/research/tasks/{task_id}/cancel": {
-    path: { task_id: string };
-    query: Record<string, never>;
-    body: never;
-    response: KbResearchTask;
-    status: 200;
-  };
-  "POST /kb/research/tasks/{task_id}/continue": {
-    path: { task_id: string };
-    query: Record<string, never>;
-    body: KbContinue;
-    response: KbResearchTask;
-    status: 200;
-  };
-  "POST /kb/research/tasks/{task_id}/pause": {
-    path: { task_id: string };
-    query: Record<string, never>;
-    body: never;
-    response: KbResearchTask;
     status: 200;
   };
   "GET /kb/science/journal": {

@@ -5,10 +5,9 @@ import { errorText } from '../api/client';
 import { exploreStart } from '../api/explore';
 import { maintenanceCheck } from '../api/maintenance';
 import { weeklySelection } from '../explore/weeklySelection';
-import { getResearchStore } from '../research/store';
 import type { KbServices } from '../state/context';
 
-export const NAVIGATION_ACTIONS = new Set(['open_explore', 'open_research_task', 'view_check', 'check_novelty', 'review_updates']);
+export const NAVIGATION_ACTIONS = new Set(['open_explore', 'view_check', 'check_novelty', 'review_updates']);
 
 export type NavigationResult = { ok: true } | { ok: false; error: string };
 
@@ -16,7 +15,6 @@ export type NavigationResult = { ok: true } | { ok: false; error: string };
  * - Open in Explore / View check → the Explore section (its progress line shows the running check).
  * - Check novelty → a new run over the candidates the weekly check left waiting (the paid step, on this click
  *   only), then Explore.
- * - Open task (B3 research_finished) → the research task view (`payload.task_id`), as the Research list does.
  * - Review source updates → All materials: the marks show on each material (there is no list of marked
  *   materials in 0.4.0).
  */
@@ -34,13 +32,6 @@ export async function runNavigation(
     if (section === 'materials') ui.showCenter('materials');
     if (section === 'chats') ui.showCenter('chat');
   };
-  if (action === 'open_research_task') {
-    const taskId = (n.payload as { task_id?: unknown }).task_id;
-    if (typeof taskId !== 'string') return { ok: false, error: 'This task is no longer available.' };
-    go('chats');
-    getResearchStore(services.client).getState().openTask(taskId);
-    return { ok: true };
-  }
   if (action === 'view_check') {
     const checkId = (n.payload as { job_id?: unknown }).job_id;
     if (typeof checkId !== 'string') return { ok: false, error: 'This check is no longer available.' };
