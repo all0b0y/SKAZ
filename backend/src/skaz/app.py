@@ -75,6 +75,8 @@ def create_app(
             runtime.kb_chats.start()
             # 0.4.0 B2: Explore runs paused by the last Quit (``app_exit``) go on.
             await runtime.kb_explore.on_start()
+            # EX3 S4: topics waiting for their hidden OpenAlex label get it once, in the background.
+            runtime.kb_areas.on_start()
             # 0.4.0 B3: research tasks follow their runs again and report stops missed while closed.
             await runtime.kb_research.on_start()
             # 0.4.0 B6: a weekly check paused by Quit goes on, a missed week runs, the weekly timer starts.
