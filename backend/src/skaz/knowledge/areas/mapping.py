@@ -1,10 +1,12 @@
 """EX2: the hidden OpenAlex label of each own topic (never shown in the UI).
 
-When a topic appears, is renamed or merged, one free OpenAlex ``/topics`` search by its name and main
-concept titles (only those names leave the machine; the science client journals the request), then the
-decision model picks 1–3 of the found OpenAlex topics or "no match". The result is stored; searching inside
-the topic filters by those ids (no match: text only). A stop (consent, the day limit, no decision model, an
-unsure answer) leaves the topic ``pending``: it is tried again when topics change or a search asks for it.
+When a topic appears, is renamed or merged, free OpenAlex ``/topics`` searches by its name and main concept
+titles, one per term (OpenAlex ANDs the words of a search: the joined query of EX2 matched nothing), without
+the concepts' parenthesised glosses (only those names leave the machine; the science client journals each
+request). Then the decision model picks 1–3 of the found OpenAlex topics or "no match". The result is stored;
+searching inside the topic filters by those ids (no match: by the topic's name and concepts only). A stop
+(consent, the day limit, no decision model, an unsure answer) leaves the topic ``pending`` with the reason:
+it is tried again at the next start, when topics change, or when a search asks for it.
 """
 
 from __future__ import annotations
@@ -12,22 +14,25 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from collections.abc import Awaitable, Callable, Sequence
+from typing import Literal
 
 from ...native_io import disk_call
 from ..decisions.protocol import ChoiceAnswer, ChoiceQuestion, DecisionLayer
 from ..logsafe import error_note
-from ..science.protocols import ScienceStop, TaxonomyNode
+from ..science.protocols import TOPIC_TERM_CHARS, TOPIC_TERMS, ScienceStop, TaxonomyNode
 from . import prompts
 from .topics import OwnTopic, TopicStore
 
 logger = logging.getLogger(__name__)
 #: ``(query) -> OpenAlex topics``: B1's free ``/topics`` search (wired by the runtime).
-#: B1/X2 ``ScienceGateway.search_topics``: up to 6 terms of up to 72 characters, joined into one search.
+#: B1/X2 ``ScienceGateway.search_topics``: up to ``TOPIC_TERMS`` terms of up to ``TOPIC_TERM_CHARS``
+#: characters, each its own search.
 TopicSearch = Callable[[Sequence[str]], Awaitable[Sequence[TaxonomyNode]]]
-#: Main concept titles added to the topic name in the one search.
+#: Main concept titles searched after the topic name.
 SEARCH_CONCEPTS = 3
-MAX_QUERY = 200
+assert SEARCH_CONCEPTS + 1 <= TOPIC_TERMS
 #: Found OpenAlex topics offered to the decision model.
 MAX_CANDIDATES = 10
 #: Up to this many OpenAlex topics per own topic; an extra pick needs this probability.
@@ -35,20 +40,44 @@ MAX_PICKS = 3
 EXTRA_PICK = 0.25
 
 
-#: ``search_topics`` takes each term up to this length (the science contract's per-topic limit).
-TERM_CHARS = 72
+#: Why a topic has no label (``explore_areas.mapping_reason``; the system's, never shown):
+#: ``no_match`` + no_candidates (OpenAlex found no topic for any term) | none_fit (the model said none fits);
+#: ``pending`` + a science stop | no_topic_search | no_decision_model | undecided | decision_failed.
+MappingReason = Literal[
+    "no_candidates",
+    "none_fit",
+    "undecided",
+    "decision_failed",
+    "no_decision_model",
+    "no_topic_search",
+    "science_consent_required",
+    "openalex_daily_limit",
+    "provider_unavailable",
+]
+_GLOSS = re.compile(r"\([^()]*\)")
+
+
+def _term(text: str) -> str:
+    """A wiki title as a search term: without its parenthesised glosses ("Agent loop (Цикл)"), within the
+    contract's length (cut at a word)."""
+    previous = None
+    while previous != text:
+        previous, text = text, _GLOSS.sub(" ", text)
+    text = " ".join(text.replace("(", " ").replace(")", " ").replace('"', " ").split())
+    if len(text) > TOPIC_TERM_CHARS:
+        text = text[:TOPIC_TERM_CHARS].rsplit(" ", 1)[0] or text[:TOPIC_TERM_CHARS]
+    return text.strip()
 
 
 def search_terms(name: str, concepts: Sequence[str]) -> list[str]:
-    """The topic name, then its main concepts while the joined search stays within ``MAX_QUERY``."""
-    terms = [name.strip()[:TERM_CHARS]]
-    for concept in concepts[:SEARCH_CONCEPTS]:
-        term = concept.strip()[:TERM_CHARS]
-        if not term or term in terms:
-            continue
-        if len(" ".join([*terms, term])) > MAX_QUERY:
+    """The topic name, then up to ``SEARCH_CONCEPTS`` main concepts: each term one ``/topics`` search."""
+    terms: list[str] = []
+    for raw in [name, *concepts]:
+        term = _term(raw)
+        if term and term.casefold() not in {t.casefold() for t in terms}:
+            terms.append(term)
+        if len(terms) > SEARCH_CONCEPTS:
             break
-        terms.append(term)
     return terms
 
 
@@ -111,25 +140,32 @@ class TopicMapper:
         """Map the topics whose label is missing or stale (only ``area_ids`` when given); returns how many
         were stored."""
         search, decisions = self._search(), self._decisions()
-        if search is None or decisions is None:
-            return 0
         async with self._lock:
             pending = await disk_call(self.topics.pending_mapping)
             if area_ids is not None:
                 wanted = set(area_ids)
                 pending = [topic for topic in pending if topic.id in wanted]
+            if search is None or decisions is None:
+                reason: MappingReason = "no_topic_search" if search is None else "no_decision_model"
+                await self._waits(pending, reason)
+                return 0
             stored = 0
-            for topic in pending:
+            for index, topic in enumerate(pending):
                 try:
                     if await self._map(topic, search, decisions):
                         stored += 1
                 except ScienceStop as stop:
                     logger.info("topic mapping paused: %s", stop.stop_reason)
-                    break  # consent, the day limit, a provider failure: the rest waits too
+                    # consent, the day limit, a provider failure: the rest waits too, with the reason
+                    await self._waits(pending[index:], stop.stop_reason)
+                    break
             return stored
 
+    async def _waits(self, topics: Sequence[OwnTopic], reason: MappingReason) -> None:
+        await disk_call(self.topics.mapping_waits, [topic.id for topic in topics], reason)
+
     async def _map(self, topic: OwnTopic, search: TopicSearch, decisions: DecisionLayer) -> bool:
-        concepts = await disk_call(self.topics.top_concepts, topic.id, SEARCH_CONCEPTS)
+        concepts = await disk_call(self.topics.top_concepts, topic.id, SEARCH_CONCEPTS * 2)
         found = await search(search_terms(topic.name, concepts))
         candidates: dict[str, str] = {}
         for node in found:
@@ -138,7 +174,7 @@ class TopicMapper:
             if len(candidates) >= MAX_CANDIDATES:
                 break
         if not candidates:
-            return await disk_call(self.topics.store_mapping, topic.id, topic.name, None)
+            return await disk_call(self.topics.store_mapping, topic.id, topic.name, None, "no_candidates")
         options = [*candidates, prompts.NO_MATCH_OPTION]
         question = ChoiceQuestion(
             state=prompts.mapping_state(topic.name, concepts),
@@ -149,8 +185,10 @@ class TopicMapper:
             answer = await decisions.ask(question)
         except Exception as error:
             logger.info("topic mapping: the decision model failed: %s", error_note(error))
+            await self._waits([topic], "decision_failed")
             return False
         if not isinstance(answer, ChoiceAnswer):
-            return False  # undecided: stays pending, asked again later
+            await self._waits([topic], "undecided")
+            return False  # stays pending, asked again later
         ids = [candidates[name] for name in picks(answer, options)]
-        return await disk_call(self.topics.store_mapping, topic.id, topic.name, ids)
+        return await disk_call(self.topics.store_mapping, topic.id, topic.name, ids, "none_fit")

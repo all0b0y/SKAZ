@@ -196,6 +196,6 @@ def test_areas_v2_adds_own_topic_columns_and_material_topics_idempotently(tmp_pa
     connection.close()
     db = KnowledgeDatabase(path)
     try:
-        assert db.schema_versions()["areas"] == areas.VERSION == 2
+        assert db.schema_versions()["areas"] == areas.VERSION == 3
     finally:
         db.close()

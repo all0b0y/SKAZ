@@ -43,12 +43,13 @@ async def test_topic_search_is_bounded_free_and_journalled(gateway: ScienceGatew
     )
     found = await gateway.search_topics(["AI agents", "Memory"], run_id=None)
     assert [(n.taxonomy_id, n.name) for n in found] == [("T1", "Agent memory"), ("T2", "Tool use")]
-    (sent,) = bases.requests
-    assert sent.url.path == "/topics" and sent.url.params["search"] == "AI agents Memory"
-    assert int(sent.url.params["per-page"]) <= 30
-    (entry,) = (await gateway.journal()).records
-    assert entry.payload.topics == ["AI agents", "Memory"] and entry.operation == "taxonomy"
-    assert entry.outcome == "succeeded"
+    # EX3 S4: OpenAlex ANDs the words of a search, so each term is its own search (never joined).
+    assert [r.url.path for r in bases.requests] == ["/topics", "/topics"]
+    assert [r.url.params["search"] for r in bases.requests] == ["AI agents", "Memory"]
+    assert all(int(r.url.params["per-page"]) <= 30 for r in bases.requests)
+    entries = (await gateway.journal()).records
+    assert sorted(tuple(e.payload.topics) for e in entries) == [("AI agents",), ("Memory",)]
+    assert {(e.operation, e.outcome) for e in entries} == {("taxonomy", "succeeded")}
     assert gateway.kb.settings.get("science.openalex.ledger")["usd"] == 0
 
 

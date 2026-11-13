@@ -54,6 +54,8 @@ class OwnTopic:
     pinned: bool
     mapping_state: MappingState
     mapped_name: str | None
+    #: Why there is no label (``areas.mapping.MappingReason``); ``None`` when mapped or not tried yet.
+    mapping_reason: str | None = None
 
     @property
     def mapping_current(self) -> bool:
@@ -70,6 +72,7 @@ def _topic(row: sqlite3.Row) -> OwnTopic:
         pinned=bool(row["pinned"]),
         mapping_state=row["mapping_state"],
         mapped_name=row["mapped_name"],
+        mapping_reason=row["mapping_reason"],
     )
 
 
@@ -200,7 +203,8 @@ class TopicStore:
             if other is not None and other != area_id:
                 raise ContractFailure(409, "conflict")  # merge it instead
             conn.execute(
-                "UPDATE explore_areas SET name = ?, mapping_state = 'pending' WHERE id = ?",
+                "UPDATE explore_areas SET name = ?, mapping_state = 'pending', mapping_reason = NULL"
+                " WHERE id = ?",
                 (cleaned, area_id),
             )
         return True
@@ -233,7 +237,8 @@ class TopicStore:
                     conn.execute("UPDATE explore_areas SET parent_id = ? WHERE id = ?", (into.id, child.id))
             self._move_labels(conn, source.id, into.id)
             conn.execute(
-                "UPDATE explore_areas SET mapping_state = 'pending', pinned = MAX(pinned, ?) WHERE id = ?",
+                "UPDATE explore_areas SET mapping_state = 'pending', mapping_reason = NULL,"
+                " pinned = MAX(pinned, ?) WHERE id = ?",
                 (int(source.pinned), into.id),
             )
             conn.execute("DELETE FROM explore_areas WHERE id = ?", (source.id,))
@@ -365,16 +370,18 @@ class TopicStore:
     def pending_mapping(self) -> list[OwnTopic]:
         return [topic for topic in self.topics() if not topic.mapping_current]
 
-    def store_mapping(self, area_id: str, name: str, topic_ids: Sequence[str] | None) -> bool:
-        """Keep the label made for ``name`` (``None``/empty = no match); a topic renamed meanwhile keeps
-        waiting for its own label. Returns whether it was stored."""
+    def store_mapping(
+        self, area_id: str, name: str, topic_ids: Sequence[str] | None, reason: str | None = None
+    ) -> bool:
+        """Keep the label made for ``name`` (``None``/empty = no match, with its ``reason``); a topic renamed
+        meanwhile keeps waiting for its own label. Returns whether it was stored."""
         ids = list(dict.fromkeys(tid for tid in (topic_ids or ()) if tid))
         state: MappingState = "mapped" if ids else "no_match"
         with self.db.write() as conn:
             changed = conn.execute(
-                "UPDATE explore_areas SET mapping_state = ?, mapped_name = ? "
+                "UPDATE explore_areas SET mapping_state = ?, mapped_name = ?, mapping_reason = ? "
                 "WHERE id = ? AND level = 'custom' AND name = ?",
-                (state, name, area_id, name),
+                (state, name, None if ids else reason, area_id, name),
             ).rowcount
             if not changed:
                 return False
@@ -384,6 +391,18 @@ class TopicStore:
                     "INSERT INTO explore_area_topics(area_id, topic_id) VALUES (?, ?)", (area_id, tid)
                 )
         return True
+
+    def mapping_waits(self, area_ids: Sequence[str], reason: str) -> None:
+        """The label could not be made now: the topics stay ``pending`` and keep why (system only)."""
+        if not area_ids:
+            return
+        marks = ",".join("?" for _ in area_ids)
+        with self.db.write() as conn:
+            conn.execute(
+                "UPDATE explore_areas SET mapping_state = 'pending', mapping_reason = ? "
+                f"WHERE level = 'custom' AND id IN ({marks})",
+                (reason, *area_ids),
+            )
 
     def hidden_ids(self, area_id: str) -> list[str]:
         """The topic's OpenAlex ids for a search filter; empty while unmapped, stale or without a match."""

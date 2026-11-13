@@ -5,6 +5,10 @@ material has at most one topic (``explore_area_materials``; ``origin`` agent|use
 wins). Each own topic carries a hidden OpenAlex label in ``explore_area_topics`` with ``mapping_state``
 and the name it was mapped
 for (``mapped_name``: a rename re-maps). Pre-EX2 OpenAlex rows stay (history of signals/runs), off the map.
+
+v3 (EX3 S4): ``mapping_reason`` — why a topic has no label (``areas.mapping.MappingReason``, system only).
+The ``no_match`` labels stored before v3 came from one joined ``/topics`` search that OpenAlex could not
+match (it ANDs the words), so they wait for their label again, once.
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ import sqlite3
 from collections.abc import Callable
 
 NAME = "areas"
-VERSION = 2
+VERSION = 3
 
 SQL = """
 CREATE TABLE IF NOT EXISTS explore_areas (
@@ -26,7 +30,8 @@ CREATE TABLE IF NOT EXISTS explore_areas (
     hidden INTEGER NOT NULL DEFAULT 0 CHECK(hidden IN (0,1)),
     pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),
     mapping_state TEXT NOT NULL DEFAULT 'pending' CHECK(mapping_state IN ('pending','mapped','no_match')),
-    mapped_name TEXT
+    mapped_name TEXT,
+    mapping_reason TEXT
 );
 CREATE TABLE IF NOT EXISTS explore_area_topics (
     area_id TEXT NOT NULL REFERENCES explore_areas(id) ON DELETE CASCADE,
@@ -102,4 +107,15 @@ def _v2(connection: sqlite3.Connection) -> None:
     )
 
 
-UPGRADES: dict[int, Callable[[sqlite3.Connection], None]] = {2: _v2}
+def _v3(connection: sqlite3.Connection) -> None:
+    """Idempotent: a no-match with a kept reason (stored by v3 code) is never retried here."""
+    present = {row[1] for row in connection.execute("PRAGMA table_info(explore_areas)")}
+    if "mapping_reason" not in present:
+        connection.execute("ALTER TABLE explore_areas ADD COLUMN mapping_reason TEXT")
+    connection.execute(
+        "UPDATE explore_areas SET mapping_state = 'pending' "
+        "WHERE level = 'custom' AND mapping_state = 'no_match' AND mapping_reason IS NULL"
+    )
+
+
+UPGRADES: dict[int, Callable[[sqlite3.Connection], None]] = {2: _v2, 3: _v3}
