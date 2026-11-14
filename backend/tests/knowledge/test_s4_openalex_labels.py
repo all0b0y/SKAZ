@@ -129,7 +129,11 @@ def test_terms_are_the_name_and_main_concepts_without_their_glosses() -> None:
             "x",
         ],
     )
-    assert terms == ["AI agents", "Subagents", "Agent loop", "Command-hook protocol"]
+    # FX-1 expands abbreviations before the concepts; parenthesised glosses still never leave.
+    assert terms == [
+        "AI agents", "Artificial intelligence agents", "Artificial intelligence",
+        "Subagents", "Agent loop", "Command-hook protocol",
+    ]
     assert search_terms("Data", ["Data", "Backup (бэкапы)", "  "]) == ["Data", "Backup"]
     long = "word " * 40
     assert all(0 < len(t) <= 72 for t in search_terms(long, [long]))  # search_topics' per-term limit
@@ -191,14 +195,15 @@ async def test_why_a_topic_has_no_label_is_kept_for_the_system(
     assert await off.map_topics() == 0
     assert bases.requests == [] and store.topic(cooking).mapping_reason == "no_decision_model"
 
-    assert await service.map_topics() == 2
+    # FX-1 persists an unsure answer as no_match too, rather than retrying it on every start.
+    assert await service.map_topics() == 3
     def state(area_id: str) -> tuple[str, str | None]:
         topic = store.topic(area_id)
         return topic.mapping_state, topic.mapping_reason
 
     assert state(cooking) == ("no_match", "no_candidates")
     assert state(comms) == ("no_match", "none_fit")
-    assert state(exams) == ("pending", "undecided")
+    assert state(exams) == ("no_match", "undecided")
     assert list(service.topics(comms)) == [] and list(service.topics(cooking)) == []
     assert not any("Cooking" in q.state for q in decider.asked)  # nothing found: the model is not asked
 
