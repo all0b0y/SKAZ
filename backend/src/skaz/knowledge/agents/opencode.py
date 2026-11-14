@@ -9,6 +9,12 @@ never seen: the environment is allowlisted (:func:`~..install.system.base_env`).
 providers happens in OpenCode itself: ``login`` opens ``opencode auth login`` for SKAZ's folder in
 Terminal; OpenCode writes the credential to SKAZ's ``auth.json``, which SKAZ never reads.
 
+OpenCode 2.0+ uses ``--standalone`` for short CLI commands (never ACP), ``debug agents`` for the
+resolved policy, JSON ``auth list`` and ``api model.list`` for credentials/catalogue. v2 permissions,
+variants and costs are normalized alongside v1's shapes. Per-turn MCP config sets ``codemode: false``
+so SKAZ tools stay directly callable; only instructions are kept between live turns, never MCP tokens.
+v2.3.0 shapes are covered by fakes from the F5 brief's offline probe; no model is called by the tests.
+
 Checked on OpenCode 1.17.18 (the installed binary, offline, isolated folder; source read from the
 bundled JavaScript of that binary — no model was called):
 
@@ -131,7 +137,8 @@ logger = logging.getLogger(__name__)
 #: The OpenCode build SKAZ verified (ACP config options, ``debug agent``, permission rules). Older
 #: builds are refused; :func:`limits_applied` guards newer ones on every check.
 MIN_OPENCODE_VERSION: Version = (1, 17, 18)
-_VERSION = re.compile(r"^\s*v?(\d+)\.(\d+)\.(\d+)", re.MULTILINE)
+_VERSION = re.compile(r"^\s*(?:opencode\s+)?v?(\d+)\.(\d+)\.(\d+)", re.MULTILINE)
+OPENCODE_V2: Version = (2, 0, 0)
 NAME = "OpenCode"
 NOT_INSTALLED = "OpenCode is not installed."
 NO_PROVIDER = "Sign in to a model provider in OpenCode (opened from SKAZ) to use OpenCode."
@@ -154,10 +161,11 @@ FREE_PROVIDER_NAME = "OpenCode"
 TOOL_PREFIX = f"{MCP_SERVER_NAME}_"
 #: Largest ``setTimeout`` value; OpenCode passes it to the MCP SDK as the per-call timeout.
 MCP_TIMEOUT_MS = 2_147_483_647
-#: Built-in tools of 1.17.18 (``debug agent`` lists the always-present ones; the rest are
-#: experimental or model-dependent). All must be denied; so must any other name.
+#: Built-in tools of v1/v2 (some are experimental or model-dependent).
+#: All must be denied; so must any other name.
 BUILTIN_TOOLS = (
-    "apply_patch", "bash", "batch", "codesearch", "edit", "glob", "grep", "invalid", "list", "lsp",
+    "apply_patch", "bash", "batch", "browser", "codesearch", "edit", "execute", "glob", "grep",
+    "invalid", "list", "lsp",
     "multiedit", "patch", "plan_enter", "plan_exit", "question", "read", "skill", "task", "todoread",
     "todowrite", "webfetch", "websearch", "write",
 )
@@ -242,25 +250,49 @@ def _wildcard(pattern: str, name: str) -> bool:
 
 
 def _decision(rules: Sequence[Mapping[str, Any]], tool: str) -> str:
-    """What OpenCode decides for a whole tool: the last rule whose ``permission`` matches it;
-    a pattern other than ``*`` leaves the tool on (it then asks per argument)."""
+    """Whole-tool decision on normalized v1 rules. A scoped denial cannot reopen a tool;
+    a scoped allow/ask keeps at least part of it available."""
     for rule in reversed(rules):
         if _wildcard(str(rule.get("permission", "")), tool):
-            return str(rule.get("action")) if rule.get("pattern") == "*" else "partial"
+            if rule.get("pattern") == "*":
+                return str(rule.get("action"))
+            if rule.get("action") != "deny":
+                return "partial"
     return "allow"
 
 
 def limits_applied(agent: Mapping[str, Any]) -> bool:
-    """``opencode debug agent skaz`` shows SKAZ's agent with every tool but SKAZ's own off."""
+    """Resolved v1/v2 SKAZ agent: deny all tools except SKAZ's own, including unknown tools."""
     if agent.get("name") != SKAZ_AGENT or agent.get("mode") != "primary":
         return False
-    tools = agent.get("tools")
-    rules = agent.get("permission")
-    if not isinstance(tools, dict) or not isinstance(rules, list):
+    v2 = "permissions" in agent
+    tools = agent.get("tools", {} if v2 else None)
+    raw_rules = agent.get("permissions" if v2 else "permission")
+    if v2 and (agent.get("id") != SKAZ_AGENT or agent.get("hidden")):
+        return False
+    if not isinstance(tools, dict) or not isinstance(raw_rules, list):
         return False
     if any(value is not False for value in tools.values()):
         return False
-    if not all(isinstance(rule, dict) for rule in rules):
+    rules: list[dict[str, str]] = []
+    for rule in raw_rules:
+        if not isinstance(rule, dict):
+            return False
+        permission = rule.get("action" if v2 else "permission")
+        pattern = rule.get("resource" if v2 else "pattern")
+        action = rule.get("effect" if v2 else "action")
+        if (not isinstance(permission, str) or not isinstance(pattern, str)
+                or action not in ("allow", "deny", "ask")):
+            return False
+        rules.append({"permission": permission, "pattern": pattern, "action": action})
+    # v2 omits the tools map. Require the pinned deny-all base, followed only by denials or
+    # grants to the SKAZ namespace, to cover arbitrary other-server tools beyond finite probes.
+    # v1 also appends external_directory grants for its internal output files (not a tool).
+    base = next((i for i in reversed(range(len(rules)))
+                 if rules[i] == {"permission": "*", "pattern": "*", "action": "deny"}), None)
+    if v2 and (base is None or any(rule["action"] != "deny"
+                                  and not rule["permission"].startswith(TOOL_PREFIX)
+                                  for rule in rules[base + 1:])):
         return False
     probes = {*BUILTIN_TOOLS, *tools, "other_server_tool", MCP_SERVER_NAME, "x"}
     if any(_decision(rules, name) != "deny" for name in probes):
@@ -274,13 +306,35 @@ def parse_credentials(text: str) -> tuple[str, ...]:
     Only the ``Credentials`` section counts: the ``Environment`` section lists keys of the
     environment, which SKAZ never passes.
     """
-    names: list[str] = []
-    for raw in _ANSI.sub("", text).splitlines():
+    text = _ANSI.sub("", text)
+    if text.lstrip().startswith("["):
+        try:
+            providers = json.loads(text)
+        except ValueError:
+            return ()
+        if not isinstance(providers, list):
+            return ()
+        names: list[str] = []
+        for provider in providers:
+            if not isinstance(provider, dict):
+                continue
+            connections = provider.get("connections")
+            name = provider.get("id") or provider.get("name")
+            if (isinstance(name, str) and name and isinstance(connections, list)
+                    and any(isinstance(c, dict) and c.get("type") == "credential" for c in connections)):
+                names.append(name)
+        return tuple(dict.fromkeys(names))
+    names = []
+    for raw in text.splitlines():
         line = raw.strip().lstrip("┌│└●◆◇▲■•").strip()
         if not line or line.startswith("Credentials"):
             continue
         if line.startswith("Environment") or _COUNT.fullmatch(line):
             break
+        stored = re.fullmatch(r"(.+?)\s{2,}.+\s+stored", line)
+        if stored:
+            names.append(stored[1].strip())
+            continue
         name, _sep, kind = line.rpartition(" ")
         if kind in _CREDENTIAL_TYPES and name.strip():
             names.append(name.strip())
@@ -288,7 +342,19 @@ def parse_credentials(text: str) -> tuple[str, ...]:
 
 
 def parse_models(text: str) -> list[dict[str, Any]]:
-    """``opencode models --verbose``: ``<provider>/<model>`` then that model's JSON, per model."""
+    """v1 ``models --verbose`` JSON stream or v2 ``api model.list`` JSON envelope/array."""
+    def valid(value: object) -> bool:
+        return (isinstance(value, dict) and isinstance(value.get("id"), str)
+                and isinstance(value.get("providerID"), str) and value.get("enabled") is not False)
+
+    try:
+        catalogue = json.loads(text)
+    except ValueError:
+        catalogue = None
+    if isinstance(catalogue, dict) and "data" in catalogue:
+        catalogue = catalogue["data"]
+    if isinstance(catalogue, list):
+        return [value for value in catalogue if valid(value)]
     decoder = json.JSONDecoder()
     models: list[dict[str, Any]] = []
     position = 0
@@ -302,15 +368,14 @@ def parse_models(text: str) -> list[dict[str, Any]]:
             position = start + 1
             continue
         position = end
-        if (isinstance(value, dict) and isinstance(value.get("id"), str)
-                and isinstance(value.get("providerID"), str)):
+        if isinstance(value, dict) and valid(value):
             models.append(value)
 
 
 def provider_allowed(model_id: str, credentials: Sequence[str]) -> bool:
     """A model SKAZ may use: never OpenCode's free provider unless the user signed in to it."""
     provider = model_id.split("/", 1)[0]
-    return provider != FREE_PROVIDER or FREE_PROVIDER_NAME in credentials
+    return provider != FREE_PROVIDER or any(name.casefold() == FREE_PROVIDER for name in credentials)
 
 
 def free_tier(model: Mapping[str, Any]) -> bool:
@@ -319,6 +384,8 @@ def free_tier(model: Mapping[str, Any]) -> bool:
         return False
     cost = model.get("cost")
     zero = isinstance(cost, Mapping) and not cost.get("input") and not cost.get("output")
+    if isinstance(cost, list) and cost:
+        zero = all(isinstance(c, Mapping) and not c.get("input") and not c.get("output") for c in cost)
     return zero or str(model.get("id", "")).endswith("-free")
 
 
@@ -329,7 +396,12 @@ def model_options(models: Sequence[Mapping[str, Any]], credentials: Sequence[str
         if not provider_allowed(model_id, credentials) or free_tier(model):
             continue
         variants = model.get("variants")
-        efforts = tuple(key for key in variants if key != "default") if isinstance(variants, dict) else ()
+        efforts: tuple[str, ...] = ()
+        if isinstance(variants, dict):
+            efforts = tuple(key for key in variants if key != "default")
+        elif isinstance(variants, list):
+            efforts = tuple(item["id"] for item in variants if isinstance(item, Mapping)
+                            and isinstance(item.get("id"), str) and item["id"] != "default")
         entries.append((model_id, str(model.get("name") or model["id"]), efforts))
     names = [name for _id, name, _efforts in entries]
     def label(model_id: str, name: str) -> str:
@@ -363,10 +435,11 @@ def opencode_prompt(turn: AgentTurn) -> str:
     return prompt
 
 
-def run_config_text(instructions: str) -> str:
+def run_config_text(instructions: str, *, mcp: Mapping[str, Any] | None = None) -> str:
     """The per-run config file: the ``skaz`` agent's prompt, braces escaped (no ``{env:}``/``{file:}``)."""
     prompt = json.dumps(instructions, ensure_ascii=True).replace("{", "\\u007b").replace("}", "\\u007d")
-    return '{"agent": {"' + SKAZ_AGENT + '": {"prompt": ' + prompt + "}}}\n"
+    extra = ', "mcp": ' + json.dumps(mcp) if mcp is not None else ""
+    return '{"agent": {"' + SKAZ_AGENT + '": {"prompt": ' + prompt + "}}" + extra + "}\n"
 
 
 _AUTH_MARKS = ("auth", "api key", "401", "unauthorized", "credential")
@@ -528,6 +601,7 @@ class OpenCodeEngine:
         located = self._locate("opencode")
         if located is None:
             raise SessionDeleteDeferred(NOT_INSTALLED)  # not an attempt: tried again later
+        await self._read_facts(located)
         code, out = await disk_call(self._delete_sync, located, session_id)
         if code != 0 and SESSION_NOT_FOUND not in out:
             raise RuntimeError(f"OpenCode did not delete the session (exit {code}).")
@@ -583,7 +657,9 @@ class OpenCodeEngine:
             raise ValueError("OpenCode replied in an unexpected format.")
         self.sessions_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         temporary = kept.with_suffix(".tmp")
-        temporary.write_text(run_config.read_text(encoding="utf-8"), encoding="utf-8")
+        config = json.loads(run_config.read_text(encoding="utf-8"))
+        # MCP grants are per turn. Keep only the session's original instructions, never its token.
+        temporary.write_text(run_config_text(config["agent"][SKAZ_AGENT]["prompt"]), encoding="utf-8")
         temporary.chmod(0o600)
         os.replace(temporary, kept)
         history = self._read_history()
@@ -642,12 +718,22 @@ class OpenCodeEngine:
             return _Facts(None, False)  # never remembered: asked again next time
         limits = False
         if version >= MIN_OPENCODE_VERSION:
-            code, out = await self._cli(located, "debug", "agent", SKAZ_AGENT)
+            args = ("debug", "agents", "--standalone") if version >= OPENCODE_V2 else (
+                "debug", "agent", SKAZ_AGENT)
+            code, out = await self._cli(located, *args)
             try:
                 agent = json.loads(out) if code == 0 else None
             except ValueError:
                 agent = None
-            limits = isinstance(agent, dict) and limits_applied(agent)
+            if version >= OPENCODE_V2:
+                agents = agent if isinstance(agent, list) else []
+                skaz = [a for a in agents if isinstance(a, dict) and a.get("id") == SKAZ_AGENT]
+                limits = len(skaz) == 1 and limits_applied(skaz[0]) and all(
+                    isinstance(a, dict) and (a.get("id") == SKAZ_AGENT or a.get("hidden")
+                                            or a.get("mode") not in ("primary", "subagent"))
+                    for a in agents)
+            else:
+                limits = isinstance(agent, dict) and limits_applied(agent)
             if not limits:
                 logger.warning("OpenCode %s did not show SKAZ's tool limits (exit %s).",
                                dotted(version), code)
@@ -655,12 +741,21 @@ class OpenCodeEngine:
         self._facts[key] = facts
         return facts
 
+    async def _standalone(self, located: Located) -> tuple[str, ...]:
+        """v2's short CLI commands must not leave a service daemon behind; ACP has no such flag."""
+        facts = await self._read_facts(located)
+        if facts.version is None:
+            raise ValueError(UNREADABLE_NOTE)
+        return ("--standalone",) if facts.version >= OPENCODE_V2 else ()
+
     async def credentials(self) -> tuple[str, ...]:
         """Names of the providers signed in in SKAZ's OpenCode folder (``opencode auth list``)."""
         located = self._locate("opencode")
         if located is None:
             return ()
-        code, out = await self._cli(located, "auth", "list")
+        standalone = await self._standalone(located)
+        format_args = ("--format", "json") if standalone else ()
+        code, out = await self._cli(located, "auth", "list", *format_args, *standalone)
         return parse_credentials(out) if code == 0 else ()
 
     # -- status ---------------------------------------------------------------
@@ -698,7 +793,9 @@ class OpenCodeEngine:
         credentials = await self.credentials()
         if not credentials:
             return ()
-        code, out = await self._cli(located, "models", "--verbose", timeout=max(self._status_timeout, 60.0))
+        standalone = await self._standalone(located)
+        args = ("api", "model.list", *standalone) if standalone else ("models", "--verbose")
+        code, out = await self._cli(located, *args, timeout=max(self._status_timeout, 60.0))
         if code != 0:
             return ()
         models = parse_models(out)
@@ -720,8 +817,10 @@ class OpenCodeEngine:
         self.prepare()
         env = self.environment(located)
         shown = {key: env[key] for key in SHOWN_ENV if key in env}
+        standalone = await self._standalone(located)
         await self._launcher.open(SIGN_IN_NAME, SIGN_IN_TITLE,
-                                  [str(located.binary), "auth", "login"], shown, agent="OpenCode")
+                                  [str(located.binary), "auth", "login", *standalone], shown,
+                                  agent="OpenCode")
 
     def login_progress(self) -> Literal["waiting", "done", "failed"] | None:
         """The sign-in window SKAZ opened: still open, finished, or stopped (``None``: never opened)."""
@@ -734,8 +833,9 @@ class OpenCodeEngine:
         located = self._locate("opencode")
         if located is None:
             raise FileNotFoundError(NOT_INSTALLED)
+        standalone = await self._standalone(located)
         for name in await self.credentials():
-            code, _out = await self._cli(located, "auth", "logout", name)
+            code, _out = await self._cli(located, "auth", "logout", name, *standalone)
             if code != 0:
                 raise ValueError(f"OpenCode didn't sign out of {name}")
         self._facts.clear()
@@ -766,6 +866,11 @@ class OpenCodeEngine:
         """``opencode session delete <id>`` in a worker thread (cancel-safe, unlike ``run_capture``):
         exit code and output (read only for "Session not found"; never logged)."""
         argv = [str(located.binary), "session", "delete", session_id]
+        facts = self._facts.get(self._key(located))
+        if facts is None or facts.version is None:
+            raise ValueError(UNREADABLE_NOTE)
+        if facts.version >= OPENCODE_V2:
+            argv.append("--standalone")
         refuse_sudo(argv)
         process = subprocess.Popen(argv, env=self.environment(located), cwd=str(self.home),
                                    start_new_session=True, stdin=subprocess.DEVNULL,
@@ -788,8 +893,9 @@ class OpenCodeEngine:
         tries = self._read_history()
         for session_id in session_ids:
             try:
+                await self._read_facts(located)
                 code, out = await disk_call(self._delete_sync, located, session_id)
-            except (OSError, subprocess.SubprocessError):
+            except (OSError, TimeoutError, ValueError, subprocess.SubprocessError):
                 code, out = 1, ""
             if code == 0 or SESSION_NOT_FOUND in out:
                 done.add(session_id)
@@ -945,6 +1051,17 @@ class OpenCodeEngine:
                 granted = True
                 servers.append({"type": "http", "name": MCP_SERVER_NAME, "url": access.url,
                                 "headers": [{"name": "Authorization", "value": f"Bearer {access.token}"}]})
+                if facts.version >= OPENCODE_V2:
+                    # ACP's mcpServers schema drops codemode. Set it in OPENCODE_CONFIG instead,
+                    # before OpenCode's codemode defaults plugin can hide SKAZ tools behind execute.
+                    config = json.loads(run_config.read_text(encoding="utf-8"))
+                    run_config = work / "skaz-run.json"
+                    run_config.write_text(run_config_text(config["agent"][SKAZ_AGENT]["prompt"], mcp={
+                        MCP_SERVER_NAME: {"type": "remote", "url": access.url,
+                                          "headers": {"Authorization": f"Bearer {access.token}"},
+                                          "oauth": False, "codemode": False},
+                    }), encoding="utf-8")
+                    run_config.chmod(0o600)
             async with self._acp(located, folder, run_config, active) as connection:
                 events = self._session(turn, prompt, servers, folder, run_config, credentials, connection,
                                        active)
@@ -1131,12 +1248,12 @@ class OpenCodeEngine:
                 continue
             call_id = str(update.get("toolCallId") or "")
             if call_id not in names:
-                title = str(update.get("title") or "")
-                if not title.startswith(TOOL_PREFIX) or len(title) == len(TOOL_PREFIX):
+                raw_name = str(update.get("name") or update.get("title") or "")
+                if not raw_name.startswith(TOOL_PREFIX) or len(raw_name) == len(TOOL_PREFIX):
                     refused("opencode", "tool")
                     yield None
                     return
-                names[call_id] = title[len(TOOL_PREFIX):]
+                names[call_id] = raw_name[len(TOOL_PREFIX):]
             raw = update.get("rawInput")
             status = update.get("status")
             finished = kind == "tool_call_update" and status in ("completed", "failed")
