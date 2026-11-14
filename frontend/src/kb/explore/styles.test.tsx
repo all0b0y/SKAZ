@@ -65,6 +65,10 @@ describe('Explore styles — every class is drawn, and every rule is used', () =
 });
 
 describe('Explore styles — what the decisions say the screen must not do', () => {
+  it('keeps both split-button halves at the same height beside the taller new-folder form', () => {
+    expect(rule(v2, '.kb-ex-split')).toMatch(/align-self:\s*flex-start/);
+  });
+
   it('UX-4: the find bar has no frame and no highlight', () => {
     const field = rule(v2, '.kb-ex-bar__field');
     expect(field).not.toMatch(/(^|[;\s])border(-(top|right|bottom|left|width|style|color))?\s*:|outline|box-shadow/);

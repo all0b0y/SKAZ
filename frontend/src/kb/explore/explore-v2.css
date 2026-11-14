@@ -877,6 +877,7 @@ button.kb-ex-chip:active {
 .kb-ex-split {
   display: inline-flex;
   align-items: stretch;
+  align-self: flex-start;
   flex: none;
 }
 
