@@ -67,18 +67,26 @@ export function ExploreSection({
   const notes = services?.notifications ?? null;
   useEffect(() => {
     if (!notes || hidden) return undefined;
-    const dropSeen = (): void => {
+    let seenNoteIds = new Set(notes.getState().items.map((n) => n.id));
+    const onNotes = (): void => {
+      const items = notes.getState().items;
+      let finishedArrived = false;
+      for (const n of items) {
+        if (!seenNoteIds.has(n.id) && n.kind === 'explore_finished') finishedArrived = true;
+      }
+      seenNoteIds = new Set(items.map((n) => n.id));
+      if (finishedArrived) void store.getState().refresh();
       const page = store.getState().page;
       if (page.kind !== 'search') return;
-      for (const n of notes.getState().items) {
+      for (const n of items) {
         const jobId = n.payload?.job_id;
         if (n.kind !== 'explore_finished' || typeof jobId !== 'string' || jobId !== page.id) continue;
         void notes.getState().dismiss(n.id);
       }
     };
-    dropSeen();
-    const stopNotes = notes.subscribe(dropSeen);
-    const stopPage = store.subscribe(dropSeen);
+    onNotes();
+    const stopNotes = notes.subscribe(onNotes);
+    const stopPage = store.subscribe(onNotes);
     return () => { stopNotes(); stopPage(); };
   }, [notes, store, hidden]);
 
@@ -189,14 +197,20 @@ export function ExploreSection({
   };
 
   /** Discuss opens the chat the backend made from the paper's card — the chat itself, not the section behind it. */
-  const discuss = (chatId: string) => {
+  const discuss = (chatId: string, material?: { id: string; title: string } | null) => {
     if (!services) return;
-    const { prefs, ui, chats } = services;
+    const { prefs, ui, chats, composer } = services;
     prefs.getState().set({ section: 'chats', sideOpen: true });
     if (ui.getState().docExpanded) ui.getState().toggleDocExpanded();
     ui.getState().showCenter('chat');
     void chats.getState().loadList();
     chats.getState().open(chatId);
+    if (material) {
+      composer.getState().push(
+        [{ kind: 'mention', ref: { type: 'material', id: material.id, title: material.title } }],
+        { focus: true },
+      );
+    }
   };
 
   /** FX-5: «Edit words and search again» starts the new run and opens it as this page's search. */

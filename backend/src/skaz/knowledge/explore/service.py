@@ -1092,7 +1092,9 @@ class ExploreFunnel:
         collected = await disk_call(self._candidates, run.id)
         while pending:
             if budget.remaining == 0:
+                await self._enrich_checked(run)
                 await self._stop(run.id, "budget")
+                await self._notify_finished(run)
                 return False
             batch = pending[: min(NOVELTY_BATCH, budget.remaining)]
             works = [KbScienceWork.model_validate(collected[cid]["work"]) for cid in batch]
@@ -1187,6 +1189,9 @@ class ExploreFunnel:
         neither an open text nor a real abstract is dropped («no text»). Paid works worth reading also get
         B1's one-time check for a free copy (decision 3c″)."""
         await self._progress(run, "ready")
+        await self._enrich_checked(run)
+
+    async def _enrich_checked(self, run: RunRow) -> None:
         done = set(await disk_call(self.job_store.completed, run.id, "ready"))
         for row in await disk_call(self.store.run_findings, run.id):
             if row.id in done or row.label == "covered":
@@ -1206,10 +1211,13 @@ class ExploreFunnel:
 
     async def _finish(self, run: RunRow) -> None:
         await self._progress(run, "ready")
-        job = await disk_call(self.job_store.stop, run.id, "completed")
-        owner = job.owner
-        if owner == "explore" and not run.request.get("free_only"):
-            counters = job.counters
+        await disk_call(self.job_store.stop, run.id, "completed")
+        await self._notify_finished(run)
+
+    async def _notify_finished(self, run: RunRow) -> None:
+        job = await disk_call(self._job, run.id)
+        if job.owner == "explore" and not run.request.get("free_only"):
+            counters = await disk_call(self._counters, run.id)
             await disk_call(
                 self.kb.notify,
                 "explore_finished",

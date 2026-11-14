@@ -17,10 +17,9 @@ function fakeExplore(overrides: Partial<ExploreClient> = {}): ExploreClient {
 }
 
 describe('DiscussPaperBar (FX-3)', () => {
-  it('shows card note and Add to materials button when paper is not in materials yet, then upgrades to Open material', async () => {
+  it('shows card note and Add to materials button when paper is not in materials yet, then hides once added', async () => {
     const explore = fakeExplore();
     const onAdded = vi.fn();
-    const onOpenMaterial = vi.fn();
     render(
       <DiscussPaperBar
         finding={{
@@ -31,12 +30,11 @@ describe('DiscussPaperBar (FX-3)', () => {
         }}
         explore={explore}
         onAdded={onAdded}
-        onOpenMaterial={onOpenMaterial}
       />,
     );
 
     expect(screen.getByText('Mixture of Experts Scaling Laws')).toBeInTheDocument();
-    expect(screen.getByText(/Discussing paper card/i)).toBeInTheDocument();
+    expect(screen.getByText(/Discussing card:/i)).toBeInTheDocument();
 
     const addBtn = screen.getByRole('button', { name: 'Add to materials' });
     fireEvent.click(addBtn);
@@ -46,14 +44,10 @@ describe('DiscussPaperBar (FX-3)', () => {
       expect(onAdded).toHaveBeenCalledWith('mat-42');
     });
 
-    const openBtn = await screen.findByRole('button', { name: 'Open material' });
-    expect(screen.getByText(/full text in Materials/i)).toBeInTheDocument();
-    fireEvent.click(openBtn);
-    expect(onOpenMaterial).toHaveBeenCalledWith('mat-42');
+    expect(screen.queryByRole('region', { name: 'Discussed paper' })).not.toBeInTheDocument();
   });
 
-  it('renders Open material immediately when finding already has material_id', () => {
-    const onOpenMaterial = vi.fn();
+  it('renders nothing when finding already has material_id (it is referenced via @ in the composer)', () => {
     render(
       <DiscussPaperBar
         finding={{
@@ -62,12 +56,9 @@ describe('DiscussPaperBar (FX-3)', () => {
           material_id: 'mat-99',
           importing: false,
         }}
-        onOpenMaterial={onOpenMaterial}
       />,
     );
 
-    expect(screen.getByText(/full text in Materials/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open material' }));
-    expect(onOpenMaterial).toHaveBeenCalledWith('mat-99');
+    expect(screen.queryByRole('region', { name: 'Discussed paper' })).not.toBeInTheDocument();
   });
 });

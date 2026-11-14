@@ -214,14 +214,6 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         {chat && <ChatOverviewButton chatId={chat.id} />}
         {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)} />}
       </header>
-      {discussFinding && (
-        <DiscussPaperBar
-          finding={discussFinding}
-          onAdded={() => { if (currentId) void chats.getState().load(currentId); }}
-          onOpenMaterial={(id) => openDoc({ type: 'material', id })}
-          onNotice={setNotice}
-        />
-      )}
       {notice && <p className="kb-notice" role="status">{notice}</p>}
       <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={fieldStill} calm={fieldCalm}>
       {showBackdrop && <ChatBackdrop working={isAnswering(chat)} active={!hidden} reduced={reduced} />}
@@ -267,6 +259,14 @@ export function ChatView({ hidden }: { hidden: boolean }) {
                 : 'Ask about your materials. Type @ to point at a page, a material or a chat.'}
           </p>
         </div>
+      )}
+      {discussFinding && !discussFinding.material_id && (
+        <DiscussPaperBar
+          finding={discussFinding}
+          onAdded={() => { if (currentId) void chats.getState().load(currentId); }}
+          onOpenMaterial={(id) => openDoc({ type: 'material', id })}
+          onNotice={setNotice}
+        />
       )}
       <Composer chatId={currentId}
         placeholder={waitingHint(chat) ?? (recording ? 'Ask about the lecture · @ to reference' : 'Ask about your materials · @ to reference')} />

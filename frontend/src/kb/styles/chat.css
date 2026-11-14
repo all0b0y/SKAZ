@@ -341,6 +341,48 @@
 .kb-interrupt__text p { color: var(--kb-text); font-size: var(--t-sm); }
 
 /* ---- Message field ---- */
+.kb-discuss-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kb-sp-8);
+  margin: 0 var(--kb-sp-18) var(--kb-sp-6);
+  padding: var(--kb-sp-6) var(--kb-sp-10);
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-md);
+  background: var(--kb-bg);
+  font-size: var(--t-xs);
+  min-width: 0;
+}
+.kb-discuss-bar__icon {
+  flex: none;
+  color: var(--kb-muted);
+}
+.kb-discuss-bar__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--kb-sp-6);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.kb-discuss-bar__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--kb-muted-strong);
+}
+.kb-discuss-bar__title {
+  color: var(--kb-text);
+  font-weight: 600;
+}
+.kb-discuss-bar__note {
+  flex: none;
+  color: var(--kb-muted);
+}
+
 .kb-composer {
   flex: none;
   position: relative;

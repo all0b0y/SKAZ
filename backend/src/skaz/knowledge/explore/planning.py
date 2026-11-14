@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 from ..api.contract_routes import ContractFailure
 from ..api.schemas_explore import KbSearchPlan, KbSearchPlanItem, KbSearchPlanRequest
+from ..areas.mapping import _term as clean_term
 from ..errors import NotFound
 from ..store.database import KnowledgeDatabase
 
@@ -17,7 +18,14 @@ TERM_CHARS = 72
 
 def terms_of(values: Sequence[str]) -> list[str]:
     """Canonical, bounded topic words, retaining their order (never material or chat bodies)."""
-    return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+    cleaned = [clean_term(value)[:TERM_CHARS] for value in values if value.strip()]
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in cleaned:
+        if item and item.casefold() not in seen:
+            seen.add(item.casefold())
+            result.append(item)
+    return result
 
 
 class SearchPlanner:

@@ -358,3 +358,34 @@ async def test_query_agent_filters_non_words_identifiers_and_instructions(parts:
     assert plan.terms == tuple(valid[:6]) and plan.title == "A title"
     assert len(engine.turns) == 1
 
+
+def test_planner_terms_strip_parenthesized_glosses_and_deduplicate() -> None:
+    from skaz.knowledge.explore.planning import terms_of
+
+    cleaned = terms_of([
+        "Agent security",
+        "Agent security analysis (Подход к разбору и защите агентской системы)",
+        "Agent security architecture (Агентская защита)",
+        "AI controller (ИИ-контролёр)",
+        "agent security",
+    ])
+    assert cleaned == [
+        "Agent security",
+        "Agent security analysis",
+        "Agent security architecture",
+        "AI controller",
+    ]
+
+
+async def test_budget_pause_enriches_checked_findings_and_notifies(parts: SimpleNamespace) -> None:
+    parts.science.search_works = [work(n, topics=["T1"], abstract=REAL_ABSTRACT) for n in range(1, 36)]
+    run = await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
+    assert (run.state, run.stop_reason) == ("paused", "budget")
+    findings = [f for g in (await parts.funnel.findings(run_id=run.id)).groups for f in g.findings]
+    assert len(findings) == 30
+    assert all(f.access == "open" and f.read_url for f in findings)
+    notes = [n for n in parts.kb.notifications() if n.kind == "explore_finished"]
+    assert len(notes) == 1 and notes[0].payload["job_id"] == run.id
+    assert "30 new" in notes[0].body
+
+

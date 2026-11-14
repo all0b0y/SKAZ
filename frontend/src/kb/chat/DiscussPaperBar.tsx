@@ -17,7 +17,6 @@ export function DiscussPaperBar({
   finding,
   explore: givenExplore,
   onAdded,
-  onOpenMaterial,
   onNotice,
 }: DiscussPaperBarProps) {
   const services = useOptionalServices();
@@ -29,6 +28,8 @@ export function DiscussPaperBar({
     setBusy(Boolean(finding.importing));
   }, [finding.finding_id, finding.material_id, finding.importing]);
 
+  if (materialId) return null;
+
   const add = async () => {
     const client = givenExplore ?? (services ? createExploreClient(services.client) : null);
     if (!client || busy) return;
@@ -37,6 +38,12 @@ export function DiscussPaperBar({
       const res = await client.add_to_materials(finding.finding_id);
       const nextId = res.material_id ?? null;
       setMaterialId(nextId);
+      if (nextId && services) {
+        services.composer.getState().push(
+          [{ kind: 'mention', ref: { type: 'material', id: nextId, title: finding.title } }],
+          { focus: true },
+        );
+      }
       onAdded?.(nextId);
     } catch (error) {
       onNotice?.(errorText(error));
@@ -47,31 +54,25 @@ export function DiscussPaperBar({
 
   return (
     <div className="kb-discuss-bar" role="region" aria-label="Discussed paper">
-      <Icon name="materials" size={14} />
+      <Icon name="materials" size={14} className="kb-discuss-bar__icon" />
       <div className="kb-discuss-bar__text">
-        <strong className="kb-discuss-bar__title">{finding.title}</strong>
+        <span className="kb-discuss-bar__label">
+          Discussing card: <strong className="kb-discuss-bar__title">{finding.title}</strong>
+        </span>
         <span className="kb-discuss-bar__note">
-          {materialId
-            ? 'Discussing paper · full text in Materials'
-            : 'Discussing paper card · add to materials for full text'}
+          (abstract only · add to materials for full text)
         </span>
       </div>
-      {materialId ? (
-        <Button size="sm" onClick={() => onOpenMaterial?.(materialId)}>
-          Open material
-        </Button>
-      ) : (
-        <Button
-          size="sm"
-          variant="fill"
-          icon="plus"
-          busy={busy}
-          disabled={busy}
-          onClick={() => void add()}
-        >
-          {busy ? 'Importing…' : 'Add to materials'}
-        </Button>
-      )}
+      <Button
+        size="sm"
+        variant="fill"
+        icon="plus"
+        busy={busy}
+        disabled={busy}
+        onClick={() => void add()}
+      >
+        {busy ? 'Importing…' : 'Add to materials'}
+      </Button>
     </div>
   );
 }

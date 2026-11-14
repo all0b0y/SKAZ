@@ -139,6 +139,9 @@ export function watchSearches(store: StoreApi<ExploreState>): () => void {
 export function searchStatus(search: KbSearch): { text: string; tone: 'run' | 'new' | 'quiet' | 'stop' } {
   if (search.state === 'running') return { text: search.found > 0 ? `${search.found} found…` : 'Searching…', tone: 'run' };
   if (search.state === 'queued') return { text: 'Waiting', tone: 'quiet' };
+  if (search.state === 'paused' && search.stop_reason === 'budget' && search.unseen > 0) {
+    return { text: `+${search.unseen}`, tone: 'new' };
+  }
   if (search.state === 'paused') return { text: 'Paused', tone: 'stop' };
   if (search.state === 'error') return { text: 'Failed', tone: 'stop' };
   if (search.unseen > 0) return { text: `+${search.unseen}`, tone: 'new' };

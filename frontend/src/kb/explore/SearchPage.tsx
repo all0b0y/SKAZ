@@ -99,7 +99,7 @@ export interface SearchPageProps {
   /** A menu of this page is open (true) or closed (false); it switches itself off when the page goes away. */
   onCovered: (covered: boolean) => void;
   onChanged: () => void;
-  onDiscuss: (chatId: string) => void;
+  onDiscuss: (chatId: string, material?: { id: string; title: string } | null) => void;
   onOpenDocument: (target: DocTarget) => void;
   onOpenSettings: (section?: SettingsSection) => void;
   toast: Toast;
@@ -227,8 +227,10 @@ export function SearchPage(props: SearchPageProps) {
 
   const discuss = (f: KbFinding) => act(async () => {
     const talk = await explore.discuss(f.id);
-    replace({ ...f, discuss_chat_id: talk.chat_id });
-    props.onDiscuss(talk.chat_id);
+    const matId = talk.material_id ?? f.material_id ?? null;
+    replace({ ...f, discuss_chat_id: talk.chat_id, ...(matId ? { material_id: matId } : {}) });
+    if (matId) props.onDiscuss(talk.chat_id, { id: matId, title: f.work.title });
+    else props.onDiscuss(talk.chat_id);
   });
 
   const openInBrowser = (f: KbFinding) => {
@@ -294,11 +296,25 @@ function Progress({ search, limit, steps, onSteps, busy, onResume, onPause, onOp
     return <p className="kb-ex-funnel">Waiting — {limit} searches are already running.</p>;
   }
   if (search.state === 'running') {
-    // FX-5: a live line of steps instead of a bare «step N of 5» — where the search stands, with its
-    // English terms and its fit/novelty counters, so the wait reads as work being done.
+    const list = liveSteps(search);
+    const activeIndex = list.findIndex((s) => s.on);
+    const active = list[activeIndex] ?? list[0]!;
     return <div className="kb-ex-progress" role="status">
+      <div className="kb-ex-progress__top">
+        <span className="kb-ex-progress__summary">
+          <b>Step {activeIndex + 1} of {list.length} · {active.title}</b>
+        </span>
+        <Button size="sm" variant="quiet" disabled={busy} onClick={onPause}>Stop</Button>
+      </div>
+      <div className="kb-ex-bars" aria-hidden="true">
+        {list.map((s) => (
+          <div key={s.title} className={`kb-ex-bar-seg${s.done ? ' is-done' : ''}${s.on ? ' is-on' : ''}`}>
+            {s.on && <span />}
+          </div>
+        ))}
+      </div>
       <ol className="kb-ex-live" aria-label="Search steps">
-        {liveSteps(search).map((s) => (
+        {list.map((s) => (
           <li key={s.title} className={`kb-ex-live__step${s.done ? ' is-done' : ''}${s.on ? ' is-on' : ''}`}
             aria-current={s.on ? 'step' : undefined}>
             {s.done && <Icon name="check" size={12} />}
@@ -307,15 +323,21 @@ function Progress({ search, limit, steps, onSteps, busy, onResume, onPause, onOp
           </li>
         ))}
       </ol>
-      <Button size="sm" variant="quiet" disabled={busy} onClick={onPause}>Stop</Button>
     </div>;
   }
   if (search.state === 'paused' || search.state === 'error') {
     const stop = STOP_TEXT[search.stop_reason ?? (search.state === 'error' ? 'failed' : 'user_pause')] ?? STOP_TEXT.user_pause!;
-    return <div className="kb-ex-stop" role="alert">
-      <span>{stop.text}</span>
+    const isBudgetBatch = search.state === 'paused' && search.stop_reason === 'budget' && search.new > 0;
+    const remaining = Math.max((search.fit ?? 0) - (search.novelty_checked ?? 0), 0);
+    return <div className={`kb-ex-stop${isBudgetBatch ? ' is-batch' : ''}`} role="alert">
+      <span>
+        {isBudgetBatch && <><b>{search.new} new papers ready</b> · {search.found} found → {search.fit} fit{remaining > 0 ? ` (${remaining} more fit)` : ''} · </>}
+        {stop.text}
+      </span>
       {stop.settings && <Button size="sm" onClick={() => onOpenSettings(stop.settings === true ? 'search' : stop.settings)}>Open Settings</Button>}
-      {stop.resume && search.checkpoint_id && <Button size="sm" disabled={busy} onClick={onResume}>{stop.resume}</Button>}
+      {stop.resume && search.checkpoint_id && (
+        <Button size="sm" disabled={busy} onClick={onResume}>{stop.resume}</Button>
+      )}
     </div>;
   }
   const when = shortDate(search.updated_at);

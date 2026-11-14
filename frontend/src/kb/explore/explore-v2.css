@@ -177,6 +177,18 @@
   font-size: var(--t-sm);
 }
 
+.kb-ex-stop.is-batch {
+  justify-content: space-between;
+  border: 1px solid var(--kb-ex-line);
+  background: var(--kb-ex-tint);
+  color: var(--kb-muted-strong);
+}
+
+.kb-ex-stop.is-batch b {
+  color: var(--kb-text);
+  font-weight: 600;
+}
+
 .kb-ex-stop--page {
   flex: none;
   margin: var(--kb-sp-8) var(--kb-sp-14) 0;
@@ -520,10 +532,59 @@ button.kb-ex-chip:active {
 
 .kb-ex-progress {
   display: flex;
-  align-items: center;
-  gap: var(--kb-sp-10);
+  flex-direction: column;
+  gap: var(--kb-sp-8);
+  padding: var(--kb-sp-10) var(--kb-sp-12);
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-md);
+  background: var(--kb-bg);
   font-size: var(--t-sm);
   color: var(--kb-muted-strong);
+}
+
+.kb-ex-progress__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kb-sp-10);
+  min-width: 0;
+}
+
+.kb-ex-progress__summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-ex-progress__summary b {
+  color: var(--kb-text);
+  font-weight: 600;
+}
+
+.kb-ex-bars {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--kb-sp-6);
+}
+
+.kb-ex-bar-seg {
+  height: 4px;
+  border-radius: var(--kb-r-2xs);
+  background: var(--kb-accent-soft);
+  overflow: hidden;
+}
+
+.kb-ex-bar-seg.is-done {
+  background: var(--kb-text);
+}
+
+.kb-ex-bar-seg.is-on > span {
+  display: block;
+  height: 100%;
+  width: 60%;
+  background: var(--kb-text);
 }
 
 /* FX-5: the live line of steps while a search runs — the active step bold, the finished ones checked,
@@ -538,6 +599,7 @@ button.kb-ex-chip:active {
   margin: 0;
   padding: 0;
   list-style: none;
+  font-size: var(--t-xs);
 }
 
 .kb-ex-live__step {
