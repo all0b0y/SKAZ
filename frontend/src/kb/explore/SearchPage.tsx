@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import type { KbFinding, KbSearch } from '../../api/kb/types.gen';
+import type { KbFinding, KbFolder, KbSearch } from '../../api/kb/types.gen';
 import type { ExploreClient } from '../api/explore';
 import type { DocTarget } from '../state/document';
 import { EXPLORE_LIST_MAX, EXPLORE_LIST_MIN } from '../state/prefs';
@@ -103,6 +103,12 @@ export interface SearchPageProps {
   onOpenDocument: (target: DocTarget) => void;
   onOpenSettings: (section?: SettingsSection) => void;
   toast: Toast;
+  /** F6: the library's folders — Add to materials can land the paper in one of them. */
+  folders?: ReadonlyArray<KbFolder>;
+  /** F6: moves the material the paper became into a folder (PATCH /kb/materials/{id}). */
+  onMoveMaterial?: (materialId: string, folderId: string) => Promise<void>;
+  /** F6: makes a folder right from the add menu; null when the backend refused the name. */
+  onCreateFolder?: (name: string) => Promise<{ id: string; name: string } | null>;
 }
 
 export function SearchPage(props: SearchPageProps) {
@@ -116,6 +122,10 @@ export function SearchPage(props: SearchPageProps) {
   const [busy, setBusy] = useState(false);
   /** FX-2: the paper whose Add to materials request is on its way (its button says Importing…). */
   const [adding, setAdding] = useState<string | null>(null);
+  /** F6: the folder the papers of this page land in — From Explore until the user picks another. */
+  const [targetFolder, setTargetFolder] = useState<{ id: string; name: string }>({ id: 'fld-explore', name: 'From Explore' });
+  /** F6: where each added paper actually landed (finding id → folder name). */
+  const [materialFolders, setMaterialFolders] = useState<Record<string, string>>({});
   const generation = useRef(0);
 
   useEffect(() => () => onCovered(false), [onCovered]);
@@ -180,20 +190,39 @@ export function SearchPage(props: SearchPageProps) {
   };
 
   /** FX-2: the paper goes to Materials — its PDF or open text when there is one, else the real abstract,
-   * else just the link. A big import continues in the background; the button says Importing… until then. */
-  const addToMaterials = (f: KbFinding) => {
+   * else just the link. A big import continues in the background; the button says Importing… until then.
+   * F6: it can land in a folder the user picked; From Explore is where it goes by default. */
+  const addToMaterials = (f: KbFinding, targetFolderId?: string, targetFolderName?: string) => {
     if (busy || adding !== null) return;
     setAdding(f.id);
     void act(async () => {
       try {
         const added = await explore.add_to_materials(f.id);
+        // A folder the user picked takes the material there; From Explore is where the backend puts it.
+        if (targetFolderId && targetFolderId !== 'fld-explore' && added.material_id && props.onMoveMaterial) {
+          await props.onMoveMaterial(added.material_id, targetFolderId);
+        }
+        const folderName = targetFolderName ?? 'From Explore';
+        setMaterialFolders((prev) => ({ ...prev, [f.id]: folderName }));
         replace({ ...f, state: added.importing ? 'importing' : 'materials', material_id: added.material_id ?? null,
           importing: added.importing ?? false, imported_content: added.content ?? null });
         onChanged();
-        toast({ text: `Added to Materials › From Explore${importNote(added.content)} · not in the wiki yet`, tone: 'done' });
+        toast({ text: `Added to Materials › ${folderName}${importNote(added.content)} · not in the wiki yet`, tone: 'done' });
       } finally {
         setAdding(null);
       }
+    });
+  };
+
+  /** F6: a paper already in Materials moves to another folder; the plaque and the toast name it. */
+  const moveMaterial = (f: KbFinding, folderId: string, folderName: string) => {
+    const move = props.onMoveMaterial;
+    const materialId = f.material_id;
+    if (!move || !materialId) return;
+    void act(async () => {
+      await move(materialId, folderId);
+      setMaterialFolders((prev) => ({ ...prev, [f.id]: folderName }));
+      toast({ text: `Moved to Materials › ${folderName}`, tone: 'done' });
     });
   };
 
@@ -278,9 +307,16 @@ export function SearchPage(props: SearchPageProps) {
           min={EXPLORE_LIST_MIN} max={EXPLORE_LIST_MAX} direction={1} onChange={props.onListWidth} />
         <section className="kb-ex-reader" aria-label="Paper">
           <ReaderHead f={open} busy={busy} importing={adding === open.id || open.state === 'importing' || open.importing === true}
-            onClose={() => setOpen(null)} onAdd={() => addToMaterials(open)}
+            folders={props.folders ?? []} targetFolder={targetFolder} folderName={materialFolders[open.id] ?? 'From Explore'}
+            onCreateFolder={props.onCreateFolder}
+            onPickFolder={(id, name) => setTargetFolder({ id, name })}
+            onAdd={(folderId, folderName) => addToMaterials(open, folderId, folderName)}
+            onMove={props.onMoveMaterial && open.material_id
+              ? (folderId, folderName) => moveMaterial(open, folderId, folderName)
+              : undefined}
+            onClose={() => setOpen(null)}
             onDiscuss={() => void discuss(open)} onBrowser={() => openInBrowser(open)} onDismiss={() => void dismiss(open)}
-            onRestore={() => void restore(open)} onOpenDocument={props.onOpenDocument} />
+            onRestore={() => void restore(open)} onOpenDocument={props.onOpenDocument} onCovered={onCovered} />
           <PaperReader url={pageUrl(open)} covered={props.covered} />
         </section>
       </>}
@@ -423,12 +459,92 @@ function Row({ f, open, importing, onOpen, onRestore }: {
   );
 }
 
-function ReaderHead({ f, busy, importing, onClose, onAdd, onDiscuss, onBrowser, onDismiss, onRestore, onOpenDocument }: {
-  f: KbFinding; busy: boolean; importing: boolean; onClose: () => void; onAdd: () => void; onDiscuss: () => void;
-  onBrowser: () => void; onDismiss: () => void; onRestore: () => void; onOpenDocument: (target: DocTarget) => void;
+function ReaderHead({ f, busy, importing, folders, targetFolder, folderName, onCreateFolder, onPickFolder, onAdd, onMove,
+  onClose, onDiscuss, onBrowser, onDismiss, onRestore, onOpenDocument, onCovered }: {
+  f: KbFinding; busy: boolean; importing: boolean;
+  /** F6: the library's folders — the caret's menu picks one to add the paper into (or makes a new one). */
+  folders: ReadonlyArray<KbFolder>;
+  /** F6: the folder the next add goes to — From Explore until the user picks another. */
+  targetFolder: { id: string; name: string };
+  /** F6: the folder this paper landed in; From Explore when nothing else is known. */
+  folderName: string;
+  /** F6: given when the section can create folders — the menu shows «New folder…». */
+  onCreateFolder?: (name: string) => Promise<{ id: string; name: string } | null>;
+  onPickFolder: (id: string, name: string) => void;
+  onAdd: (folderId?: string, folderName?: string) => void;
+  onMove: ((folderId: string, folderName: string) => void) | undefined;
+  onClose: () => void; onDiscuss: () => void; onBrowser: () => void; onDismiss: () => void; onRestore: () => void;
+  onOpenDocument: (target: DocTarget) => void; onCovered: (covered: boolean) => void;
 }) {
   const state = f.state ?? 'new';
   const why = f.new_line ?? f.reason;
+  // F6: the split button's folder menu, and the menu that moves an added paper elsewhere.
+  const folderBtnRef = useRef<HTMLButtonElement | null>(null);
+  const moveBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [folderMenuOpen, setFolderMenuOpen] = useState(false);
+  const [moveMenuOpen, setMoveMenuOpen] = useState(false);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  // Another paper takes the menus with it: nothing stays open across the switch.
+  useEffect(() => {
+    setFolderMenuOpen(false);
+    setMoveMenuOpen(false);
+  }, [f.id]);
+  // A menu is drawn in the page, so the paper's native view must not sit over it (as in Filters).
+  useEffect(() => {
+    onCovered(folderMenuOpen || moveMenuOpen);
+    return () => onCovered(false);
+  }, [folderMenuOpen, moveMenuOpen, onCovered]);
+
+  const otherFolders = folders.filter((x) => x.id !== 'fld-explore');
+  const addItems = useMemo<MenuItem[]>(() => [
+    {
+      id: 'fld-explore', label: 'From Explore', icon: 'inbox',
+      note: targetFolder.id === 'fld-explore' ? 'Current' : undefined,
+      onSelect: () => { onPickFolder('fld-explore', 'From Explore'); onAdd('fld-explore', 'From Explore'); },
+    },
+    ...otherFolders.map((folder) => ({
+      id: folder.id, label: folder.name, icon: 'folder' as const,
+      onSelect: () => { onPickFolder(folder.id, folder.name); onAdd(folder.id, folder.name); },
+    })),
+    ...(onCreateFolder ? [{
+      id: '__new', label: 'New folder…', icon: 'folderPlus' as const,
+      onSelect: () => { setNewFolderName(''); setCreateError(null); setCreatingFolder(true); },
+    }] : []),
+  ], [otherFolders, targetFolder.id, onPickFolder, onAdd, onCreateFolder]);
+  const moveItems = useMemo<MenuItem[]>(() => [
+    {
+      id: 'fld-explore', label: 'From Explore', icon: 'inbox',
+      note: folderName === 'From Explore' ? 'Current' : undefined,
+      onSelect: () => onMove?.('fld-explore', 'From Explore'),
+    },
+    ...otherFolders.map((folder) => ({
+      id: folder.id, label: folder.name, icon: 'folder' as const,
+      note: folderName === folder.name ? 'Current' : undefined,
+      onSelect: () => onMove?.(folder.id, folder.name),
+    })),
+  ], [otherFolders, folderName, onMove]);
+
+  /** «New folder…»: make the folder, then the paper goes straight into it. */
+  const submitNewFolder = (event: FormEvent) => {
+    event.preventDefault();
+    const name = newFolderName.trim();
+    if (!name || busy || importing || creating || !onCreateFolder) return;
+    setCreating(true);
+    onCreateFolder(name).then((created) => {
+      setCreating(false);
+      if (!created) { setCreateError('Couldn’t create the folder. Try another name.'); return; }
+      setCreatingFolder(false);
+      setNewFolderName('');
+      setCreateError(null);
+      onPickFolder(created.id, created.name);
+      onAdd(created.id, created.name);
+    }).catch(() => { setCreating(false); setCreateError('Couldn’t create the folder. Try another name.'); });
+  };
+  const cancelNewFolder = () => { setCreatingFolder(false); setNewFolderName(''); setCreateError(null); };
+
   return (
     <header className="kb-ex-reader__head">
       <div className="kb-ex-reader__top">
@@ -451,15 +567,43 @@ function ReaderHead({ f, busy, importing, onClose, onAdd, onDiscuss, onBrowser, 
       {state === 'materials' ? (
         <div className="kb-ex-instate">
           <Icon name="check" size={14} />
-          <span>In Materials › From Explore{importNote(f.imported_content)} · not in the wiki</span>
+          <span>In Materials › {folderName}{importNote(f.imported_content)} · not in the wiki</span>
+          {onMove && f.material_id && folders.length > 0 && <>
+            <button ref={moveBtnRef} type="button" className="kb-ex-move" aria-label="Move to folder" aria-haspopup="menu"
+              aria-expanded={moveMenuOpen} disabled={busy} onClick={() => setMoveMenuOpen((v) => !v)}>
+              Folder: {folderName}<Icon name="chevronDown" size={12} />
+            </button>
+            <Menu open={moveMenuOpen} onClose={() => setMoveMenuOpen(false)} anchorRef={moveBtnRef}
+              placement="bottom-start" label="Move to folder" items={moveItems} />
+          </>}
           {f.material_id && <Button size="sm" onClick={() => onOpenDocument({ type: 'material', id: f.material_id! })}>Open</Button>}
           <Button size="sm" disabled={busy} onClick={onDiscuss}>Discuss</Button>
         </div>
       ) : (
         <div className="kb-ex-acts">
-          <Button size="sm" variant="fill" icon="plus" disabled={busy || importing} busy={importing} onClick={onAdd}>
-            {importing ? 'Importing…' : 'Add to materials'}
-          </Button>
+          <span className="kb-ex-split">
+            <Button size="sm" variant="fill" icon="plus" disabled={busy || importing} busy={importing}
+              onClick={() => onAdd(targetFolder.id, targetFolder.name)}>
+              {importing ? 'Importing…' : targetFolder.id === 'fld-explore' ? 'Add to materials' : `Add to «${targetFolder.name}»`}
+            </Button>
+            <button ref={folderBtnRef} type="button" className="kb-ex-split__caret" aria-label="Choose folder for material"
+              aria-haspopup="menu" aria-expanded={folderMenuOpen} disabled={busy || importing}
+              onClick={() => setFolderMenuOpen((v) => !v)}>
+              <Icon name="chevronDown" size={12} />
+            </button>
+          </span>
+          <Menu open={folderMenuOpen} onClose={() => setFolderMenuOpen(false)} anchorRef={folderBtnRef}
+            placement="bottom-start" label="Add to folder" items={addItems} />
+          {creatingFolder && (
+            <form className="kb-ex-newfolder" onSubmit={submitNewFolder}>
+              <TextField label="New folder name" value={newFolderName} maxLength={200} autoFocus error={createError}
+                onChange={(e) => setNewFolderName(e.target.value)} />
+              <Button size="sm" variant="fill" type="submit" disabled={!newFolderName.trim() || busy || importing || creating}>
+                Create &amp; add
+              </Button>
+              <Button size="sm" type="button" disabled={creating} onClick={cancelNewFolder}>Cancel</Button>
+            </form>
+          )}
           <Button size="sm" icon="chats" disabled={busy} onClick={onDiscuss}>Discuss</Button>
           <Button size="sm" icon="external" onClick={onBrowser}>Open in browser</Button>
           {state === 'dismissed'
