@@ -212,6 +212,57 @@ describe('EX3 search page — Add to materials (UX-11)', () => {
     expect(sent(h.request, 'POST', '/kb/explore/findings/f1/materials')).toHaveLength(1);
   });
 
+  it('lands the paper in a folder picked from the menu: the move follows the add, and both notes name the folder', async () => {
+    const onMoveMaterial = vi.fn(async () => undefined);
+    const h = setup({ props: {
+      onMoveMaterial,
+      folders: [{ id: 'fld-sec', name: 'Agent Security', system: false, material_count: 0, created_at: '2026-11-01T10:00:00Z' }],
+    } });
+    fireEvent.click(await row(/RailS/));
+    // the split button's caret opens the folder menu; picking a folder adds the paper straight into it
+    fireEvent.click(within(reader()).getByRole('button', { name: 'Choose folder for material' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Agent Security' }));
+    await waitFor(() => expect(sent(h.request, 'POST', '/kb/explore/findings/f1/materials')).toHaveLength(1));
+    await waitFor(() => expect(onMoveMaterial).toHaveBeenCalledWith('material-added', 'fld-sec'));
+    await waitFor(() => expect(h.toast).toHaveBeenCalledWith({ text: 'Added to Materials › Agent Security (abstract only) · not in the wiki yet', tone: 'done' }));
+    expect(within(reader()).getByText('In Materials › Agent Security (abstract only) · not in the wiki')).toBeInTheDocument();
+    // the plaque offers the move to another folder, with the folder it is in now
+    expect(within(reader()).getByRole('button', { name: 'Move to folder' })).toHaveTextContent('Folder: Agent Security');
+  });
+
+  it('moves an added paper to another folder from the plaque, and both notes follow', async () => {
+    const onMoveMaterial = vi.fn(async () => undefined);
+    const h = setup({ props: {
+      onMoveMaterial,
+      folders: [{ id: 'fld-sec', name: 'Agent Security', system: false, material_count: 0, created_at: '2026-11-01T10:00:00Z' }],
+    } });
+    fireEvent.click(await row(/RailS/));
+    fireEvent.click(within(reader()).getByRole('button', { name: 'Add to materials' }));
+    await waitFor(() => expect(within(reader()).getByText('In Materials › From Explore (abstract only) · not in the wiki')).toBeInTheDocument());
+    fireEvent.click(within(reader()).getByRole('button', { name: 'Move to folder' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Agent Security' }));
+    await waitFor(() => expect(onMoveMaterial).toHaveBeenCalledWith('material-added', 'fld-sec'));
+    await waitFor(() => expect(h.toast).toHaveBeenCalledWith({ text: 'Moved to Materials › Agent Security', tone: 'done' }));
+    expect(within(reader()).getByText('In Materials › Agent Security (abstract only) · not in the wiki')).toBeInTheDocument();
+    expect(within(reader()).getByRole('button', { name: 'Move to folder' })).toHaveTextContent('Folder: Agent Security');
+  });
+
+  it('makes a new folder right from the menu, and the paper lands in it', async () => {
+    const onMoveMaterial = vi.fn(async () => undefined);
+    const onCreateFolder = vi.fn(async (name: string) => ({ id: 'fld-new', name }));
+    const h = setup({ props: { onMoveMaterial, onCreateFolder } });
+    fireEvent.click(await row(/RailS/));
+    fireEvent.click(within(reader()).getByRole('button', { name: 'Choose folder for material' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'New folder…' }));
+    fireEvent.change(within(reader()).getByRole('textbox', { name: 'New folder name' }), { target: { value: 'Agent Security' } });
+    fireEvent.click(within(reader()).getByRole('button', { name: 'Create & add' }));
+    await waitFor(() => expect(onCreateFolder).toHaveBeenCalledWith('Agent Security'));
+    await waitFor(() => expect(sent(h.request, 'POST', '/kb/explore/findings/f1/materials')).toHaveLength(1));
+    await waitFor(() => expect(onMoveMaterial).toHaveBeenCalledWith('material-added', 'fld-new'));
+    await waitFor(() => expect(h.toast).toHaveBeenCalledWith({ text: 'Added to Materials › Agent Security (abstract only) · not in the wiki yet', tone: 'done' }));
+    expect(within(reader()).getByText('In Materials › Agent Security (abstract only) · not in the wiki')).toBeInTheDocument();
+  });
+
   it('says what went wrong in a toast, hides provider detail, and leaves the paper as it was', async () => {
     const world = exploreWorld({ searches: [searchFixture('run-1', 'Model architectures')], findings: papers() });
     world.failing['POST /kb/explore/findings/f1/materials'] = { status: 502, detail: 'secret provider text', code: 'provider_unavailable' };

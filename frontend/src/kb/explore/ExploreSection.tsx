@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useStore } from 'zustand';
 import type { KbArea, KbAreaMap } from '../../api/kb/types.gen';
+import type { KbClient } from '../api/client';
 import { useOptionalServices } from '../state/context';
 import type { DocTarget } from '../state/document';
+import { createLibraryStore } from '../state/library';
 import { createPrefsStore } from '../state/prefs';
 import { createUiStore, type SettingsSection, type UiState } from '../state/ui';
 import type { ToastData } from '../ui/Toast';
@@ -23,6 +25,9 @@ const NO_UI = createUiStore();
 
 /** Same for the preferences: their defaults, never stored (FX-4 list width falls back to 380). */
 const NO_PREFS = createPrefsStore(null);
+
+/** Same for the library's folders: an empty store, never asked (the section only reads it when services exist). */
+const NO_LIBRARY = createLibraryStore({ call: () => Promise.reject(new Error('This section has no services.')) } as unknown as KbClient);
 
 /**
  * Something of the window sits over the page: a dialog, the ⌘K palette, or the toast. The paper's native view
@@ -61,6 +66,16 @@ export function ExploreSection({
   // FX-4: the papers list's width while a paper is open, kept in the stored preferences.
   const prefs = services?.prefs ?? NO_PREFS;
   const listWidth = useStore(prefs, (s) => s.exploreListWidth);
+
+  // F6: the folders a paper from Explore can land in — read with the library's content, which is
+  // asked for once the section is on screen (a hidden section keeps reading nothing, as the shell
+  // expects; elsewhere the app's own start already read it).
+  const library = services?.library ?? NO_LIBRARY;
+  const folders = useStore(library, (s) => s.folders);
+  useEffect(() => {
+    if (hidden || !services) return;
+    if (services.library.getState().contentLoad === 'idle') void services.library.getState().loadContent();
+  }, [hidden, services]);
 
   // FX-5: a search that finishes while you are looking at it does not also ring the bell — its
   // «Search finished» note is dismissed as soon as it arrives (or as soon as you open that search).
@@ -219,6 +234,20 @@ export function ExploreSection({
     store.getState().showSearch(id);
   };
 
+  /** F6: the material a paper became moves to the folder the user picked (and the lists re-read). */
+  const moveMaterial = async (materialId: string, folderId: string) => {
+    if (!services) return;
+    await services.client.call('PATCH /kb/materials/{material_id}', { path: { material_id: materialId }, body: { folder_id: folderId } });
+    void services.library.getState().loadContent();
+  };
+
+  /** F6: a folder made right from the add menu; null when the backend refused the name. */
+  const createFolder = async (name: string) => {
+    if (!services) return null;
+    const res = await services.library.getState().createFolder(name);
+    return res.ok ? res.value : null;
+  };
+
   return (
     <main className="kb-ex" data-pane="explore" hidden={hidden}>
       <form className="kb-ex-bar" onSubmit={find} role="search">
@@ -258,6 +287,7 @@ export function ExploreSection({
           parallelLimit={nav.parallelLimit} listWidth={listWidth}
           onListWidth={(px) => prefs.getState().setExploreListWidth(px)} onStarted={openStarted}
           covered={covered} onCovered={pageCover}
+          folders={folders} onMoveMaterial={moveMaterial} onCreateFolder={createFolder}
           onChanged={() => void store.getState().refresh()} onDiscuss={discuss} onOpenDocument={openDocument}
           onOpenSettings={openSettings} toast={toast} />
       )}

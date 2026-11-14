@@ -873,6 +873,78 @@ button.kb-ex-chip:active {
   margin-top: var(--kb-sp-4);
 }
 
+/* F6: the split button — Add to materials, and beside it the caret that picks the folder it lands in. */
+.kb-ex-split {
+  display: inline-flex;
+  align-items: stretch;
+  flex: none;
+}
+
+/* The joined right half of the fill button: same height and fill, corners only on the outside. */
+.kb-ex-split .kb-btn {
+  border-radius: var(--kb-r-sm) 0 0 var(--kb-r-sm);
+}
+
+.kb-ex-split__caret {
+  display: inline-flex;
+  align-items: center;
+  margin-left: -1px;
+  padding: 0 var(--kb-sp-6);
+  border: 1px solid var(--kb-fill-border);
+  border-left: 0;
+  border-radius: 0 var(--kb-r-sm) var(--kb-r-sm) 0;
+  background: var(--kb-fill);
+  color: var(--kb-on-fill);
+}
+
+.kb-ex-split__caret:hover:not(:disabled),
+.kb-ex-split__caret[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--kb-fill) 86%, var(--kb-bg));
+}
+
+.kb-ex-split__caret:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* F6: «New folder…» — a compact form right in the actions, for a folder to add the paper into. */
+.kb-ex-newfolder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--kb-sp-6);
+  flex-basis: 100%;
+  max-width: min(100%, 440px);
+}
+
+/* F6: after the add — the folder the paper landed in, with a menu to move it to another one. */
+.kb-ex-move {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-sp-4);
+  height: var(--kb-control-h-sm);
+  padding: 0 var(--kb-sp-10);
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  font-size: var(--t-sm);
+  color: var(--kb-muted-strong);
+  white-space: nowrap;
+}
+
+.kb-ex-move:hover,
+.kb-ex-move[aria-expanded='true'] {
+  background: var(--kb-accent-soft);
+}
+
+.kb-ex-move:active {
+  background: var(--kb-accent-press);
+}
+
+.kb-ex-move:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .kb-ex-reader__frame {
   flex: 1;
   min-height: 0;

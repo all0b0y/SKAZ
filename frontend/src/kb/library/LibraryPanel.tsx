@@ -3,7 +3,6 @@ import type { KbFolder, KbMaterialSummary } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../ui';
 import { useLibrary, useServices, useUi } from '../state/context';
 import { KIND_ICON, folderTone } from './materialMeta';
-import { AddToWiki } from '../material/AddToWiki';
 import { orderedFolders } from './folderOrder';
 import { ExploreReminder } from '../materials/ExploreReminder';
 import { NameField } from './NameField';
@@ -92,9 +91,6 @@ function MaterialRow({ material, tone, meta, sel, drag }: {
   const openDoc = useUi((s) => s.openDoc);
   const current = useUi((s) => s.docMaterialId === material.id);
   const reason = sel.reasonOf(material.id);
-  const fromExplore = material.folder_id === 'fld-explore';
-  const exploreNotInWiki = fromExplore && material.wiki_state === 'not_in_wiki';
-  const dotTone = tone ?? (fromExplore ? 'var(--kb-muted)' : undefined);
   return (
     <li {...sel.rowProps(material.id)} {...drag} data-entrance={material.id}>
       <div role="gridcell">
@@ -102,16 +98,15 @@ function MaterialRow({ material, tone, meta, sel, drag }: {
           type="button"
           className={`kb-row${current ? ' is-current' : ''}${reason ? ' kb-row--dim' : ''}`}
           aria-current={current ? 'true' : undefined}
-          title={exploreNotInWiki ? `${material.title} — From Explore · Not in wiki` : material.title}
+          title={material.title}
           onClick={() => openDoc(material.id)}
         >
           <SelectionCheckbox checked={sel.selected.has(material.id)} reason={reason} />
           <Icon name={KIND_ICON[material.kind]} size={16} className="kb-row__icon" />
           <span className="kb-row__text">{material.title}</span>
-          {dotTone && <span className="kb-fdot" style={{ background: dotTone }} aria-hidden="true" />}
+          {tone && <span className="kb-fdot" style={{ background: tone }} aria-hidden="true" />}
           {meta && <span className="kb-row__meta">{meta}</span>}
         </button>
-        {exploreNotInWiki && material.status === 'ready' && <AddToWiki materialId={material.id} />}
       </div>
     </li>
   );
