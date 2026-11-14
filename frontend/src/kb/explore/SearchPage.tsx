@@ -105,6 +105,8 @@ export interface SearchPageProps {
   toast: Toast;
   /** F6: the library's folders — Add to materials can land the paper in one of them. */
   folders?: ReadonlyArray<KbFolder>;
+  /** Current locations from the library, including papers imported before this page mounted. */
+  materialFolderNames?: Readonly<Record<string, string>>;
   /** F6: moves the material the paper became into a folder (PATCH /kb/materials/{id}). */
   onMoveMaterial?: (materialId: string, folderId: string) => Promise<void>;
   /** F6: makes a folder right from the add menu; null when the backend refused the name. */
@@ -126,6 +128,8 @@ export function SearchPage(props: SearchPageProps) {
   const [targetFolder, setTargetFolder] = useState<{ id: string; name: string }>({ id: 'fld-explore', name: 'From Explore' });
   /** F6: where each added paper actually landed (finding id → folder name). */
   const [materialFolders, setMaterialFolders] = useState<Record<string, string>>({});
+  // A library refresh (including a move/rename elsewhere) supersedes this page's optimistic names.
+  useEffect(() => { setMaterialFolders({}); }, [props.materialFolderNames]);
   const generation = useRef(0);
 
   useEffect(() => () => onCovered(false), [onCovered]);
@@ -198,15 +202,23 @@ export function SearchPage(props: SearchPageProps) {
     void act(async () => {
       try {
         const added = await explore.add_to_materials(f.id);
-        // A folder the user picked takes the material there; From Explore is where the backend puts it.
-        if (targetFolderId && targetFolderId !== 'fld-explore' && added.material_id && props.onMoveMaterial) {
-          await props.onMoveMaterial(added.material_id, targetFolderId);
-        }
-        const folderName = targetFolderName ?? 'From Explore';
-        setMaterialFolders((prev) => ({ ...prev, [f.id]: folderName }));
+        // Import and move are two writes. Preserve the first success even if the second fails.
         replace({ ...f, state: added.importing ? 'importing' : 'materials', material_id: added.material_id ?? null,
           importing: added.importing ?? false, imported_content: added.content ?? null });
         onChanged();
+        // A folder the user picked takes the material there; From Explore is where the backend puts it.
+        if (targetFolderId && targetFolderId !== 'fld-explore' && added.material_id && props.onMoveMaterial) {
+          try {
+            await props.onMoveMaterial(added.material_id, targetFolderId);
+          } catch {
+            toast({ text: `Added to Materials › From Explore, but couldn’t move it to ${targetFolderName ?? 'the chosen folder'}. Use Folder to try again.`, tone: 'problem' });
+            return;
+          }
+        }
+        const moved = targetFolderId && targetFolderId !== 'fld-explore' && added.material_id && props.onMoveMaterial;
+        const folderName = moved ? targetFolderName ?? 'From Explore'
+          : (added.material_id ? props.materialFolderNames?.[added.material_id] : undefined) ?? 'From Explore';
+        setMaterialFolders((prev) => ({ ...prev, [f.id]: folderName }));
         toast({ text: `Added to Materials › ${folderName}${importNote(added.content)} · not in the wiki yet`, tone: 'done' });
       } finally {
         setAdding(null);
@@ -307,7 +319,8 @@ export function SearchPage(props: SearchPageProps) {
           min={EXPLORE_LIST_MIN} max={EXPLORE_LIST_MAX} direction={1} onChange={props.onListWidth} />
         <section className="kb-ex-reader" aria-label="Paper">
           <ReaderHead f={open} busy={busy} importing={adding === open.id || open.state === 'importing' || open.importing === true}
-            folders={props.folders ?? []} targetFolder={targetFolder} folderName={materialFolders[open.id] ?? 'From Explore'}
+            folders={props.folders ?? []} targetFolder={targetFolder}
+            folderName={materialFolders[open.id] ?? (open.material_id ? props.materialFolderNames?.[open.material_id] : undefined) ?? 'From Explore'}
             onCreateFolder={props.onCreateFolder}
             onPickFolder={(id, name) => setTargetFolder({ id, name })}
             onAdd={(folderId, folderName) => addToMaterials(open, folderId, folderName)}
@@ -487,10 +500,16 @@ function ReaderHead({ f, busy, importing, folders, targetFolder, folderName, onC
   const [newFolderName, setNewFolderName] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const createGeneration = useRef(0);
   // Another paper takes the menus with it: nothing stays open across the switch.
   useEffect(() => {
     setFolderMenuOpen(false);
     setMoveMenuOpen(false);
+    setCreatingFolder(false);
+    setCreating(false);
+    setNewFolderName('');
+    setCreateError(null);
+    return () => { createGeneration.current += 1; };
   }, [f.id]);
   // A menu is drawn in the page, so the paper's native view must not sit over it (as in Filters).
   useEffect(() => {
@@ -532,8 +551,10 @@ function ReaderHead({ f, busy, importing, folders, targetFolder, folderName, onC
     event.preventDefault();
     const name = newFolderName.trim();
     if (!name || busy || importing || creating || !onCreateFolder) return;
+    const mine = ++createGeneration.current;
     setCreating(true);
     onCreateFolder(name).then((created) => {
+      if (mine !== createGeneration.current) return;
       setCreating(false);
       if (!created) { setCreateError('Couldn’t create the folder. Try another name.'); return; }
       setCreatingFolder(false);
@@ -541,7 +562,10 @@ function ReaderHead({ f, busy, importing, folders, targetFolder, folderName, onC
       setCreateError(null);
       onPickFolder(created.id, created.name);
       onAdd(created.id, created.name);
-    }).catch(() => { setCreating(false); setCreateError('Couldn’t create the folder. Try another name.'); });
+    }).catch(() => {
+      if (mine !== createGeneration.current) return;
+      setCreating(false); setCreateError('Couldn’t create the folder. Try another name.');
+    });
   };
   const cancelNewFolder = () => { setCreatingFolder(false); setNewFolderName(''); setCreateError(null); };
 

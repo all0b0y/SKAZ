@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KbServicesProvider } from '../state/context';
+import { baseWorld } from '../test/fakeBridge';
 import { ExploreSection } from './ExploreSection';
 import { ExploreSide } from './ExploreSide';
 import { exploreState } from './exploreState';
@@ -139,6 +140,25 @@ describe('EX3 explore page — the find bar is the one place a search starts (UX
       expect(h.services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'search' });
     }
     expect(h.store.getState().page).toEqual({ kind: 'map' });
+  });
+});
+
+describe('F6 folder state from the library', () => {
+  it('names the actual folder of an already imported material instead of guessing From Explore', async () => {
+    const h = setup(exploreWorld({
+      searches: [searchFixture('run-1', 'Saved papers')],
+      findings: [findingFixture('f1', 'Saved paper', { run_id: 'run-1', state: 'seen', material_id: 'material-added' })],
+    }));
+    const material = baseWorld().materials[0]!;
+    act(() => h.services.library.setState({ contentLoad: 'ready',
+      folders: [{ id: 'fld-sec', name: 'Agent Security', system: false, material_count: 1, created_at: material.created_at }],
+      materials: [{ ...material, id: 'material-added', folder_id: 'fld-sec' }],
+    }));
+    await tile('Machine learning');
+    act(() => h.store.getState().showSearch('run-1'));
+    fireEvent.click(await screen.findByRole('button', { name: /Saved paper/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to materials' }));
+    expect(await screen.findByText('In Materials › Agent Security (abstract only) · not in the wiki')).toBeInTheDocument();
   });
 });
 

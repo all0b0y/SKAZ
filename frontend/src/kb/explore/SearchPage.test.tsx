@@ -230,6 +230,25 @@ describe('EX3 search page — Add to materials (UX-11)', () => {
     expect(within(reader()).getByRole('button', { name: 'Move to folder' })).toHaveTextContent('Folder: Agent Security');
   });
 
+  it('keeps a successful import visible when moving to the chosen folder fails', async () => {
+    const onMoveMaterial = vi.fn().mockRejectedValueOnce(new Error('move failed')).mockResolvedValue(undefined);
+    const h = setup({ props: {
+      onMoveMaterial,
+      folders: [{ id: 'fld-sec', name: 'Agent Security', system: false, material_count: 0, created_at: '2026-11-01T10:00:00Z' }],
+    } });
+    fireEvent.click(await row(/RailS/));
+    fireEvent.click(within(reader()).getByRole('button', { name: 'Choose folder for material' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Agent Security' }));
+    await waitFor(() => expect(onMoveMaterial).toHaveBeenCalled());
+    expect(await within(reader()).findByText('In Materials › From Explore (abstract only) · not in the wiki')).toBeInTheDocument();
+    expect(within(reader()).queryByRole('button', { name: /Add to/ })).not.toBeInTheDocument();
+    expect(h.toast).toHaveBeenCalledWith({ text: 'Added to Materials › From Explore, but couldn’t move it to Agent Security. Use Folder to try again.', tone: 'problem' });
+    fireEvent.click(within(reader()).getByRole('button', { name: 'Move to folder' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Agent Security' }));
+    await waitFor(() => expect(h.toast).toHaveBeenCalledWith({ text: 'Moved to Materials › Agent Security', tone: 'done' }));
+    expect(sent(h.request, 'POST', '/kb/explore/findings/f1/materials')).toHaveLength(1);
+  });
+
   it('moves an added paper to another folder from the plaque, and both notes follow', async () => {
     const onMoveMaterial = vi.fn(async () => undefined);
     const h = setup({ props: {
@@ -261,6 +280,22 @@ describe('EX3 search page — Add to materials (UX-11)', () => {
     await waitFor(() => expect(onMoveMaterial).toHaveBeenCalledWith('material-added', 'fld-new'));
     await waitFor(() => expect(h.toast).toHaveBeenCalledWith({ text: 'Added to Materials › Agent Security (abstract only) · not in the wiki yet', tone: 'done' }));
     expect(within(reader()).getByText('In Materials › Agent Security (abstract only) · not in the wiki')).toBeInTheDocument();
+  });
+
+  it('does not carry a pending Create & add to a different paper', async () => {
+    let finish!: (folder: { id: string; name: string }) => void;
+    const onCreateFolder = vi.fn(() => new Promise<{ id: string; name: string }>((resolve) => { finish = resolve; }));
+    const h = setup({ props: { onCreateFolder, onMoveMaterial: vi.fn(async () => undefined) } });
+    fireEvent.click(await row(/RailS/));
+    fireEvent.click(within(reader()).getByRole('button', { name: 'Choose folder for material' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'New folder…' }));
+    fireEvent.change(within(reader()).getByRole('textbox', { name: 'New folder name' }), { target: { value: 'Security' } });
+    fireEvent.click(within(reader()).getByRole('button', { name: 'Create & add' }));
+    fireEvent.click(await row(/HAP/));
+    expect(within(reader()).queryByRole('textbox', { name: 'New folder name' })).not.toBeInTheDocument();
+    await act(async () => finish({ id: 'fld-new', name: 'Security' }));
+    expect(sent(h.request, 'POST', '/kb/explore/findings/f1/materials')).toHaveLength(0);
+    expect(sent(h.request, 'POST', '/kb/explore/findings/f2/materials')).toHaveLength(0);
   });
 
   it('says what went wrong in a toast, hides provider detail, and leaves the paper as it was', async () => {

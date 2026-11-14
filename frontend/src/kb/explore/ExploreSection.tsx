@@ -72,6 +72,14 @@ export function ExploreSection({
   // expects; elsewhere the app's own start already read it).
   const library = services?.library ?? NO_LIBRARY;
   const folders = useStore(library, (s) => s.folders);
+  const materials = useStore(library, (s) => s.materials);
+  const materialFolderNames = useMemo(() => {
+    const names = new Map(folders.map((folder) => [folder.id, folder.name]));
+    return Object.fromEntries(materials.flatMap((material) => {
+      const name = names.get(material.folder_id);
+      return name ? [[material.id, name]] : [];
+    }));
+  }, [folders, materials]);
   useEffect(() => {
     if (hidden || !services) return;
     if (services.library.getState().contentLoad === 'idle') void services.library.getState().loadContent();
@@ -287,7 +295,8 @@ export function ExploreSection({
           parallelLimit={nav.parallelLimit} listWidth={listWidth}
           onListWidth={(px) => prefs.getState().setExploreListWidth(px)} onStarted={openStarted}
           covered={covered} onCovered={pageCover}
-          folders={folders} onMoveMaterial={moveMaterial} onCreateFolder={createFolder}
+          folders={folders} materialFolderNames={materialFolderNames}
+          onMoveMaterial={services ? moveMaterial : undefined} onCreateFolder={services ? createFolder : undefined}
           onChanged={() => void store.getState().refresh()} onDiscuss={discuss} onOpenDocument={openDocument}
           onOpenSettings={openSettings} toast={toast} />
       )}
