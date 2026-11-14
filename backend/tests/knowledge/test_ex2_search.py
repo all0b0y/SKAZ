@@ -272,10 +272,13 @@ async def test_renamed_or_pending_mapping_cannot_filter_with_stale_ids(parts: Si
 
 
 async def test_long_precise_query_is_honest_instead_of_truncated(parts: SimpleNamespace) -> None:
+    # FX-1: a long query (>72 chars) is turned into short English terms by the chat agent in stage="plan";
+    # without a configured agent, the run pauses honestly with agent_required and sends nothing to OpenAlex.
     preview = await parts.funnel.plan(KbSearchPlanRequest(query="x" * 73))
-    assert not preview.ready and "72" in preview.reason
-    with pytest.raises(ContractFailure):
-        await parts.funnel.start(KbFunnelStart(query="x" * 73))
+    assert preview.ready and len(preview.items[0].terms[0]) == 72
+    started = await parts.funnel.start(KbFunnelStart(query="x" * 73))
+    settled = await parts.funnel.settled(started.id)
+    assert (settled.state, settled.stop_reason) == ("paused", "agent_required")
     assert parts.science.calls == []
 
 

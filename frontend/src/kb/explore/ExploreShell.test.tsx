@@ -57,7 +57,10 @@ describe('EX3 Explore in the shell', () => {
     const pane = document.querySelector<HTMLElement>('[data-pane="explore"]')!;
     expect(await within(pane).findByRole('heading', { name: 'Model architectures' })).toBeInTheDocument();
     expect(await within(pane).findByRole('button', { name: /RailS/ })).toBeInTheDocument();
-    expect(within(pane).getByRole('region', { name: 'Paper' })).toHaveTextContent('Pick a paper on the left');
+    // FX-4: the reader slot is not there until a paper is picked — the list has the page to itself
+    expect(within(pane).queryByRole('region', { name: 'Paper' })).not.toBeInTheDocument();
+    fireEvent.click(within(pane).getByRole('button', { name: /RailS/ }));
+    expect(within(pane).getByRole('region', { name: 'Paper' })).toBeInTheDocument();
     fireEvent.click(within(side).getByRole('button', { name: 'Map of your wiki' }));
     expect(await within(pane).findByText('Your wiki by topic')).toBeInTheDocument();
     expect(within(pane).queryByRole('region', { name: 'Paper' })).not.toBeInTheDocument();

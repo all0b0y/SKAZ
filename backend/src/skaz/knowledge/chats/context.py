@@ -284,6 +284,10 @@ class ContextBuilder:
 
         for note, label, body in self._recordings(chat, scope):
             add(note, label, body)
+        # FX-3: the Explore paper this chat discusses — its card, or its material's full text.
+        discuss = self._discuss(chat, allowed)
+        if discuss is not None:
+            sections.append(discuss)
         if given.context.page_id and allowed(given.context.page_id, "a wiki page"):
             page = self._page(given.context.page_id)
             if page is not None:
@@ -329,6 +333,36 @@ class ContextBuilder:
         return "\n\n".join([*sections, f"The user's message:\n{given.text}"])
 
     # -- pieces ---------------------------------------------------------------------
+
+    def _discuss(self, chat: Chat, allowed: Callable[[str, str], bool]) -> str | None:
+        """FX-3: the Explore paper a Discuss chat is bound to, as service context of every question.
+
+        Once the paper is one of the user's materials, its full text enters with the attachment
+        budget and numbered segments (so answers cite ``⟦m:<id>:<seg>|…⟧`` exactly); until then
+        only its card is available and the agent points at this chat's «Add to materials».
+        """
+        from ..explore.discuss import card_text, discuss_state  # the explore package imports chats
+
+        state = discuss_state(self.kb.db, chat.id)
+        if state is None:
+            return None
+        if state.material_id is not None and allowed(state.material_id, "a material"):
+            attached = self._attachment(state.material_id, ATTACHMENT_CHARS)
+            if attached is not None:
+                body, _used = attached
+                note = ("This chat is discussing a paper from Explore that is in the user's materials "
+                        f"(material id {state.material_id}). Answer from its full text below and cite "
+                        f"fragments with ⟦m:{state.material_id}:<seg>|<exact words>⟧; if the material "
+                        "is longer than the excerpt below, read the rest with skaz_read_material:")
+                card = card_text(state.finding)
+                return note + "\n" + untrusted_block("paper in materials",
+                                                     card + "\n\nFull text:\n" + body)
+        note = ("This chat is discussing a paper from Explore that is not in the user's materials "
+                "yet. Only its card is available below. Answer from this card; when the user's "
+                "question requires the paper's full text (methods, exact numbers, tables, "
+                "sections), say so in one short sentence and tell the user they can click "
+                "“Add to materials” in this chat to load the full text:")
+        return note + "\n" + untrusted_block("paper card", card_text(state.finding))
 
     def _recordings(self, chat: Chat, scope: SourceScope | None = None) -> list[tuple[str, str, str]]:
         """The chat's own recording (its latest speech) and recordings in progress — only those the

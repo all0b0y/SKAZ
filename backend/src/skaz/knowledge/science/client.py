@@ -5,8 +5,9 @@ Crossref need no key; there is no Semantic Scholar. Only topics, DOIs and public
 request goes through ``transport``, which journals it first. Limits stop honestly with their reason;
 SKAZ never switches provider because one failed.
 
-Full text (decision 3c′): OpenAlex TEI (with a key) → arXiv HTML → an open article page → the abstract,
-honestly labelled. Never a PDF. Paid works (3c″): free alternatives are checked first, once per work;
+Full text: OpenAlex TEI (with a key) → arXiv HTML → an open article page/file → the abstract.
+FX-2 user-click imports try ``read_pdf`` first and keep the original PDF. Paid works (3c″):
+free alternatives are checked first, once per work;
 the suggestion appears at most once per work, and only when the work looks useful.
 """
 
@@ -16,7 +17,9 @@ import json
 import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime
+from html.parser import HTMLParser
 from typing import Any, cast
+from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
 
@@ -38,7 +41,9 @@ from ..api.schemas_science import (
 )
 from ..errors import NotFound
 from ..service import KnowledgeService
-from ..sources.fetch import SafeFetcher
+from ..sources.fetch import Fetched, SafeFetcher
+from ..sources.html import decode_html
+from ..sources.web_page import HTML_TYPES
 from . import arxiv, crossref, openalex
 from .fulltext import page_text, tei_text
 from .ids import (
@@ -74,6 +79,9 @@ TAXONOMY_PAGE = 200
 TAXONOMY_PAGES = 5
 #: Open article pages tried before falling back to the abstract.
 OPEN_PAGE_TRIES = 3
+FILE_TRIES = 5
+TEXT_FILE_TYPES = frozenset({"text/plain", "text/markdown", "text/x-markdown"})
+ARTICLE_EXTENSIONS = frozenset({".pdf", ".md", ".txt", ".html", ".htm"})
 PAID_COPY = (
     "This article is paid. I think it's useful because {because}. You can check it yourself; if you get it, "
     "add it to your materials."
@@ -104,6 +112,74 @@ def paid_copy(reason: str) -> str:
 
 def _results(works: list[KbScienceWork], cursor: str | None) -> KbScienceResults:
     return KbScienceResults(works=works, next_cursor=cursor, stop_reason=None)
+
+
+def _extension(url: str) -> str:
+    try:
+        path = unquote(urlsplit(url).path).lower()
+    except ValueError:
+        return ""
+    return "." + path.rsplit(".", 1)[-1] if "." in path.rsplit("/", 1)[-1] else ""
+
+
+class _ArticleLinks(HTMLParser):
+    """Only file links and alternate representations; article text never becomes an instruction."""
+
+    def __init__(self, base: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base = base
+        self.urls: list[str] = []
+        self.pdf_urls: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        href = values.get("href")
+        if tag not in ("a", "link") or not href:
+            return
+        try:
+            url = urljoin(self.base, href)
+        except ValueError:
+            return
+        alternate = tag == "link" and "alternate" in (values.get("rel") or "").lower().split()
+        if (
+            url.startswith(("https://", "http://")) and (_extension(url) in ARTICLE_EXTENSIONS or alternate)
+            and url not in self.urls
+        ):
+            self.urls.append(url)
+            if _extension(url) == ".pdf" or values.get("type") == "application/pdf":
+                self.pdf_urls.append(url)
+
+
+def _article_links(fetched: Fetched, *, pdf_only: bool = False) -> list[str]:
+    if fetched.content_type not in HTML_TYPES:
+        return []
+    parser = _ArticleLinks(fetched.url)
+    parser.feed(decode_html(fetched.body, fetched.charset))
+    return parser.pdf_urls if pdf_only else parser.urls
+
+
+def _is_pdf(fetched: Fetched) -> bool:
+    return fetched.body.startswith(b"%PDF-") or fetched.content_type == "application/pdf"
+
+
+def _page_text(fetched: Fetched) -> str | None:
+    try:
+        return page_text(fetched)
+    except (AssertionError, ValueError):
+        # Some empty/broken repository pages make readability/lxml fail instead of returning no text.
+        return None
+
+
+def _file_text(fetched: Fetched) -> str | None:
+    if _is_pdf(fetched):
+        return None
+    if fetched.content_type in TEXT_FILE_TYPES or (
+        fetched.content_type in ("", "application/octet-stream")
+        and _extension(fetched.url) in (".md", ".txt")
+    ):
+        body = decode_html(fetched.body, fetched.charset).strip()
+        return body[:400_000] if len(body) >= 80 else None
+    return _page_text(fetched)
 
 
 class ScienceGateway:
@@ -193,7 +269,7 @@ class ScienceGateway:
         return merged
 
     async def _keep(self, works: Sequence[KbScienceWork]) -> list[KbScienceWork]:
-        return await disk_call(self._with_access, list(works))
+        return await disk_call(self._with_access, openalex.deduplicate_works(works))
 
     async def _openalex_work(
         self, path: str, payload: KbSciencePayload, operation: Any, run_id: str | None
@@ -355,6 +431,48 @@ class ScienceGateway:
         works, cursor = crossref.parse_list(data) if isinstance(data, dict) else ([], None)
         return _results(await self._keep(works), cursor)
 
+    async def read_pdf(self, work_id: str, *, run_id: str | None = None) -> Fetched | None:
+        """FX-2, user-click only: explicit open PDF → PDF on an open repository page."""
+        await self._ready()
+        work = await self._work(work_id, run_id)
+        sent = KbSciencePayload(dois=[work.doi]) if work.doi else KbSciencePayload(ids=[work.provider_id])
+
+        def call(url: str) -> Call:
+            provider = (
+                "arxiv" if urlsplit(url).hostname in ("arxiv.org", "export.arxiv.org") else work.provider
+            )
+            return Call(provider, "full_text", url, sent)
+
+        urls = [loc.url for loc in work.locations if loc.open_access and _extension(loc.url) == ".pdf"]
+        if work.arxiv_id:
+            urls.insert(0, f"https://arxiv.org/pdf/{work.arxiv_id}.pdf")
+        tried: set[str] = set()
+        for url in dict.fromkeys(urls):
+            tried.add(url)
+            fetched = await self.transport.download(call(url), run_id=run_id)
+            if fetched is not None and _is_pdf(fetched):
+                return fetched
+        pages = [
+            loc.url for loc in work.locations
+            if loc.open_access and loc.kind == "open_page" and _extension(loc.url) not in (".md", ".txt")
+        ]
+        for url in [url for url in dict.fromkeys(pages) if url not in tried][:OPEN_PAGE_TRIES]:
+            tried.add(url)
+            fetched = await self.transport.download(call(url), run_id=run_id)
+            if fetched is None:
+                continue
+            if _is_pdf(fetched):
+                return fetched
+            links = [
+                link for link in _article_links(fetched, pdf_only=True) if link not in tried
+            ]
+            for link in links[:FILE_TRIES]:
+                tried.add(link)
+                pdf = await self.transport.download(call(link), run_id=run_id)
+                if pdf is not None and _is_pdf(pdf):
+                    return pdf
+        return None
+
     async def read_text(self, work_id: str, *, run_id: str | None = None) -> KbScienceText:
         await self._ready()
         work = await self._work(work_id, run_id)
@@ -367,17 +485,20 @@ class ScienceGateway:
 
         tei = next((loc for loc in work.locations if loc.kind == "tei"), None)
         if key and tei is not None and work.provider == "openalex":
-            raw = await self.transport.body(
-                Call(
-                    "openalex",
-                    "full_text",
-                    tei.url,
-                    KbSciencePayload(ids=[work.provider_id]),
-                    cost=openalex.COST_CONTENT,
-                    accept="application/xml,text/xml;q=0.9",
-                ),
-                run_id=run_id,
-            )
+            try:
+                raw = await self.transport.body(
+                    Call(
+                        "openalex",
+                        "full_text",
+                        tei.url,
+                        KbSciencePayload(ids=[work.provider_id]),
+                        cost=openalex.COST_CONTENT,
+                        accept="application/xml,text/xml;q=0.9",
+                    ),
+                    run_id=run_id,
+                )
+            except ScienceUnavailable:
+                raw = None
             body = tei_text(raw) if raw is not None else None
             if body:
                 return text("tei", body, tei.url)
@@ -389,20 +510,45 @@ class ScienceGateway:
         for arxiv_id in dict.fromkeys(arxiv_ids):
             url = f"https://arxiv.org/html/{arxiv_id}"
             fetched = await self.transport.page(
-                Call("arxiv", "full_text", url, KbSciencePayload(ids=[arxiv_id])), run_id=run_id
+                Call("arxiv", "full_text", url, KbSciencePayload(ids=[arxiv_id])),
+                run_id=run_id, allow_vpn_fake_ip=True,
             )
-            body = page_text(fetched) if fetched is not None else None
+            body = _page_text(fetched) if fetched is not None else None
             if body:
                 return text("arxiv_html", body, url)
 
-        pages = [loc.url for loc in work.locations if loc.kind == "open_page" and loc.open_access]
+        pages = [
+            loc.url for loc in work.locations
+            if loc.kind == "open_page" and loc.open_access and _extension(loc.url) != ".pdf"
+        ]
         pages += [alt for alt in alternatives if alt.startswith(("https://", "http://"))]
         sent = KbSciencePayload(dois=[work.doi]) if work.doi else KbSciencePayload(ids=[work.provider_id])
         for url in list(dict.fromkeys(pages))[:OPEN_PAGE_TRIES]:
-            fetched = await self.transport.page(Call(work.provider, "full_text", url, sent), run_id=run_id)
-            body = page_text(fetched) if fetched is not None else None
+            if _extension(url) in (".md", ".txt"):
+                fetched = await self.transport.download(
+                    Call(work.provider, "full_text", url, sent), run_id=run_id,
+                )
+                body = _file_text(fetched) if fetched is not None else None
+                if body:
+                    return text("open_page", body, fetched.url if fetched else url)
+                continue
+            fetched = await self.transport.page(
+                Call(work.provider, "full_text", url, sent), run_id=run_id, allow_vpn_fake_ip=True,
+            )
+            if fetched is not None:
+                links = [
+                    link for link in _article_links(fetched) if _extension(link) != ".pdf" and link != url
+                ]
+                for link in links[:FILE_TRIES]:
+                    attached = await self.transport.download(
+                        Call(work.provider, "full_text", link, sent), run_id=run_id,
+                    )
+                    body = _file_text(attached) if attached is not None else None
+                    if body:
+                        return text("open_page", body, attached.url if attached else link)
+            body = _page_text(fetched) if fetched is not None else None
             if body:
-                return text("open_page", body, url)
+                return text("open_page", body, fetched.url if fetched else url)
 
         return text("abstract_only", work.abstract or "", None)
 
@@ -416,16 +562,21 @@ class ScienceGateway:
         if arxiv_id:
             url = f"https://arxiv.org/html/{arxiv_id}"
             fetched = await self.transport.page(
-                Call("arxiv", "full_text", url, KbSciencePayload(ids=[arxiv_id])), run_id=run_id
+                Call("arxiv", "full_text", url, KbSciencePayload(ids=[arxiv_id])),
+                run_id=run_id, allow_vpn_fake_ip=True,
             )
-            return url if fetched is not None and page_text(fetched) else f"https://arxiv.org/pdf/{arxiv_id}"
+            return url if fetched is not None and _page_text(fetched) else f"https://arxiv.org/pdf/{arxiv_id}"
         sent = KbSciencePayload(dois=[work.doi]) if work.doi else KbSciencePayload(ids=[work.provider_id])
         pages = [loc.url for loc in work.locations if loc.kind == "open_page" and loc.open_access]
-        for url in list(dict.fromkeys(pages))[:OPEN_PAGE_TRIES]:
-            fetched = await self.transport.page(Call(work.provider, "full_text", url, sent), run_id=run_id)
-            if fetched is not None and page_text(fetched):
+        pdfs = [url for url in pages if _extension(url) == ".pdf"]
+        for url in list(dict.fromkeys(url for url in pages if url not in pdfs))[:OPEN_PAGE_TRIES]:
+            fetched = await self.transport.page(
+                Call(work.provider, "full_text", url, sent), run_id=run_id, allow_vpn_fake_ip=True,
+            )
+            if fetched is not None and _page_text(fetched):
                 return url
-        return None
+        # Keep PDF-only works visible without downloading their PDFs during automatic search checks.
+        return next(iter(pdfs), None)
 
     # -- ScienceClient --------------------------------------------------------------------------------
 

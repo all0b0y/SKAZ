@@ -3,6 +3,7 @@ import { useStore } from 'zustand';
 import type { KbArea, KbAreaMap } from '../../api/kb/types.gen';
 import { useOptionalServices } from '../state/context';
 import type { DocTarget } from '../state/document';
+import { createPrefsStore } from '../state/prefs';
 import { createUiStore, type SettingsSection, type UiState } from '../state/ui';
 import type { ToastData } from '../ui/Toast';
 import { Icon } from '../ui';
@@ -19,6 +20,9 @@ import './explore-v2.css';
 
 /** Stands in for the window's UI state when the section is shown without the app's services (tests, previews). */
 const NO_UI = createUiStore();
+
+/** Same for the preferences: their defaults, never stored (FX-4 list width falls back to 380). */
+const NO_PREFS = createPrefsStore(null);
 
 /**
  * Something of the window sits over the page: a dialog, the ⌘K palette, or the toast. The paper's native view
@@ -53,6 +57,30 @@ export function ExploreSection({
   const pageCover = useCover(store);
   const overlay = useStore(services?.ui ?? NO_UI, overlayUp);
   const covered = hidden || overlay || nav.covers > 0;
+
+  // FX-4: the papers list's width while a paper is open, kept in the stored preferences.
+  const prefs = services?.prefs ?? NO_PREFS;
+  const listWidth = useStore(prefs, (s) => s.exploreListWidth);
+
+  // FX-5: a search that finishes while you are looking at it does not also ring the bell — its
+  // «Search finished» note is dismissed as soon as it arrives (or as soon as you open that search).
+  const notes = services?.notifications ?? null;
+  useEffect(() => {
+    if (!notes || hidden) return undefined;
+    const dropSeen = (): void => {
+      const page = store.getState().page;
+      if (page.kind !== 'search') return;
+      for (const n of notes.getState().items) {
+        const jobId = n.payload?.job_id;
+        if (n.kind !== 'explore_finished' || typeof jobId !== 'string' || jobId !== page.id) continue;
+        void notes.getState().dismiss(n.id);
+      }
+    };
+    dropSeen();
+    const stopNotes = notes.subscribe(dropSeen);
+    const stopPage = store.subscribe(dropSeen);
+    return () => { stopNotes(); stopPage(); };
+  }, [notes, store, hidden]);
 
   const openDocument = useCallback((target: DocTarget) => {
     if (onOpenDocumentProp) onOpenDocumentProp(target);
@@ -171,6 +199,12 @@ export function ExploreSection({
     chats.getState().open(chatId);
   };
 
+  /** FX-5: «Edit words and search again» starts the new run and opens it as this page's search. */
+  const openStarted = async (id: string) => {
+    await store.getState().refresh();
+    store.getState().showSearch(id);
+  };
+
   return (
     <main className="kb-ex" data-pane="explore" hidden={hidden}>
       <form className="kb-ex-bar" onSubmit={find} role="search">
@@ -207,7 +241,9 @@ export function ExploreSection({
           onTopicAction={topicAction} onMap={onMap} />
       ) : (
         <SearchPage key={search.id} search={search} scopeName={nameOf(search.area_id)} explore={clients.explore}
-          parallelLimit={nav.parallelLimit} covered={covered} onCovered={pageCover}
+          parallelLimit={nav.parallelLimit} listWidth={listWidth}
+          onListWidth={(px) => prefs.getState().setExploreListWidth(px)} onStarted={openStarted}
+          covered={covered} onCovered={pageCover}
           onChanged={() => void store.getState().refresh()} onDiscuss={discuss} onOpenDocument={openDocument}
           onOpenSettings={openSettings} toast={toast} />
       )}

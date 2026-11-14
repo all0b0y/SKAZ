@@ -14,7 +14,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -226,7 +226,9 @@ class ScienceTransport:
 
     # -- article pages (arXiv HTML, open pages) -------------------------------------------------------
 
-    async def page(self, call: Call, *, run_id: str | None = None) -> Fetched | None:
+    async def page(
+        self, call: Call, *, run_id: str | None = None, allow_vpn_fake_ip: bool = False,
+    ) -> Fetched | None:
         """An HTML page through the shared fetch guard (public address, size and time limits).
 
         A page that can't be read is ``None`` (journalled ``failed``): the next text source is tried.
@@ -240,10 +242,44 @@ class ScienceTransport:
                 total_seconds=PAGE_SECONDS,
                 pin_address=True,
                 content_types=HTML_TYPES,
+                allow_vpn_fake_ip=allow_vpn_fake_ip,
             )
         except KnowledgeError as error:
             await self._close(record_id, "failed", None)
             logger.info("Science page unavailable: %s %s", call.provider, type(error).__name__)
             return None
+        await self._close(record_id, "succeeded", fetched.status)
+        return fetched
+
+    async def download(
+        self,
+        call: Call,
+        *,
+        run_id: str | None = None,
+        max_bytes: int = MAX_BODY_BYTES,
+        accept: str = "*/*",
+        content_types: Collection[str] | None = None,
+        allow_vpn_fake_ip: bool = True,
+    ) -> Fetched | None:
+        """A bounded file download for Add to materials, through the same consent and URL guards."""
+        record_id = await self._open(call, run_id)
+        try:
+            fetched = await self.fetcher.fetch(
+                call.url,
+                max_bytes=max_bytes,
+                accept=accept,
+                content_types=content_types,
+                total_seconds=PAGE_SECONDS,
+                allow_vpn_fake_ip=allow_vpn_fake_ip,
+                pin_address=True,
+            )
+        except KnowledgeError as error:
+            await self._close(record_id, "failed", None)
+            logger.info("Science file unavailable: %s %s", call.provider, type(error).__name__)
+            return None
+        except BaseException:
+            # Cancellation is an outcome too: never leave a journal row in «sent».
+            await self._close(record_id, "failed", None)
+            raise
         await self._close(record_id, "succeeded", fetched.status)
         return fetched

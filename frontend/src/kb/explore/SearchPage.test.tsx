@@ -30,7 +30,9 @@ function setup(over: { world?: Partial<ExploreWorld>; search?: Partial<ReturnTyp
   const h = exploreClients(world);
   const toast = vi.fn();
   const props: SearchPageProps = {
-    search, scopeName: 'Model architectures', explore: h.clients.explore, parallelLimit: 3, covered: false, onCovered: vi.fn(),
+    search, scopeName: 'Model architectures', explore: h.clients.explore, parallelLimit: 3,
+    listWidth: 380, onListWidth: vi.fn(), onStarted: vi.fn(),
+    covered: false, onCovered: vi.fn(),
     onChanged: vi.fn(), onDiscuss: vi.fn(), onOpenDocument: vi.fn(), onOpenSettings: vi.fn(), toast, ...over.props,
   };
   const view = render(<SearchPage {...props} />);
@@ -99,10 +101,14 @@ describe('EX3 search page — a paper in the list (UX-6)', () => {
 });
 
 describe('EX3 search page — opening a paper marks it seen (UX-2) and fills the reader slot', () => {
-  it('keeps a hint in the slot until a paper is picked', async () => {
+  it('gives the list the whole page until a paper is picked; picking one splits it once (FX-4)', async () => {
     setup();
     await row(/RailS/);
-    expect(within(reader()).getByText('Pick a paper on the left — it opens here.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Paper' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('separator', { name: 'Resize papers list' })).not.toBeInTheDocument();
+    fireEvent.click(await row(/Seen already/));
+    expect(screen.getByRole('region', { name: 'Paper' })).toBeInTheDocument();
+    expect(screen.getByRole('separator', { name: 'Resize papers list' })).toHaveAttribute('aria-controls', 'kb-ex-list');
   });
 
   it('opening a New paper sends «seen», takes the dot away and tells the page the counts changed', async () => {
@@ -139,11 +145,12 @@ describe('EX3 search page — opening a paper marks it seen (UX-2) and fills the
     expect(within(reader()).getByText('Mostly repeats what your wiki has.')).toBeInTheDocument();
   });
 
-  it('closes the paper and goes back to the hint', async () => {
+  it('closes the paper, and the list has the whole page again (FX-4)', async () => {
     setup();
     fireEvent.click(await row(/Seen already/));
     fireEvent.click(within(reader()).getByRole('button', { name: 'Close paper' }));
-    expect(within(reader()).getByText('Pick a paper on the left — it opens here.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Paper' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('separator', { name: 'Resize papers list' })).not.toBeInTheDocument();
   });
 
   it('opens the paper\'s own page: the read link, else the DOI, else says there is no page', async () => {
@@ -181,13 +188,13 @@ describe('EX3 search page — opening a paper marks it seen (UX-2) and fills the
 });
 
 describe('EX3 search page — Add to materials (UX-11)', () => {
-  it('adds the paper, tells you where it went, and shows it as In Materials, not in the wiki', async () => {
+  it('adds the paper, tells you where it went and how much of it, and shows it as In Materials, not in the wiki', async () => {
     const h = setup();
     fireEvent.click(await row(/RailS/));
     fireEvent.click(within(reader()).getByRole('button', { name: 'Add to materials' }));
     await waitFor(() => expect(sent(h.request, 'POST', '/kb/explore/findings/f1/materials')).toHaveLength(1));
-    await waitFor(() => expect(h.toast).toHaveBeenCalledWith({ text: 'Added to Materials › From Explore · not in the wiki yet', tone: 'done' }));
-    expect(within(reader()).getByText('In Materials › From Explore · not in the wiki')).toBeInTheDocument();
+    await waitFor(() => expect(h.toast).toHaveBeenCalledWith({ text: 'Added to Materials › From Explore (abstract only) · not in the wiki yet', tone: 'done' }));
+    expect(within(reader()).getByText('In Materials › From Explore (abstract only) · not in the wiki')).toBeInTheDocument();
     expect(within(reader()).queryByRole('button', { name: 'Add to materials' })).not.toBeInTheDocument();
     expect(within(reader()).queryByRole('button', { name: 'Not for me' })).not.toBeInTheDocument();
     fireEvent.click(within(reader()).getByRole('button', { name: 'Open' }));
@@ -241,7 +248,8 @@ describe('EX3 search page — Not for me (UX-2)', () => {
     fireEvent.click(within(reader()).getByRole('button', { name: 'Not for me' }));
     await waitFor(() => expect(sent(h.request, 'POST', '/kb/explore/findings/f1/dismiss')).toHaveLength(1));
     await waitFor(() => expect(screen.queryByRole('button', { name: /RailS/ })).not.toBeInTheDocument());
-    expect(within(reader()).getByText('Pick a paper on the left — it opens here.')).toBeInTheDocument();
+    // the paper closes with the list, which has the whole page again (FX-4)
+    expect(screen.queryByRole('region', { name: 'Paper' })).not.toBeInTheDocument();
     const toast = h.toast.mock.calls.at(-1)![0] as { text: string; action: { label: string; run: () => void } };
     expect(toast.text).toBe('Hidden. Show → Not for me brings it back.');
     expect(toast.action.label).toBe('Undo');
@@ -315,7 +323,7 @@ describe('EX3 search page — a paid paper (UX-3)', () => {
     await open();
     expect(note()).toBeInTheDocument();
     fireEvent.click(within(reader()).getByRole('button', { name: 'Add to materials' }));
-    await within(reader()).findByText('In Materials › From Explore · not in the wiki');
+    await within(reader()).findByText('In Materials › From Explore (abstract only) · not in the wiki');
     expect(within(reader()).queryByText(/This article is paid/)).not.toBeInTheDocument();
   });
 
@@ -421,12 +429,16 @@ describe('EX3 search page — the funnel «found → fit → new» and its Steps
     expect(document.querySelector('.kb-ex-steps')!.textContent).not.toMatch(/local model|openrouter|codex|free ·/i);
   });
 
-  it('shows a search that is running with its step, and Stop pauses it', async () => {
-    const h = setup({ search: { state: 'running', stage: 'decision', found: 31, fit: 0, new: 0 } });
-    const status = await screen.findByRole('status', { name: '' });
-    expect(status).toHaveTextContent('31 found · step 3 of 5');
-    expect(screen.getByRole('progressbar', { name: 'Search progress' })).toHaveAttribute('value', '3');
-    expect(screen.getByRole('progressbar', { name: 'Search progress' })).toHaveAttribute('max', '5');
+  it('shows a search that is running with its live line of steps, and Stop pauses it', async () => {
+    const h = setup({ search: { state: 'running', stage: 'decision', found: 31, after_rules: 40, decided: 12, fit: 0, new: 0 } });
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('Understanding your request');
+    expect(status).toHaveTextContent('Searching OpenAlex');
+    expect(status).toHaveTextContent('Checking fit');
+    expect(status).toHaveTextContent('Comparing with your wiki');
+    expect(screen.getByText('12/40')).toBeInTheDocument();
+    expect(screen.getByText('Checking fit').closest('li')).toHaveClass('is-on');
+    expect(screen.getByText('Searching OpenAlex').closest('li')).toHaveClass('is-done');
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(sent(h.request, 'POST', '/kb/explore/runs/run-1/pause')).toHaveLength(1));
     expect(h.props.onChanged).toHaveBeenCalled();
@@ -434,7 +446,7 @@ describe('EX3 search page — the funnel «found → fit → new» and its Steps
 
   it('says it is searching before anything is found, and that papers appear as they are checked', async () => {
     setup({ search: { state: 'running', stage: 'collect', found: 0 }, world: { findings: [] } });
-    expect(await screen.findByText('Searching OpenAlex…')).toBeInTheDocument();
+    expect(await screen.findByText('Searching OpenAlex')).toBeInTheDocument();
     expect(await screen.findByText('Papers appear here as they are checked.')).toBeInTheDocument();
   });
 

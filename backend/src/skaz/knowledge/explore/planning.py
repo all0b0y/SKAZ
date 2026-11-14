@@ -105,8 +105,10 @@ class SearchPlanner:
 
     def build(self, body: KbSearchPlanRequest) -> KbSearchPlan:
         query = body.query.strip()
-        if len(query) > TERM_CHARS:
-            return KbSearchPlan(items=[], ready=False, reason="Use a search topic of at most 72 characters.")
+        # This is a local preview; the background query agent derives the actual outbound keywords.
+        term = query
+        if len(term) > TERM_CHARS:
+            term = term[:TERM_CHARS].rsplit(" ", 1)[0] or term[:TERM_CHARS]
         if body.area_id:
             chosen = [body.area_id]
         elif query:
@@ -116,11 +118,11 @@ class SearchPlanner:
         else:
             chosen = []
         items = [
-            KbSearchPlanItem(area_id=aid, label=self.name(aid), terms=[query] if query else self._terms(aid))
+            KbSearchPlanItem(area_id=aid, label=self.name(aid), terms=[term] if query else self._terms(aid))
             for aid in chosen
         ]
         if query and not chosen:
-            items = [KbSearchPlanItem(area_id=None, label=query, terms=[query])]
+            items = [KbSearchPlanItem(area_id=None, label=query, terms=[term])]
         return KbSearchPlan(
             items=items, ready=bool(items), reason=None if items else "Choose a topic or type a query."
         )

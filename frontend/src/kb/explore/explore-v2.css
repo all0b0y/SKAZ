@@ -197,6 +197,22 @@
   font-size: var(--t-md);
 }
 
+/* FX-5: an empty answer says which words went out, and offers to edit them and search again. */
+.kb-ex-again {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--kb-sp-10);
+  width: 100%;
+}
+
+.kb-ex-again__edit {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--kb-sp-8);
+  width: min(100%, 440px);
+}
+
 .kb-ex-chips {
   display: flex;
   flex-wrap: wrap;
@@ -421,8 +437,17 @@ button.kb-ex-chip:active {
   display: flex;
 }
 
+/* FX-4: while no paper is open the list has the page to itself; picking one splits the page once, at
+   the remembered width — nothing slides in and no width moves by itself (UX-14). */
+.kb-ex-search.is-wide .kb-ex-list {
+  flex: 1 1 auto;
+  border-right: 0;
+}
+
 .kb-ex-list {
-  flex: 0 0 460px;
+  /* The remembered width (FX-4); the page sets it inline, this is the default. */
+  --kb-ex-list-w: 460px;
+  flex: 0 0 var(--kb-ex-list-w);
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -463,6 +488,15 @@ button.kb-ex-chip:active {
   color: var(--kb-muted-strong);
 }
 
+/* FX-1: the English terms a finished or stopped search went out with. */
+.kb-ex-terms {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-sm);
+  color: var(--kb-muted);
+}
+
 .kb-ex-steps {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -492,24 +526,53 @@ button.kb-ex-chip:active {
   color: var(--kb-muted-strong);
 }
 
-.kb-ex-progress progress {
+/* FX-5: the live line of steps while a search runs — the active step bold, the finished ones checked,
+   an arrow between neighbours. The terms and counters sit right beside their step. */
+.kb-ex-live {
   flex: 1;
   min-width: 0;
-  height: 4px;
-  border: 0;
-  border-radius: var(--kb-r-pill);
-  background: var(--kb-accent-soft);
-  overflow: hidden;
-  appearance: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kb-sp-2) var(--kb-sp-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.kb-ex-progress progress::-webkit-progress-bar {
-  background: var(--kb-accent-soft);
+.kb-ex-live__step {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--kb-sp-4);
+  max-width: 100%;
+  color: var(--kb-muted);
 }
 
-.kb-ex-progress progress::-webkit-progress-value {
-  background: var(--kb-text);
-  border-radius: var(--kb-r-pill);
+.kb-ex-live__step + .kb-ex-live__step {
+  padding-left: var(--kb-sp-24);
+}
+
+.kb-ex-live__step + .kb-ex-live__step::before {
+  content: '→';
+  position: absolute;
+  left: var(--kb-sp-6);
+  color: var(--kb-muted);
+}
+
+.kb-ex-live__step.is-done {
+  color: var(--kb-muted-strong);
+}
+
+.kb-ex-live__step.is-on {
+  color: var(--kb-text);
+  font-weight: 600;
+}
+
+.kb-ex-live__note {
+  color: var(--kb-muted);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .kb-ex-filters {
@@ -624,6 +687,17 @@ button.kb-ex-chip:active {
 .kb-ex-row__abstract.is-none {
   font-style: italic;
   color: var(--kb-muted);
+}
+
+/* FX-2: a paper still coming in from the source says so in its row. */
+.kb-ex-row__import {
+  grid-column: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-sp-4);
+  margin-top: var(--kb-sp-2);
+  font-size: var(--t-sm);
+  color: var(--kb-muted-strong);
 }
 
 .kb-ex-row__restore {
@@ -802,8 +876,7 @@ button.kb-ex-chip:active {
 }
 
 .kb-ex-reader__outside,
-.kb-ex-reader__none,
-.kb-ex-reader__empty {
+.kb-ex-reader__none {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -956,7 +1029,7 @@ button.kb-ex-chip:active {
 /* ---- Narrower than a wide window: fewer columns, never a panel that slides in ---- */
 @container kb-ex (max-width: 960px) {
   .kb-ex-list {
-    flex-basis: 360px;
+    flex-basis: min(var(--kb-ex-list-w), 360px);
   }
 }
 
@@ -977,5 +1050,15 @@ button.kb-ex-chip:active {
     flex: 0 0 46%;
     border-right: 0;
     border-bottom: 1px solid var(--kb-ex-line);
+  }
+
+  /* A column split is not dragged: the divider between the list and the paper waits for a wide page. */
+  .kb-ex-search > .kb-resizer {
+    display: none;
+  }
+
+  .kb-ex-search.is-wide .kb-ex-list {
+    flex: 1 1 auto;
+    border-bottom: 0;
   }
 }

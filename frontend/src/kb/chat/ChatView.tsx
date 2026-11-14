@@ -13,6 +13,7 @@ import { AgentFix } from './AgentFix';
 import { useOpenDocument } from '../state/document';
 import { ChatMenu, RenameForm } from './ChatMenu';
 import { AssistantMessage, SystemMessage, UserMessage } from './Message';
+import { DiscussPaperBar } from './DiscussPaperBar';
 import { useQuestionActions } from './useQuestionActions';
 import { partsOf } from '../api/permissions';
 import { WebSearchChip } from './webSearch';
@@ -175,6 +176,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   };
 
   const recording = !!(chat?.recording_material_id ?? summary?.recording_material_id);
+  const discussFinding = chat?.discuss_finding ?? summary?.discuss_finding ?? null;
   const engine = chat?.engine ?? summary?.engine;
   const chatAgent = engine ? agentOf(agents, engine) : undefined;
   const fix = chatAgent && chatAgent.state !== 'ready' ? <AgentFix agent={chatAgent} /> : null;
@@ -212,6 +214,14 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         {chat && <ChatOverviewButton chatId={chat.id} />}
         {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)} />}
       </header>
+      {discussFinding && (
+        <DiscussPaperBar
+          finding={discussFinding}
+          onAdded={() => { if (currentId) void chats.getState().load(currentId); }}
+          onOpenMaterial={(id) => openDoc({ type: 'material', id })}
+          onNotice={setNotice}
+        />
+      )}
       {notice && <p className="kb-notice" role="status">{notice}</p>}
       <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={fieldStill} calm={fieldCalm}>
       {showBackdrop && <ChatBackdrop working={isAnswering(chat)} active={!hidden} reduced={reduced} />}

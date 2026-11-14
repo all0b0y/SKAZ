@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from ..api.schemas_explore_common import KbPublicationDate
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
         KbScienceText,
         KbScienceWork,
     )
+    from ..sources.fetch import Fetched
 
 
 class ScienceStop(Exception):
@@ -129,6 +130,15 @@ class ScienceClient(Protocol):
     ) -> Sequence[ScienceUpdate]: ...
     async def publication(self, ref: ScienceRef, *, run_id: str | None = None) -> KbPublicationDate: ...
     async def taxonomy(self, parent_id: str | None = None) -> Sequence[TaxonomyNode]: ...
+
+
+@runtime_checkable
+class SciencePdfReader(Protocol):
+    """Optional FX-2 extension: existing text-only science clients remain usable."""
+
+    async def read_pdf(self, work_id: str, *, run_id: str | None = None) -> Fetched | None:
+        """User-click import only: an open PDF, including a repository's attached article."""
+        ...
 
 
 #: ``search_topics`` limits, shared by the producer of the terms (``areas.mapping``) and the client: at most

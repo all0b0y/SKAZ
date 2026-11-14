@@ -105,10 +105,9 @@ async def test_discuss_opens_one_chat_on_the_card_and_downloads_nothing(parts: S
     reads_before = parts.science.count("read_text")
     talk = await parts.funnel.discuss(finding.id)
     assert parts.chats.created == ["Routing experts"]
-    ((chat_id, message),) = parts.chats.sent
-    assert chat_id == talk.chat_id
-    assert "Routing experts" in message.text and REAL_ABSTRACT in message.text
-    assert "add" in message.text.lower() and "materials" in message.text.lower()
+    # FX-3 (replaces UX-7a): the card is service context on each turn, never a fake user message.
+    assert parts.chats.sent == []
+    assert talk.material_id is None
     assert parts.science.count("read_text") == reads_before
     assert (await parts.funnel.discuss(finding.id)).chat_id == talk.chat_id
     assert len(parts.chats.created) == 1

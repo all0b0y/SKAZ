@@ -5,8 +5,8 @@ titles, one per term (OpenAlex ANDs the words of a search: the joined query of E
 the concepts' parenthesised glosses (only those names leave the machine; the science client journals each
 request). Then the decision model picks 1–3 of the found OpenAlex topics or "no match". The result is stored;
 searching inside the topic filters by those ids (no match: by the topic's name and concepts only). A stop
-(consent, the day limit, no decision model, an unsure answer) leaves the topic ``pending`` with the reason:
-it is tried again at the next start, when topics change, or when a search asks for it.
+(consent, the day limit, no decision model) leaves the topic ``pending`` with the reason. An unsure
+answer is stored as ``no_match``: search uses words without retrying the same label on every start.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Literal
 
 from ...native_io import disk_call
-from ..decisions.protocol import ChoiceAnswer, ChoiceQuestion, DecisionLayer
+from ..decisions.protocol import ChoiceAnswer, ChoiceQuestion, DecisionLayer, Undecided
 from ..logsafe import error_note
 from ..science.protocols import TOPIC_TERM_CHARS, TOPIC_TERMS, ScienceStop, TaxonomyNode
 from . import prompts
@@ -41,8 +41,8 @@ EXTRA_PICK = 0.25
 
 
 #: Why a topic has no label (``explore_areas.mapping_reason``; the system's, never shown):
-#: ``no_match`` + no_candidates (OpenAlex found no topic for any term) | none_fit (the model said none fits);
-#: ``pending`` + a science stop | no_topic_search | no_decision_model | undecided | decision_failed.
+#: ``no_match`` + no_candidates (OpenAlex found no topic) | none_fit | undecided (no confident label);
+#: ``pending`` + a science stop | no_topic_search | no_decision_model | decision_failed.
 MappingReason = Literal[
     "no_candidates",
     "none_fit",
@@ -55,6 +55,18 @@ MappingReason = Literal[
     "provider_unavailable",
 ]
 _GLOSS = re.compile(r"\([^()]*\)")
+_ABBREVIATIONS = {
+    "ai": "Artificial intelligence",
+    "llm": "Large language model",
+    "llms": "Large language model",
+    "rag": "Retrieval augmented generation",
+    "moe": "Mixture of experts",
+    "nlp": "Natural language processing",
+    "rl": "Reinforcement learning",
+    "cv": "Computer vision",
+    "ml": "Machine learning",
+}
+_ABBREVIATION = re.compile(r"\b(?:AI|LLMs?|RAG|MoE|NLP|RL|CV|ML)\b", re.IGNORECASE)
 
 
 def _term(text: str) -> str:
@@ -70,13 +82,16 @@ def _term(text: str) -> str:
 
 
 def search_terms(name: str, concepts: Sequence[str]) -> list[str]:
-    """The topic name, then up to ``SEARCH_CONCEPTS`` main concepts: each term one ``/topics`` search."""
+    """Name, expanded abbreviations, then main concepts; each term one bounded ``/topics`` search."""
+    name = _term(name)
+    expanded = _ABBREVIATION.sub(lambda match: _ABBREVIATIONS[match[0].casefold()], name)
+    expansions = [_ABBREVIATIONS[match[0].casefold()] for match in _ABBREVIATION.finditer(name)]
     terms: list[str] = []
-    for raw in [name, *concepts]:
+    for raw in [name, expanded, *expansions, *concepts[:SEARCH_CONCEPTS]]:
         term = _term(raw)
         if term and term.casefold() not in {t.casefold() for t in terms}:
             terms.append(term)
-        if len(terms) > SEARCH_CONCEPTS:
+        if len(terms) >= TOPIC_TERMS:
             break
     return terms
 
@@ -187,8 +202,10 @@ class TopicMapper:
             logger.info("topic mapping: the decision model failed: %s", error_note(error))
             await self._waits([topic], "decision_failed")
             return False
+        if isinstance(answer, Undecided):
+            return await disk_call(self.topics.store_mapping, topic.id, topic.name, None, "undecided")
         if not isinstance(answer, ChoiceAnswer):
             await self._waits([topic], "undecided")
-            return False  # stays pending, asked again later
+            return False
         ids = [candidates[name] for name in picks(answer, options)]
         return await disk_call(self.topics.store_mapping, topic.id, topic.name, ids, "none_fit")

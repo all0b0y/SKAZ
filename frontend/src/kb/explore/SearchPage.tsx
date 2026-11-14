@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import type { KbFinding, KbSearch } from '../../api/kb/types.gen';
 import type { ExploreClient } from '../api/explore';
 import type { DocTarget } from '../state/document';
+import { EXPLORE_LIST_MAX, EXPLORE_LIST_MIN } from '../state/prefs';
 import type { SettingsSection } from '../state/ui';
 import type { ToastData } from '../ui/Toast';
-import { Button, Icon, Menu, type MenuItem } from '../ui';
+import { Button, Icon, Menu, TextField, type MenuItem } from '../ui';
+import { Resizer } from '../shell/Resizer';
 import { exploreIssue } from './errors';
 import {
   DEFAULT_FILTERS, SHOW_LABEL, SORT_LABEL, TYPE_LABEL, YEAR_LABEL, filtersActive, filtersQuery, readFilters, writeFilters,
   type FindingFilters,
 } from './filters';
 import { PaperReader } from './PaperReader';
-import { STAGE_STEP } from './types';
 
 type Toast = (toast: Omit<ToastData, 'id'>) => void;
 
@@ -21,11 +22,13 @@ const TYPE_TEXT: Record<string, string> = {
   dissertation: 'Dissertation', 'book-chapter': 'Book chapter',
 };
 
-/** What a paused or failed search says, and what can be done about it. */
-export const STOP_TEXT: Record<string, { text: string; settings?: boolean; resume?: string }> = {
+/** What a paused or failed search says, and what can be done about it. `settings` says which part of
+ * Settings its button opens: `true` = the search settings (FX: `agent_required` needs the chat agent). */
+export const STOP_TEXT: Record<string, { text: string; settings?: SettingsSection | true; resume?: string }> = {
   decision_model_required: { text: 'Set up a decision model to check which papers fit the topic.', settings: true },
   science_consent_required: { text: 'SKAZ needs your OK to send the topic words to OpenAlex. Turn it on in Settings, then continue.', settings: true, resume: 'Continue' },
   openalex_daily_limit: { text: "OpenAlex's free daily limit is reached. Continue tomorrow, or add a free key in Settings.", settings: true, resume: 'Continue' },
+  agent_required: { text: 'Set up a chat agent in Settings to turn your request into English search terms.', settings: 'models', resume: 'Continue' },
   budget: { text: 'Paused at the step limit of this search.', resume: 'Continue' },
   user_pause: { text: 'Paused.', resume: 'Continue' },
   app_exit: { text: 'Stopped when SKAZ closed. Free steps go on by themselves; paid checks wait for your Continue.', resume: 'Continue' },
@@ -51,6 +54,34 @@ export function lowerFirst(text: string): string {
   return /[A-Z]/.test(word.slice(1)) ? clean : clean.replace(/^./, (c) => c.toLowerCase());
 }
 
+/** FX-2: how much of the paper actually went to Materials — said in the toast and the reader's note. */
+export function importNote(content: KbFinding['imported_content']): string {
+  if (content === 'abstract_only') return ' (abstract only)';
+  if (content === 'link_only') return ' (link only)';
+  return '';
+}
+
+/** FX-5: the words field of «Edit words and search again» — commas separate the terms that go out. */
+export function splitTerms(text: string): string[] {
+  return text.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean);
+}
+
+/** FX-5: the live line of steps while a search runs — the active one bold, the finished ones checked. */
+export function liveSteps(search: KbSearch): Array<{ title: string; note: string | null; on: boolean; done: boolean }> {
+  const stepOf: Record<string, number> = { plan: 1, collect: 2, rules: 2, links: 2, decision: 3, repeats: 3, novelty: 4, ready: 4 };
+  const now = stepOf[search.stage] ?? 1;
+  const terms = search.terms && search.terms.length > 0 ? `(${search.terms.join(' · ')})` : null;
+  const checking = (search.after_rules ?? 0) > 0 || (search.decided ?? 0) > 0
+    ? `${search.decided ?? 0}/${search.after_rules || search.found}` : null;
+  const comparing = search.novelty_checked ? `${search.novelty_checked}/${search.fit}` : null;
+  return [
+    { title: 'Understanding your request', note: null, on: now === 1, done: now > 1 },
+    { title: 'Searching OpenAlex', note: terms, on: now === 2, done: now > 2 },
+    { title: 'Checking fit', note: checking, on: now === 3, done: now > 3 },
+    { title: 'Comparing with your wiki', note: comparing, on: now === 4, done: now > 4 },
+  ];
+}
+
 const pageUrl = (f: KbFinding): string | null => f.read_url ?? (f.work.doi ? `https://doi.org/${f.work.doi}` : null);
 
 export interface SearchPageProps {
@@ -58,6 +89,11 @@ export interface SearchPageProps {
   scopeName: string;
   explore: ExploreClient;
   parallelLimit: number;
+  /** FX-4: the papers list's width while a paper is open; the divider between them keeps it in prefs. */
+  listWidth: number;
+  onListWidth: (px: number) => void;
+  /** FX-5: a search started from this page («Edit words and search again») opens as this page's search. */
+  onStarted: (id: string) => void | Promise<void>;
   /** Something sits over the page (a menu, a dialog, the toast): the reader's native view steps aside. */
   covered: boolean;
   /** A menu of this page is open (true) or closed (false); it switches itself off when the page goes away. */
@@ -78,6 +114,8 @@ export function SearchPage(props: SearchPageProps) {
   const [open, setOpen] = useState<KbFinding | null>(null);
   const [steps, setSteps] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** FX-2: the paper whose Add to materials request is on its way (its button says Importing…). */
+  const [adding, setAdding] = useState<string | null>(null);
   const generation = useRef(0);
 
   useEffect(() => () => onCovered(false), [onCovered]);
@@ -89,15 +127,39 @@ export function SearchPage(props: SearchPageProps) {
     try {
       const res = await explore.search_findings(filtersQuery(search.id, filters));
       if (mine !== generation.current) return;
-      setRows(res.groups.flatMap((g) => g.findings));
+      const list = res.groups.flatMap((g) => g.findings);
+      setRows(list);
+      // A paper the user is reading takes each fresh state the list reads (an import that landed, FX-2).
+      setOpen((now) => (now ? list.find((f) => f.id === now.id) ?? now : now));
       setFailed(null);
     } catch (error) {
       if (mine === generation.current) setFailed(exploreIssue(error).message);
     }
   }, [explore, search.id, filters]);
 
-  // New findings arrive while the search runs; a finished search is read once per change.
-  useEffect(() => { void load(); }, [load, search.state, search.new, search.unseen]);
+  // New findings arrive while the search runs; a finished search is read once per change. Every count a
+  // running search moves rereads the papers (FX-5), so they appear as soon as novelty has checked them.
+  useEffect(() => { void load(); }, [load, search.state, search.stage, search.found, search.decided, search.fit, search.novelty_checked, search.new, search.unseen]);
+
+  // While the search runs — or a paper still imports in the background (FX-2) — the page keeps a steady
+  // beat of its own, so new papers and finished imports show up without anything else changing. The
+  // paper being read is also asked on its own: once it lands it leaves the filtered list.
+  const openId = open?.id ?? null;
+  const openImporting = open !== null && (open.state === 'importing' || open.importing === true);
+  const anyImporting = openImporting || (rows ?? []).some((f) => f.state === 'importing' || f.importing === true);
+  useEffect(() => {
+    if (search.state !== 'running' && !anyImporting) return undefined;
+    const timer = window.setInterval(() => {
+      void load();
+      if (openImporting && openId !== null) {
+        void explore.finding(openId).then((next) => {
+          setRows((old) => old?.map((f) => (f.id === next.id ? next : f)) ?? old);
+          setOpen((now) => (now && now.id === next.id ? next : now));
+        }).catch(() => undefined);
+      }
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [search.state, anyImporting, openImporting, openId, load, explore]);
 
   const replace = (next: KbFinding) => {
     setRows((old) => old?.map((f) => (f.id === next.id ? next : f)) ?? old);
@@ -117,12 +179,36 @@ export function SearchPage(props: SearchPageProps) {
     }
   };
 
-  const addToMaterials = (f: KbFinding) => act(async () => {
-    const added = await explore.add_to_materials(f.id);
-    replace({ ...f, state: 'materials', material_id: added.material_id ?? null });
-    onChanged();
-    toast({ text: 'Added to Materials › From Explore · not in the wiki yet', tone: 'done' });
-  });
+  /** FX-2: the paper goes to Materials — its PDF or open text when there is one, else the real abstract,
+   * else just the link. A big import continues in the background; the button says Importing… until then. */
+  const addToMaterials = (f: KbFinding) => {
+    if (busy || adding !== null) return;
+    setAdding(f.id);
+    void act(async () => {
+      try {
+        const added = await explore.add_to_materials(f.id);
+        replace({ ...f, state: added.importing ? 'importing' : 'materials', material_id: added.material_id ?? null,
+          importing: added.importing ?? false, imported_content: added.content ?? null });
+        onChanged();
+        toast({ text: `Added to Materials › From Explore${importNote(added.content)} · not in the wiki yet`, tone: 'done' });
+      } finally {
+        setAdding(null);
+      }
+    });
+  };
+
+  /** FX-5: an empty answer is a words problem — the edited words start a new run and open it here. */
+  const searchAgain = (text: string) => {
+    const words = text.trim();
+    if (!words) return;
+    void act(async () => {
+      const started = await explore.start({
+        area_id: search.area_id, query: words,
+        plan: [{ area_id: search.area_id, label: words, terms: splitTerms(words) }],
+      });
+      await props.onStarted(started.id);
+    });
+  };
 
   const dismiss = (f: KbFinding) => act(async () => {
     const next = await explore.dismiss(f.id);
@@ -158,13 +244,17 @@ export function SearchPage(props: SearchPageProps) {
   const pause = () => act(async () => { await explore.pause(search.id); onChanged(); });
 
   return (
-    <div className="kb-ex-search">
-      <section className="kb-ex-list" aria-label="Papers found">
+    <div className={`kb-ex-search${open ? '' : ' is-wide'}`}>
+      <section id="kb-ex-list" className="kb-ex-list" aria-label="Papers found"
+        style={{ '--kb-ex-list-w': `${props.listWidth}px` } as CSSProperties}>
         <header className="kb-ex-list__head">
           <div className="kb-ex-list__title">
             <h2 title={search.name}>{search.name}</h2>
             {search.query && <span className="kb-ex-muted">in {props.scopeName}</span>}
           </div>
+          {search.state !== 'running' && search.state !== 'queued' && search.terms && search.terms.length > 0 && (
+            <p className="kb-ex-terms" title={search.terms.join(' · ')}>Searched for: {search.terms.join(' · ')}</p>
+          )}
           <Progress search={search} limit={props.parallelLimit} steps={steps} onSteps={() => setSteps((s) => !s)}
             busy={busy} onResume={() => void resume()} onPause={() => void pause()} onOpenSettings={props.onOpenSettings} />
         </header>
@@ -174,19 +264,24 @@ export function SearchPage(props: SearchPageProps) {
           {!failed && rows === null && <p className="kb-ex-muted kb-ex-pad" role="status">Loading…</p>}
           {!failed && rows !== null && rows.length === 0 && (
             <Empty search={search} filters={filters} onClear={() => setFilters({ ...DEFAULT_FILTERS, sort: filters.sort })}
-              onShowPaid={() => setFilters({ ...filters, free: false })} />
+              onShowPaid={() => setFilters({ ...filters, free: false })} onAgain={searchAgain} />
           )}
-          {rows?.map((f) => <Row key={f.id} f={f} open={f.id === open?.id} onOpen={() => openRow(f)} onRestore={() => void restore(f)} />)}
+          {rows?.map((f) => <Row key={f.id} f={f} open={f.id === open?.id}
+            importing={adding === f.id || f.state === 'importing' || f.importing === true}
+            onOpen={() => openRow(f)} onRestore={() => void restore(f)} />)}
         </div>
       </section>
-      <section className="kb-ex-reader" aria-label="Paper">
-        {open ? <>
-          <ReaderHead f={open} busy={busy} onClose={() => setOpen(null)} onAdd={() => void addToMaterials(open)}
+      {open && <>
+        <Resizer label="Resize papers list" controls="kb-ex-list" value={props.listWidth}
+          min={EXPLORE_LIST_MIN} max={EXPLORE_LIST_MAX} direction={1} onChange={props.onListWidth} />
+        <section className="kb-ex-reader" aria-label="Paper">
+          <ReaderHead f={open} busy={busy} importing={adding === open.id || open.state === 'importing' || open.importing === true}
+            onClose={() => setOpen(null)} onAdd={() => addToMaterials(open)}
             onDiscuss={() => void discuss(open)} onBrowser={() => openInBrowser(open)} onDismiss={() => void dismiss(open)}
             onRestore={() => void restore(open)} onOpenDocument={props.onOpenDocument} />
           <PaperReader url={pageUrl(open)} covered={props.covered} />
-        </> : <div className="kb-ex-reader__empty">Pick a paper on the left — it opens here.</div>}
-      </section>
+        </section>
+      </>}
     </div>
   );
 }
@@ -199,10 +294,19 @@ function Progress({ search, limit, steps, onSteps, busy, onResume, onPause, onOp
     return <p className="kb-ex-funnel">Waiting — {limit} searches are already running.</p>;
   }
   if (search.state === 'running') {
-    const step = STAGE_STEP[search.stage as keyof typeof STAGE_STEP] ?? 1;
+    // FX-5: a live line of steps instead of a bare «step N of 5» — where the search stands, with its
+    // English terms and its fit/novelty counters, so the wait reads as work being done.
     return <div className="kb-ex-progress" role="status">
-      <span>{search.found > 0 ? `${search.found} found · step ${step} of 5` : 'Searching OpenAlex…'}</span>
-      <progress aria-label="Search progress" value={step} max={5} />
+      <ol className="kb-ex-live" aria-label="Search steps">
+        {liveSteps(search).map((s) => (
+          <li key={s.title} className={`kb-ex-live__step${s.done ? ' is-done' : ''}${s.on ? ' is-on' : ''}`}
+            aria-current={s.on ? 'step' : undefined}>
+            {s.done && <Icon name="check" size={12} />}
+            <span>{s.title}</span>
+            {s.note && <span className="kb-ex-live__note">{s.note}</span>}
+          </li>
+        ))}
+      </ol>
       <Button size="sm" variant="quiet" disabled={busy} onClick={onPause}>Stop</Button>
     </div>;
   }
@@ -210,7 +314,7 @@ function Progress({ search, limit, steps, onSteps, busy, onResume, onPause, onOp
     const stop = STOP_TEXT[search.stop_reason ?? (search.state === 'error' ? 'failed' : 'user_pause')] ?? STOP_TEXT.user_pause!;
     return <div className="kb-ex-stop" role="alert">
       <span>{stop.text}</span>
-      {stop.settings && <Button size="sm" onClick={() => onOpenSettings('search')}>Open Settings</Button>}
+      {stop.settings && <Button size="sm" onClick={() => onOpenSettings(stop.settings === true ? 'search' : stop.settings)}>Open Settings</Button>}
       {stop.resume && search.checkpoint_id && <Button size="sm" disabled={busy} onClick={onResume}>{stop.resume}</Button>}
     </div>;
   }
@@ -229,20 +333,41 @@ function Progress({ search, limit, steps, onSteps, busy, onResume, onPause, onOp
   </>;
 }
 
-function Empty({ search, filters, onClear, onShowPaid }: {
-  search: KbSearch; filters: FindingFilters; onClear: () => void; onShowPaid: () => void;
+function Empty({ search, filters, onClear, onShowPaid, onAgain }: {
+  search: KbSearch; filters: FindingFilters; onClear: () => void; onShowPaid: () => void; onAgain: (words: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [words, setWords] = useState(() => search.terms?.join(', ') || search.query);
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (words.trim()) onAgain(words);
+  };
   if (search.state === 'running' || search.state === 'queued') return <p className="kb-ex-muted kb-ex-pad">Papers appear here as they are checked.</p>;
   if (search.state === 'paused' || search.state === 'error') return <p className="kb-ex-muted kb-ex-pad">Nothing to show yet.</p>;
+  /** FX-5: the words this search went out with — its English terms, or the request as typed. */
+  const searched = search.terms?.length ? search.terms.join(' · ') : search.query;
+  /** An empty answer is a words problem (FX-5): say the words, offer to edit them and search again. */
+  const again = <div className="kb-ex-again">
+    {searched && <span className="kb-ex-muted">Searched for: {searched}</span>}
+    {editing ? (
+      <form className="kb-ex-again__edit" onSubmit={submit}>
+        <TextField label="Search words" value={words} maxLength={200} autoFocus
+          onChange={(e) => setWords(e.target.value)} />
+        <Button size="sm" variant="fill" type="submit" disabled={!words.trim()}>Search again</Button>
+      </form>
+    ) : (
+      <Button size="sm" onClick={() => setEditing(true)}>Edit words and search again</Button>
+    )}
+  </div>;
   if (search.found === 0) {
-    return <div className="kb-ex-empty"><strong>Nothing found</strong><span className="kb-ex-muted">No papers came back for these words.</span></div>;
+    return <div className="kb-ex-empty"><strong>Nothing found</strong><span className="kb-ex-muted">No papers came back for these words.</span>{again}</div>;
   }
   if (search.new === 0) {
     return <div className="kb-ex-empty"><strong>Nothing new for you</strong><span className="kb-ex-muted">
       {search.no_text > 0
         ? `Every paper that fit is already in your wiki, or had no text to read (${search.no_text}).`
         : 'Every paper that fit is already covered by your wiki.'}
-    </span></div>;
+    </span>{again}</div>;
   }
   return <div className="kb-ex-empty">
     <strong>Nothing matches the filters</strong>
@@ -252,7 +377,9 @@ function Empty({ search, filters, onClear, onShowPaid }: {
   </div>;
 }
 
-function Row({ f, open, onOpen, onRestore }: { f: KbFinding; open: boolean; onOpen: () => void; onRestore: () => void }) {
+function Row({ f, open, importing, onOpen, onRestore }: {
+  f: KbFinding; open: boolean; importing: boolean; onOpen: () => void; onRestore: () => void;
+}) {
   const state = f.state ?? 'new';
   const meta = [f.work.publication.year, TYPE_TEXT[f.work.publication_type ?? ''] ?? 'Other', f.work.venue].filter(Boolean).join(' · ');
   return (
@@ -264,6 +391,7 @@ function Row({ f, open, onOpen, onRestore }: { f: KbFinding; open: boolean; onOp
           {f.access === 'paid' && <>{' · '}<span className="kb-ex-tag is-paid">Paid</span></>}
           {f.access === 'open' && <>{' · '}<span className="kb-ex-tag is-free">Free</span></>}
         </span>
+        {importing && <span className="kb-ex-row__import"><Icon name="retry" size={12} className="kb-explore-spin" />Importing…</span>}
         {f.has_abstract === false || !f.work.abstract
           ? <span className="kb-ex-row__abstract is-none">No abstract from the source — open it to read.</span>
           : <span className="kb-ex-row__abstract">{f.work.abstract}</span>}
@@ -273,9 +401,9 @@ function Row({ f, open, onOpen, onRestore }: { f: KbFinding; open: boolean; onOp
   );
 }
 
-function ReaderHead({ f, busy, onClose, onAdd, onDiscuss, onBrowser, onDismiss, onRestore, onOpenDocument }: {
-  f: KbFinding; busy: boolean; onClose: () => void; onAdd: () => void; onDiscuss: () => void; onBrowser: () => void;
-  onDismiss: () => void; onRestore: () => void; onOpenDocument: (target: DocTarget) => void;
+function ReaderHead({ f, busy, importing, onClose, onAdd, onDiscuss, onBrowser, onDismiss, onRestore, onOpenDocument }: {
+  f: KbFinding; busy: boolean; importing: boolean; onClose: () => void; onAdd: () => void; onDiscuss: () => void;
+  onBrowser: () => void; onDismiss: () => void; onRestore: () => void; onOpenDocument: (target: DocTarget) => void;
 }) {
   const state = f.state ?? 'new';
   const why = f.new_line ?? f.reason;
@@ -301,13 +429,15 @@ function ReaderHead({ f, busy, onClose, onAdd, onDiscuss, onBrowser, onDismiss, 
       {state === 'materials' ? (
         <div className="kb-ex-instate">
           <Icon name="check" size={14} />
-          <span>In Materials › From Explore · not in the wiki</span>
+          <span>In Materials › From Explore{importNote(f.imported_content)} · not in the wiki</span>
           {f.material_id && <Button size="sm" onClick={() => onOpenDocument({ type: 'material', id: f.material_id! })}>Open</Button>}
           <Button size="sm" disabled={busy} onClick={onDiscuss}>Discuss</Button>
         </div>
       ) : (
         <div className="kb-ex-acts">
-          <Button size="sm" variant="fill" icon="plus" disabled={busy} onClick={onAdd}>Add to materials</Button>
+          <Button size="sm" variant="fill" icon="plus" disabled={busy || importing} busy={importing} onClick={onAdd}>
+            {importing ? 'Importing…' : 'Add to materials'}
+          </Button>
           <Button size="sm" icon="chats" disabled={busy} onClick={onDiscuss}>Discuss</Button>
           <Button size="sm" icon="external" onClick={onBrowser}>Open in browser</Button>
           {state === 'dismissed'

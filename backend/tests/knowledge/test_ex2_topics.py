@@ -262,10 +262,10 @@ async def test_sort_materials_labels_45_unsorted_materials_in_batches_and_maps_n
     assert "Sorted 45 of 45" in job.journal[-1].message and "Agents" not in job.journal[-1].message
     assert all(item.kind != "topics" for item in IngestService.list_jobs(service._ingest))  # type: ignore[arg-type]
 
-    # Hidden label: one search per new topic by its name + main concepts; ids never on the map.
+    # Hidden label: one search per new topic by its name (+ FX-1 expansion) + main concepts.
     agents = next(a for a in (await service.map(parent_id=after.areas[0].id)).areas if a.name == "AI agents")
     assert list(service.topics(agents.id)) == ["T10028"] and agents.topic_ids == []
-    assert any(q.startswith("AI agents Agents ") and "concept" in q for q in search.queries)
+    assert any(q.startswith("AI agents ") and "Agents " in q and "concept" in q for q in search.queries)
     assert len(search.queries) == 5  # AI, AI agents, Деловые коммуникации, Продажи, Cooking
     assert service.area_for_topics(["T10028"]) == agents.id
     assert (await service.sort_topics()).state == "idle"  # nothing left to sort: no job, no call
@@ -456,10 +456,11 @@ async def test_hidden_label_picks_up_to_three_topics_no_match_and_waits_on_a_sto
         }
     )
     service = ExploreAreasService(ready, decisions=decider, topic_search=lambda: search)
-    assert await service.map_topics() == 2  # RAG mapped, Cooking no match; Переговоры undecided
+    # FX-1: an undecided answer is stored as no_match (reason="undecided") so it is not retried every start.
+    assert await service.map_topics() == 3  # RAG mapped, Cooking no match, Переговоры no_match (undecided)
     assert list(service.topics(rag)) == ["T1", "T2", "T3"]
     assert store.topic(cooking).mapping_state == "no_match" and list(service.topics(cooking)) == []
-    assert store.topic(talks).mapping_state == "pending"
+    assert store.topic(talks).mapping_state == "no_match" and store.topic(talks).mapping_reason == "undecided"
     assert prompts.NO_MATCH_OPTION in decider.asked[0].options and "<untrusted-data" in decider.asked[0].state
 
     store.rename(rag, "Retrieval-augmented generation")

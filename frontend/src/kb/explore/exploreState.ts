@@ -37,6 +37,8 @@ export interface ExploreState {
 
 const busyStates = new Set(['queued', 'running']);
 const POLL_MS = 1500;
+/** FX-5: while a search runs or waits, the list follows it a beat faster. */
+const BUSY_POLL_MS = 1000;
 
 type ReadSearches = () => Promise<KbSearches>;
 
@@ -106,8 +108,9 @@ export function exploreState(key: object, readSearches: ReadSearches): StoreApi<
 const watchers = new WeakMap<StoreApi<ExploreState>, { count: number; timer: number | null }>();
 
 /**
- * Keep the searches current while someone shows them: read once, then every 1.5 s while a search runs or
- * waits. The side list and the page both watch; one timer serves them.
+ * Keep the searches current while someone shows them: read once, then every 1.5 s — every 1 s while a
+ * search runs or waits (FX-5), so its live counts move without a page of its own. The side list and
+ * the page both watch; one timer serves them.
  */
 export function watchSearches(store: StoreApi<ExploreState>): () => void {
   let watch = watchers.get(store);
@@ -116,13 +119,19 @@ export function watchSearches(store: StoreApi<ExploreState>): () => void {
   w.count += 1;
   if (w.count === 1) {
     void store.getState().refresh();
-    w.timer = window.setInterval(() => {
-      if (store.getState().searches.some((s) => busyStates.has(s.state))) void store.getState().refresh();
-    }, POLL_MS);
+    const busy = (): boolean => store.getState().searches.some((s) => busyStates.has(s.state));
+    const tick = (): void => {
+      void (async () => {
+        if (busy()) await store.getState().refresh();
+        // The delay follows the answer: a search that just finished slows the beat back down.
+        w.timer = window.setTimeout(tick, busy() ? BUSY_POLL_MS : POLL_MS);
+      })();
+    };
+    w.timer = window.setTimeout(tick, POLL_MS);
   }
   return () => {
     w.count -= 1;
-    if (w.count === 0 && w.timer !== null) { window.clearInterval(w.timer); w.timer = null; }
+    if (w.count === 0 && w.timer !== null) { window.clearTimeout(w.timer); w.timer = null; }
   };
 }
 

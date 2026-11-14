@@ -1,7 +1,8 @@
 """``runtime.kb_explore``: the funnel (``ExploreService``), 0.4.0 B2.
 
-Stages (v3 "step N of 5"): collect → rules → decision → novelty → ready.
+Stages: plan (typed query) → collect → rules → decision → novelty → ready.
 
+* plan — the default chat agent turns a typed request into short English OpenAlex terms.
 * collect — Continues (works citing the user's sources), Branches (shared roots / a neighbouring topic),
   Search (the search line's text as a topic, or the area's topics). Only topics, DOIs and ids leave.
 * rules — in code, free (``rules.py``).
@@ -77,6 +78,7 @@ from ..areas.protocols import AreaDirectory, SignalRecorder
 from ..decisions.protocol import ChoiceAnswer, ChoiceQuestion, DecisionLayer
 from ..errors import KnowledgeError, NotFound
 from ..freshness.protocols import PublicationDates
+from ..ids import utc_now_ms
 from ..permissions.search_rules import ActiveRules
 from ..science.protocols import (
     ScienceClient,
@@ -96,8 +98,9 @@ from .novelty import (
     reason_for,
     work_state,
 )
-from .planning import SearchPlanner
+from .planning import TERM_CHARS, SearchPlanner
 from .protocols import NoveltyChecker
+from .query_agent import QueryAgent, QueryAgentRequired, QueryAgentUnavailable
 from .reading import ReadingDesk, is_real_abstract
 from .rules import (
     Seed,
@@ -130,6 +133,7 @@ _USEFUL = frozenset({"new", "extends", "contradicts"})
 _RUN_OWNERS: tuple[KbJobOwner, ...] = ("explore",)
 _VERDICT_OWNERS: tuple[KbJobOwner, ...] = ("explore", "weekly")
 _COLLECT_DONE = "@collect"
+_PLAN_DONE = "@plan"
 _LOCAL_USER = KbSignalEntity(kind="user", id="local-user")
 DecisionChoice = Literal["download_local", "openrouter_jev"]
 
@@ -482,9 +486,14 @@ class ExploreFunnel:
         plan = await disk_call(self._start_plan, body, owner)
         options = list(dict.fromkeys(item.area_id for item in plan if item.area_id))
         scopes = await disk_call(self._plan_scopes, plan, bool(body.candidate_ids))
+        query = body.query.strip()
+        needs_query_plan = (
+            owner == "explore" and not free_only and not body.candidate_ids
+            and body.plan is None and bool(query)
+        )
         name = (
             title
-            or body.query
+            or query
             or (area_path[-1] if area_path else None)
             or ("Check novelty" if body.candidate_ids else "Find what's new")
         )
@@ -497,9 +506,14 @@ class ExploreFunnel:
             batch=1,
             free_only=free_only,
         )
-        job = await disk_call(self.job_store.create, owner, name, "collect", budget)
+        job = await disk_call(
+            self.job_store.create, owner, name, "plan" if needs_query_plan else "collect", budget
+        )
         request = {
             **body.model_dump(mode="json"),
+            "query": query,
+            "needs_query_plan": needs_query_plan,
+            "query_plan_title": name if not title else None,
             "free_only": free_only,
             "area_options": options,
             "plan": [_dump(item) for item in plan],
@@ -507,6 +521,10 @@ class ExploreFunnel:
             "today": self._today().isoformat(),
         }
         await disk_call(self.store.create_run, job.id, area_id=body.area_id, task_id=task_id, request=request)
+        # Check before entering the slot queue as well: even a queued run must respect withdrawn consent.
+        if needs_query_plan and not await self._science_enabled():
+            await disk_call(self.job_store.delete, job.id)
+            raise ContractFailure(403, "consent_required")
         gate: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         self._gates[job.id] = gate
         task = self._spawn(job.id)
@@ -622,6 +640,7 @@ class ExploreFunnel:
     ) -> None:
         try:
             run = await disk_call(self._run_row, run_id)
+            run = await self._plan_query(run, free_steps_only=free_steps_only)
             await self._collect(run)
             await self._rules(run)
             if not await self._decide(run, choice, free_steps_only=free_steps_only):
@@ -664,6 +683,12 @@ class ExploreFunnel:
             gate.set_result(True)
         return result
 
+    async def _science_enabled(self) -> bool:
+        # The real ScienceGateway exposes its consent store. Older ScienceClient doubles only implement
+        # the protocol's requests, which still enforce their consent in _science().
+        store = getattr(self._client(), "store", None)
+        return store is None or bool(await disk_call(store.enabled))
+
     async def _stop(self, run_id: str, reason: KbStopReason, *, retry_at: str | None = None) -> None:
         job = await disk_call(self._job, run_id)
         completed, pending = await disk_call(self._progress_ids, run_id, job.stage)
@@ -688,6 +713,68 @@ class ExploreFunnel:
         if job.state != "running":  # a Pause/Cancel landed while this runner awaited: it stays
             raise _Halted()
         return job
+
+    # -- stage 0: query plan -----------------------------------------------------------------------------
+
+    async def _plan_query(self, run: RunRow, *, free_steps_only: bool = False) -> RunRow:
+        if not run.request.get("needs_query_plan"):
+            return run
+        if _PLAN_DONE in await disk_call(self.job_store.completed, run.id, "plan"):
+            return run
+        query = str(run.request.get("query") or "")
+        # Compatibility for protocol-only callers; build_explore always supplies the real registry.
+        if self.agents is None and query.isascii() and len(query) <= TERM_CHARS:
+            return run
+        await self._progress(run, "plan")
+        if free_steps_only:  # restart recovery never starts this paid step without Continue
+            await self._stop(run.id, "app_exit")
+            raise _Halted()
+        if not await self._science_enabled():
+            gate = self._gates.get(run.id)
+            if gate is not None and not gate.done():
+                gate.set_result(False)
+                raise _Refused()
+            raise ScienceConsentRequired()
+        # start() returns the live plan stage while the chat agent works in the background.
+        gate = self._gates.get(run.id)
+        if gate is not None and not gate.done():
+            gate.set_result(True)
+        area_path = await disk_call(self.directory.area_path, run.area_id) if run.area_id else ()
+        concepts = await disk_call(self.planner._terms, run.area_id) if run.area_id else ()
+        try:
+            derived = await QueryAgent(self.agents).plan(
+                query, area_name=area_path[-1] if area_path else None, concepts=concepts,
+            )
+        except QueryAgentRequired:
+            await self._stop(run.id, "agent_required")
+            raise _Halted() from None
+        except QueryAgentUnavailable:
+            await self._stop(run.id, "provider_unavailable")
+            raise _Halted() from None
+        # A cancellation while the agent was answering must not publish a new plan.
+        await self._progress(run, "plan")
+        new_plan = [KbSearchPlanItem(
+            area_id=run.area_id, label=area_path[-1] if area_path else derived.title or query,
+            terms=list(derived.terms),
+        )]
+        updated = await disk_call(
+            self.store.update_run_request, run.id, {"plan": [_dump(item) for item in new_plan]}
+        )
+        if updated is None:
+            raise _Halted()
+        await disk_call(self._rename_planned_run, run, derived.title or query)
+        await disk_call(
+            self.job_store.complete, run.id, _PLAN_DONE, "plan", _json({"terms": list(derived.terms)})
+        )
+        return updated
+
+    def _rename_planned_run(self, run: RunRow, title: str) -> None:
+        # Compare and rename in one write so a user rename during the agent run always wins.
+        with self.kb.db.write() as connection:
+            connection.execute(
+                "UPDATE explore_jobs SET title=?, updated_at=? WHERE id=? AND title=?",
+                (title, utc_now_ms(), run.id, run.request.get("query_plan_title")),
+            )
 
     # -- stage 1: collect --------------------------------------------------------------------------------
 
@@ -1242,6 +1329,8 @@ class ExploreFunnel:
     def _progress_ids(self, run_id: str, stage: str) -> tuple[list[str], list[str]]:
         """Finished and waiting work of the stage a run stopped in (its checkpoint)."""
         finished = self.job_store.completed(run_id, cast(KbRunStage, stage))
+        if stage == "plan":
+            return sorted(finished), [] if _PLAN_DONE in finished else [_PLAN_DONE]
         done = sorted(cid for cid in finished if not cid.startswith("@"))
         if stage == "decision":
             pending = self._pending_decisions(run_id)
@@ -1489,7 +1578,7 @@ class FindingsView:
 
     def keeps(self, finding: KbFinding) -> bool:
         if self.show == "active":
-            if finding.state not in ("new", "seen"):
+            if finding.state not in ("new", "seen", "importing"):
                 return False
         elif finding.state != self.show:
             return False

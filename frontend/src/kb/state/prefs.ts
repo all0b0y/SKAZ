@@ -20,6 +20,10 @@ export const SIDE_DEFAULT = 248;
 export const RIGHT_MIN = 320;
 export const RIGHT_MAX = 640;
 export const RIGHT_DEFAULT = 400;
+/** FX-4: the papers list of a search page while a paper is open — its divider keeps this width. */
+export const EXPLORE_LIST_MIN = 260;
+export const EXPLORE_LIST_MAX = 640;
+export const EXPLORE_LIST_DEFAULT = 380;
 
 /** The wiki side panel's kind sections, in their order (decision 27). */
 export const WIKI_KINDS = ['concept', 'note', 'analysis', 'folder', 'deck', 'test'] as const satisfies readonly PageKind[];
@@ -36,6 +40,8 @@ export interface Prefs {
   sideOpen: boolean;
   sideWidth: number;
   rightWidth: number;
+  /** FX-4: the papers list's width on a search page while a paper is open. */
+  exploreListWidth: number;
   onboardingDone: boolean;
   wikiOpen: WikiOpen;
   /** Appearance knobs (DESIGN-SYSTEM.md); mirrored onto <html> by KbApp's ThemeSync. */
@@ -55,6 +61,7 @@ export const DEFAULT_PREFS: Prefs = {
   sideOpen: true,
   sideWidth: SIDE_DEFAULT,
   rightWidth: RIGHT_DEFAULT,
+  exploreListWidth: EXPLORE_LIST_DEFAULT,
   onboardingDone: false,
   wikiOpen: WIKI_OPEN_DEFAULT,
   ...DEFAULT_LOOK,
@@ -93,6 +100,7 @@ export function readPrefs(storage: Pick<Storage, 'getItem'> | null): Prefs {
     sideOpen: typeof raw.sideOpen === 'boolean' ? raw.sideOpen : DEFAULT_PREFS.sideOpen,
     sideWidth: clamp(raw.sideWidth, SIDE_MIN, SIDE_MAX, SIDE_DEFAULT),
     rightWidth: clamp(raw.rightWidth, RIGHT_MIN, RIGHT_MAX, RIGHT_DEFAULT),
+    exploreListWidth: clamp(raw.exploreListWidth, EXPLORE_LIST_MIN, EXPLORE_LIST_MAX, EXPLORE_LIST_DEFAULT),
     onboardingDone: raw.onboardingDone === true,
     wikiOpen: readWikiOpen(raw.wikiOpen),
     base: oneOf(raw.base, BASES.map((o) => o.value), DEFAULT_PREFS.base),
@@ -107,6 +115,8 @@ export interface PrefsActions {
   set: (patch: Partial<Prefs>) => void;
   setSideWidth: (px: number) => void;
   setRightWidth: (px: number) => void;
+  /** FX-4: the papers list's width on a search page, kept for the next one. */
+  setExploreListWidth: (px: number) => void;
   setWikiOpen: (kind: WikiKind, open: boolean) => void;
 }
 
@@ -118,12 +128,13 @@ export function createPrefsStore(storage: Storage | null): PrefsStore {
     set: (patch) => set(patch),
     setSideWidth: (px) => set({ sideWidth: clamp(px, SIDE_MIN, SIDE_MAX, SIDE_DEFAULT) }),
     setRightWidth: (px) => set({ rightWidth: clamp(px, RIGHT_MIN, RIGHT_MAX, RIGHT_DEFAULT) }),
+    setExploreListWidth: (px) => set({ exploreListWidth: clamp(px, EXPLORE_LIST_MIN, EXPLORE_LIST_MAX, EXPLORE_LIST_DEFAULT) }),
     setWikiOpen: (kind, open) => set((s) => ({ wikiOpen: { ...s.wikiOpen, [kind]: open } })),
   }));
   store.subscribe((state) => {
     const data: Prefs = {
       theme: state.theme, textSize: state.textSize, section: state.section, sideOpen: state.sideOpen,
-      sideWidth: state.sideWidth, rightWidth: state.rightWidth,
+      sideWidth: state.sideWidth, rightWidth: state.rightWidth, exploreListWidth: state.exploreListWidth,
       onboardingDone: state.onboardingDone, wikiOpen: state.wikiOpen,
       base: state.base, accent: state.accent, density: state.density, motion: state.motion, sounds: state.sounds,
     };

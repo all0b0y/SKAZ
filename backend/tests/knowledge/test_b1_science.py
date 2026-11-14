@@ -296,10 +296,13 @@ async def test_parsed_work_is_honest_about_access_and_text(gateway: ScienceGatew
     assert free.arxiv_id == "2401.01234" and free.access.paid is False
     assert free.publication.precision == "year"
     kinds = [(loc.kind, loc.url) for loc in free.locations]
+    # FX-2: open PDF links are kept in locations so Add to materials can download and import the PDF first.
     assert kinds == [
         ("arxiv_html", "https://arxiv.org/html/2401.01234"),
+        ("open_page", "http://arxiv.org/pdf/2401.01234"),
         ("open_page", "https://repository.example.edu/handle/42"),
-    ]  # PDF links are never listed
+        ("open_page", "https://repository.example.edu/files/42.pdf"),
+    ]
     with pytest.raises(NotFound):
         await gateway.work("W1")  # 404 at OpenAlex
 

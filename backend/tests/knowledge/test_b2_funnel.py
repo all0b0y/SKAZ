@@ -740,11 +740,11 @@ async def _one_finding(parts: SimpleNamespace, **kwargs: Any) -> Any:
 
 
 async def test_add_to_materials_full_text_or_abstract_honestly(parts: SimpleNamespace) -> None:
-    finding = await _one_finding(parts)
+    finding = await _one_finding(parts, abstract=REAL_ABSTRACT)
     parts.science.texts["work-1"] = KbScienceText(
         work_id="work-1",
         kind="abstract_only",
-        text="An abstract.",
+        text=REAL_ABSTRACT,
         source_url=None,
         access=finding.work.access,
     )

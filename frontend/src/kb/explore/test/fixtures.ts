@@ -183,7 +183,7 @@ export function serveExplore(world: ExploreWorld, req: BridgeRequest): JsonRespo
 
   if (method === 'GET' && path === '/kb/explore/findings') {
     const show = (query.show as string | undefined) ?? 'active';
-    const wanted = (x: KbFinding) => (show === 'active' ? x.state === 'new' || x.state === 'seen' : x.state === show);
+    const wanted = (x: KbFinding) => (show === 'active' ? x.state === 'new' || x.state === 'seen' || x.state === 'importing' : x.state === show);
     const list = world.findings.filter((x) => x.run_id === query.run_id && wanted(x) && !(query.free_only && x.access === 'paid'));
     return ok({ groups: [{ task_id: null, task_title: null, task_state: null, updated_at: null, findings: list }], covered_count: 0, next_cursor: null, checked_at: null, full_text_key_hint_count: 0 });
   }

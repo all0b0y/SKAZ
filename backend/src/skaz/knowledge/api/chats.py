@@ -45,6 +45,7 @@ from ..chats.model import (
 from ..chats.resolve import tool_label
 from ..chats.service import ChatConflict, ChatService, ChatView, memory_view
 from ..errors import KnowledgeError
+from ..explore.discuss import discuss_badge, discuss_badges
 from ..permissions.broker import PermissionConflict
 from ..permissions.search_rules import ActiveRules, SearchRulesStore
 from ..permissions.store import ControlStore, PermissionRecord, QuestionRecord
@@ -69,6 +70,7 @@ from .schemas_chats import (
     KbCitePart,
     KbConnectionFolder,
     KbConnectionPart,
+    KbDiscussFinding,
     KbFailure,
     KbKnowledgePart,
     KbMemoryPart,
@@ -267,7 +269,7 @@ class Presenter:
                            message=self.message(event.message) if event.message is not None else None)
 
 
-def summary(view: ChatView) -> KbChatSummary:
+def summary(view: ChatView, discuss: KbDiscussFinding | None = None) -> KbChatSummary:
     chat = view.chat
     return KbChatSummary(
         id=chat.id, title=chat.title, pinned=chat.pinned, engine=chat.engine, model=chat.model,
@@ -275,6 +277,7 @@ def summary(view: ChatView) -> KbChatSummary:
         created_at=chat.created_at, updated_at=chat.updated_at, last_preview=chat.last_preview,
         recording_material_id=chat.recording_material_id, folder_ids=list(chat.folder_ids), state=view.state,
         unread=chat.unread, waiting_for_user=view.waiting, research_task_id=chat.research_task_id,
+        discuss_finding=discuss,  # FX-3: the Explore paper this chat discusses, if any
     )
 
 
@@ -328,8 +331,9 @@ def question_part(record: QuestionRecord) -> KbQuestionPart:
 
 def full_chat(kb: KnowledgeService, view: ChatView) -> KbChat:
     presenter = Presenter(kb)
-    return KbChat(**summary(view).model_dump(), messages=[presenter.message(m) for m in view.messages],
-                  cursor=view.cursor)
+    discuss = discuss_badge(kb.db, view.chat.id)
+    return KbChat(**summary(view, discuss).model_dump(),
+                  messages=[presenter.message(m) for m in view.messages], cursor=view.cursor)
 
 
 def _messages(kb: KnowledgeService, messages: list[Message]) -> list[KbMessage]:
@@ -381,7 +385,8 @@ async def list_chats(chats: ChatsDep, q: Annotated[str | None, Query(max_length=
                      limit: Annotated[int, Query(ge=1, le=MAX_LIST)] = MAX_LIST) -> list[KbChatSummary]:
     """Newest activity first; ``q`` searches chat titles and messages."""
     views = await chats.list_chats(query=q, filter=filter, folder_id=folder_id, limit=limit)
-    return [summary(view) for view in views]
+    badges = await kb_call(discuss_badges, chats.kb.db, [view.chat.id for view in views])
+    return [summary(view, badges.get(view.chat.id)) for view in views]
 
 
 @router.post("", status_code=201)
@@ -407,7 +412,8 @@ async def remember_last_choice(chats: ChatsDep, body: KbChatLastChoice) -> None:
 async def chat_list_events(chats: ChatsDep, after: After = 0, wait: Wait = 0) -> KbChatListEvents:
     """Changes of the chat list (answering / new answer / renamed …) after the cursor."""
     views, cursor = await chats.list_events(after, wait)
-    return KbChatListEvents(chats=[summary(view) for view in views], cursor=cursor)
+    badges = await kb_call(discuss_badges, chats.kb.db, [view.chat.id for view in views])
+    return KbChatListEvents(chats=[summary(view, badges.get(view.chat.id)) for view in views], cursor=cursor)
 
 
 @router.get("/{chat_id}")
@@ -422,7 +428,8 @@ async def change_chat(chat_id: str, body: KbChatPatch, chats: ChatsDep) -> KbCha
     for name in ("title", "pinned", "engine"):
         if changes.get(name, ...) is None:
             del changes[name]
-    return summary(await chats.patch(chat_id, changes))
+    view = await chats.patch(chat_id, changes)
+    return summary(view, await kb_call(discuss_badge, chats.kb.db, chat_id))
 
 
 @router.delete("/{chat_id}", status_code=204)

@@ -130,7 +130,7 @@ def _is_pdf(url: str) -> bool:
 
 
 def locations_of(data: Mapping[str, Any], work_id: str, arxiv_id: str | None) -> list[KbScienceLocation]:
-    """Text locations in the 3c′ order. PDF links are never listed: research never downloads a PDF."""
+    """Open locations, including PDFs reserved for the user's Add to materials action."""
     found: list[KbScienceLocation] = []
     seen: set[str] = set()
 
@@ -144,17 +144,80 @@ def locations_of(data: Mapping[str, Any], work_id: str, arxiv_id: str | None) ->
         add(tei_url(work_id), "tei", True)
     if arxiv_id:
         add(f"https://arxiv.org/html/{arxiv_id}", "arxiv_html", True)
-    for location in data.get("locations") or ():
+    locations = [*(data.get("locations") or ()), data.get("best_oa_location"), data.get("primary_location")]
+    for location in locations:
         if not isinstance(location, Mapping) or location.get("is_oa") is not True:
             continue
         url = location.get("landing_page_url")
-        if isinstance(url, str) and not _is_pdf(url) and "arxiv.org/" not in url.lower():
+        if isinstance(url, str) and "arxiv.org/" not in url.lower():
             add(url, "open_page", True)
+        pdf_url = location.get("pdf_url")
+        if isinstance(pdf_url, str):
+            add(pdf_url, "open_page", True)
     primary = data.get("primary_location")
     if isinstance(primary, Mapping):
         url = primary.get("landing_page_url")
         if isinstance(url, str) and not _is_pdf(url) and primary.get("is_oa") is not True:
             add(url, "publisher", False)
+    return found
+
+
+def _normalized(text: str) -> str:
+    return "".join(char for char in text.casefold() if char.isalnum())
+
+
+def _zenodo_number(work: KbScienceWork) -> int:
+    doi = normalize_doi(work.doi)
+    prefix = "10.5281/zenodo."
+    tail = doi.removeprefix(prefix) if doi and doi.startswith(prefix) else ""
+    return int(tail) if tail.isdigit() else 0
+
+
+def _same_version(a: KbScienceWork, b: KbScienceWork) -> bool:
+    first_a = _normalized(a.authors[0]) if a.authors else ""
+    first_b = _normalized(b.authors[0]) if b.authors else ""
+    preprints = all(w.arxiv_id or w.publication_type in ("preprint", "posted-content") for w in (a, b))
+    return bool(
+        (first_a and first_a == first_b)
+        or (_zenodo_number(a) and _zenodo_number(b))
+        or (preprints and a.publication.year is not None and a.publication.year == b.publication.year)
+    )
+
+
+def _version_rank(work: KbScienceWork) -> tuple[int, int, int, int, int]:
+    day = work.publication.date
+    # Dates before citation counts: an older version has had more time to collect citations.
+    published = day.toordinal() if day else date(work.publication.year or 1, 1, 1).toordinal()
+    abstract = work.abstract or ""
+    real = len(abstract.strip()) >= 80 and not abstract.casefold().startswith(
+        ("research article:", "preprint:", "article:")
+    )
+    return published, _zenodo_number(work), work.cited_by_count, int(real), len(work.locations)
+
+
+def deduplicate_works(works: Sequence[KbScienceWork]) -> list[KbScienceWork]:
+    """Merge editions with a long matching title and author/repository evidence; retain every URL."""
+    found: list[KbScienceWork] = []
+    titles: dict[str, list[int]] = {}
+    for work in works:
+        title = _normalized(work.title)
+        candidates = titles.get(title, []) if len(title) >= 20 else []
+        index = next((i for i in candidates if _same_version(found[i], work)), None)
+        if index is None:
+            titles.setdefault(title, []).append(len(found))
+            found.append(work)
+            continue
+        previous = found[index]
+        winner, other = (
+            (work, previous) if _version_rank(work) > _version_rank(previous) else (previous, work)
+        )
+        locations = list(winner.locations)
+        seen = {loc.url for loc in locations}
+        for loc in other.locations:
+            if loc.url not in seen:
+                locations.append(loc)
+                seen.add(loc.url)
+        found[index] = winner.model_copy(update={"locations": locations})
     return found
 
 
