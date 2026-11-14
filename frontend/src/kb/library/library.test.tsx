@@ -3,6 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { KbApiError, KbClient, buildPath } from '../api/client';
 import { baseWorld, createFakeBridge } from '../test/fakeBridge';
+import { materialWiki } from '../test/fakeKb';
 import { renderKb } from '../test/renderKb';
 
 describe('KbClient over the preload bridge', () => {
@@ -119,6 +120,30 @@ describe('Library side panel on real /kb answers', () => {
     expect(fake.calls.some((c) => c.path === '/kb/materials' && c.query?.folder_id === 'phys')).toBe(true);
     await user.click(within(side).getByRole('button', { name: 'All folders' }));
     expect(await within(side).findByRole('list', { name: 'Folders' })).toBeInTheDocument();
+  });
+
+  it('a material found in Explore is an ordinary row in the sidebar: plain title, no dot, no Add to wiki', async () => {
+    // F6: papers from Explore are ordinary materials — the sidebar row is like every other row.
+    const user = userEvent.setup();
+    const world = baseWorld();
+    world.folders.unshift({ id: 'fld-explore', name: 'From Explore', system: true, material_count: 1, created_at: '2026-10-03T10:00:00Z' });
+    const paper = world.materials.find((m) => m.id === 'm3')!;
+    paper.folder_id = 'fld-explore';
+    paper.wiki = materialWiki('not_in_wiki');
+    paper.wiki_state = 'not_in_wiki';
+    renderKb({ prefs: { section: 'materials' }, world });
+    const side = await screen.findByRole('region', { name: 'Materials' });
+    const recent = await within(side).findByRole('grid', { name: 'Recent' });
+    const row = within(recent).getByRole('button', { name: 'Pasted text: problems' });
+    expect(row).toHaveAttribute('title', 'Pasted text: problems');   // no «From Explore · Not in wiki» gloss
+    expect(row.querySelector('.kb-fdot')).not.toBeInTheDocument();  // the dot is only for the user's folders
+    expect(within(side).queryByRole('button', { name: 'Add to wiki' })).not.toBeInTheDocument();
+    // and its folder opens like any other, with the plain rows in it
+    const folders = within(side).getByRole('list', { name: 'Folders' });
+    await user.click(within(folders).getByRole('button', { name: /^From Explore/ }));
+    const folderList = await within(side).findByRole('grid', { name: 'From Explore' });
+    expect(within(folderList).getByRole('button', { name: 'Pasted text: problems' })).toBeInTheDocument();
+    expect(within(side).queryByRole('button', { name: 'Add to wiki' })).not.toBeInTheDocument();
   });
 
   it('an unavailable library is an error with the backend reason, never an empty library', async () => {
