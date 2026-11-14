@@ -6,6 +6,7 @@ to a JSONL record. Its answers come from the offline probe of the installed Open
 (``fixtures/agents/opencode_acp_probe.json``) or are built from the shapes in that binary's ACP
 source (``tool_call``/``tool_call_update`` from ``Dn``/``xo``/``To``, ``session/request_permission``
 options ``once``/``always``/``reject``). It proves the SKAZ side of the seam only, never a model.
+v2 scenarios use the v2.3.0 shapes from the F5 brief's offline probe and require the new CLI flags.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ def record(kind, **data):
         handle.write(json.dumps({"kind": kind, **data}) + "\n")
 
 args = sys.argv[1:]
+v2 = SCENARIO.get("version_output", "").startswith("opencode v2.")
 run_config = os.environ.get("OPENCODE_CONFIG")
 record("start", argv=args, cwd=os.getcwd(), env=dict(os.environ), pid=os.getpid(),
        run_config=open(run_config).read() if run_config and os.path.exists(run_config) else None)
@@ -36,21 +38,33 @@ if args == ["--version"]:
     print(SCENARIO.get("version_output", "1.17.18"))
     sys.exit(0)
 if args == ["debug", "agent", "skaz"]:
+    assert not v2, args
     print(json.dumps(SCENARIO["debug_agent"], indent=2))
     sys.exit(0)
+if args == ["debug", "agents", "--standalone"]:
+    assert v2, args
+    print(json.dumps(SCENARIO["debug_agents"]))
+    sys.exit(SCENARIO.get("debug_exit", 0))
 LOGGED_OUT = %(scenario)r + ".logged-out"
-if args == ["auth", "list"]:
+if args == (["auth", "list", "--format", "json", "--standalone"] if v2 else ["auth", "list"]):
     sys.stdout.write("" if os.path.exists(LOGGED_OUT) else SCENARIO.get("auth_list", ""))
     sys.exit(0)
 if args[:2] == ["auth", "logout"]:  # `opencode auth logout <provider>` (checked with OpenCode 1.17.18)
+    assert (args[-1] == "--standalone") == v2, args
     open(LOGGED_OUT, "a").write(" ".join(args[2:]) + "\n")
     sys.exit(0)
 if args == ["auth", "login"]:
     sys.exit(0)
 if args == ["models", "--verbose"]:
+    assert not v2, args
     sys.stdout.write(SCENARIO.get("models_verbose", ""))
     sys.exit(SCENARIO.get("models_exit", 0))
+if args == ["api", "model.list", "--standalone"]:
+    assert v2, args
+    print(json.dumps(SCENARIO["model_list"]))
+    sys.exit(SCENARIO.get("models_exit", 0))
 if args[:2] == ["session", "delete"]:
+    assert (args[-1] == "--standalone") == v2, args
     record("session_delete", id=args[2], data=os.environ.get("XDG_DATA_HOME"))
     if args[2] in SCENARIO.get("missing_sessions", []):  # 1.17.18 Cli.session.delete: UI error, exit 1
         sys.stderr.write("Error: Session not found: " + args[2] + "\n")
