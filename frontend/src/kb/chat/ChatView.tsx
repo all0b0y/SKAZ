@@ -116,7 +116,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const summary = useChats((s) => (s.currentId ? s.list.find((c) => c.id === s.currentId) : undefined));
   const openDoc = useOpenDocument();
   const [renaming, setRenaming] = useState(false);
-  const [busy, setBusy] = useState<{ id: string; what: string } | null>(null);
+  const [busy, setBusy] = useState<Record<string, string>>({});
   const [notice, setNotice] = useNotice();
   /** Regenerate/Resume failed: the reason stays under that answer, by the button (QA D6). */
   const [actionError, setActionError] = useState<{ id: string; text: string } | null>(null);
@@ -159,13 +159,18 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   });
 
   const act = async (message: KbMessage, what: 'regenerate' | 'resume' | 'save') => {
-    if (!currentId) return;
-    setBusy({ id: message.id, what });
+    if (!currentId || busy[message.id]) return;
+    setBusy((running) => ({ ...running, [message.id]: what }));
     setActionError(null);
     const s = chats.getState();
     const res = what === 'regenerate' ? await s.regenerate(currentId, message.id)
       : what === 'resume' ? await s.resume(currentId, message.id) : await s.saveMessage(currentId, message.id);
-    setBusy(null);
+    setBusy((running) => {
+      const next = { ...running };
+      delete next[message.id];
+      return next;
+    });
+    if (chats.getState().currentId !== currentId) return;
     if (!res.ok && what !== 'save') setActionError({ id: message.id, text: res.error });
     else if (!res.ok) setNotice(res.error);
     else if (what === 'save' && res.value) {
@@ -232,12 +237,16 @@ export function ChatView({ hidden }: { hidden: boolean }) {
               : m.role === 'system' ? <SystemMessage key={m.id} chatId={chat.id} message={m} />
                 : (
                   <AssistantMessage key={m.id} chatId={chat.id} message={m} actions={{
-                    busy: busy?.id === m.id ? busy.what : null,
+                    busy: busy[m.id] ?? null,
                     error: actionError?.id === m.id ? actionError.text : null,
                     fix,
                     onRegenerate: () => void act(m, 'regenerate'),
                     onResume: () => void act(m, 'resume'),
                     onSave: () => void act(m, 'save'),
+                    onCancelSave: async () => {
+                      const res = await chats.getState().stop(chat.id, m.id);
+                      if (!res.ok && chats.getState().currentId === chat.id) setNotice(res.error);
+                    },
                   }} />
                 )))}
           </div>

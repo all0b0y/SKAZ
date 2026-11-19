@@ -208,6 +208,7 @@ export interface AnswerActions {
   onRegenerate: () => void;
   onResume: () => void;
   onSave: () => void;
+  onCancelSave?: () => void;
   busy: string | null;
   /** Why Regenerate/Resume didn't start, shown by the buttons; `fix` is the way to fix the agent. */
   error?: string | null;
@@ -273,13 +274,18 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
               setCopied(ok);
               if (ok) replayCopy();
             }} />
-          <IconButton icon="retry" iconPlay={regenPlay} label="Regenerate" size="sm" disabled={actions.busy === 'regenerate'}
+          <IconButton icon="retry" iconPlay={regenPlay} label="Regenerate" size="sm" disabled={!!actions.busy}
             onClick={() => { replayRegen(); actions.onRegenerate(); }} />
           {message.saved_page_id ? (
             <IconButton icon="check" label="Saved to wiki — open" size="sm"
               onClick={() => open({ type: 'page', id: message.saved_page_id! })} />
+          ) : actions.busy === 'save' ? (
+            <>
+              <Button size="sm" variant="quiet" busy disabled>Shaping for wiki…</Button>
+              <IconButton icon="stop" size="sm" label="Cancel wiki shaping" onClick={actions.onCancelSave} />
+            </>
           ) : (
-            <IconButton icon="saveWiki" label="Save to wiki" size="sm" disabled={actions.busy === 'save' || message.state !== 'done'} onClick={actions.onSave} />
+            <IconButton icon="saveWiki" label="Save to wiki" size="sm" disabled={!!actions.busy || message.state !== 'done'} onClick={actions.onSave} />
           )}
         </div>
       )}

@@ -85,6 +85,7 @@ class Agents:
     """Three fake engines whose scripts tests replace per engine."""
 
     scripts: dict[EngineId, Script] = field(default_factory=dict)
+    shape_scripts: dict[EngineId, Script] = field(default_factory=dict)
     engines: dict[EngineId, FakeEngine] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -93,7 +94,13 @@ class Agents:
             self.engines[engine_id] = self._engine(engine_id)
 
     def _engine(self, engine_id: EngineId, status: EngineStatus | None = None) -> FakeEngine:
-        return FakeEngine(engine_id, script=lambda turn: self.scripts[engine_id](turn), status=status)
+        def script(turn: AgentTurn) -> Sequence[ScriptItem]:
+            if (turn.response_schema or {}).get("title") == "WikiAnalysisEdit":
+                if engine_id in self.shape_scripts:
+                    return self.shape_scripts[engine_id](turn)
+                return text('{"omit":[],"break_before":[]}')
+            return self.scripts[engine_id](turn)
+        return FakeEngine(engine_id, script=script, status=status)
 
     def missing(self, engine_id: EngineId, reason: str) -> None:
         status = EngineStatus(engine_id, installed=False, reason=reason)
