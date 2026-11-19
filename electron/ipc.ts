@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron';
 import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { open, realpath, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { CHANNELS } from './channels';
 import { NativeLiveClient } from './nativeLive';
@@ -8,6 +9,7 @@ import type { BackendManager } from './backend';
 import { REQUEST_TIMEOUT_MS, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
 import { kbBridgeHandlers } from './kbBridge';
+import { hashBoundedDiskFile } from './nativeIntake041/diskFingerprint';
 import { ExportFolders, openInObsidian, resolveTarget, type LibraryActionDeps } from './libraryActions';
 import { obsidianDeps } from './obsidianHost';
 import { mediaAccessOf, privacySettingsUrl } from './systemAudio';
@@ -146,11 +148,29 @@ export function registerIpc(
         : dialog.showOpenDialog({ ...options, properties: props });
     },
     writeTextFile: (path, text) => writeFileSync(path, text, { encoding: 'utf8' }),
-    fileSize: (path) => {
-      try { const st = statSync(path); return st.isFile() ? st.size : null; } catch { return null; }
+    fileSize: async (path) => {
+      try { const st = await stat(path); return st.isFile() ? st.size : null; } catch { return null; }
     },
+    realPath: async (path) => {
+      try { return await realpath(path); } catch { return null; }
+    },
+    readHeader: async (path, maxBytes) => {
+      let fh: Awaited<ReturnType<typeof open>> | null = null;
+      try {
+        fh = await open(path, 'r');
+        const buf = Buffer.allocUnsafe(maxBytes);
+        const { bytesRead } = await fh.read(buf, 0, maxBytes, 0);
+        return new Uint8Array(buf.buffer, buf.byteOffset, bytesRead);
+      } catch {
+        return null;
+      } finally {
+        if (fh !== null) await fh.close().catch(() => undefined);
+      }
+    },
+    hashBoundedFile: hashBoundedDiskFile,
     documentsDir: app.getPath('documents'),
     downloadsDir: app.getPath('downloads'),
+    skazDataDir: manager.getDataDir(),
     materialExtensions: MATERIAL_EXTENSIONS,
   });
   ipcMain.handle(CHANNELS.dictate, (event, wav: unknown, language: unknown) => {
@@ -164,6 +184,26 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.chooseMaterialFiles, (event) => {
     if (!senderTrusted(event)) return [];
     return kb.chooseMaterialFiles();
+  });
+  ipcMain.handle(CHANNELS.chooseMaterialBatch, (event) => {
+    if (!senderTrusted(event)) return { accepted: [], rejected: [] };
+    return kb.chooseMaterialBatch();
+  });
+  ipcMain.handle(CHANNELS.droppedMaterialFiles, (event, rawPaths: unknown) => {
+    if (!senderTrusted(event)) return { accepted: [], rejected: [] };
+    return kb.droppedMaterialFiles(rawPaths);
+  });
+  ipcMain.handle(CHANNELS.validateClipboardImage, (event, payload: unknown) => {
+    if (!senderTrusted(event)) return { ok: false, reason: 'untrusted sender' };
+    return kb.validateClipboardImage(payload);
+  });
+  ipcMain.handle(CHANNELS.importMaterialSelection, (event, request: unknown) => {
+    if (!senderTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
+    return kb.importSelection(request);
+  });
+  ipcMain.handle(CHANNELS.materialImagePreview, (event, selectionId: unknown) => {
+    if (!senderTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
+    return kb.imagePreview(selectionId);
   });
 
   // Library file actions (B20): the renderer names a target, main finds and checks the path.

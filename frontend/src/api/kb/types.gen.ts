@@ -32,6 +32,9 @@ export interface KbAddFile {
   folder_id: string;
   title?: string | null;
   to_wiki?: boolean | null;
+  selection_source?: "picker" | "drop" | "clipboard" | null;
+  expected_size?: number | null;
+  expected_sha256?: string | null;
 }
 
 export interface KbAddLink {
@@ -266,7 +269,7 @@ export interface KbAreaMap {
 export interface KbAreaMaterial {
   material_id: string;
   title: string;
-  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image";
   publication: KbPublicationDate;
   wiki_pages: number;
   concepts?: number;
@@ -918,7 +921,7 @@ export interface KbFragment {
 export interface KbFragmentHit {
   material_id: string;
   material_title: string;
-  material_kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  material_kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image";
   seg: number;
   start_ms: number | null;
   page: number | null;
@@ -1134,6 +1137,14 @@ export interface KbHierarchyNode {
   text: string;
   note: string | null;
   depth: number;
+}
+
+/** Trusted main-only image preview request (for an admitted disk path or stored material). */
+export interface KbImagePreviewRequest {
+  path?: string | null;
+  material_id?: string | null;
+  expected_size?: number | null;
+  expected_sha256?: string | null;
 }
 
 export interface KbImportCreate {
@@ -1404,7 +1415,7 @@ export interface KbMarkedStatement {
 export interface KbMaterial {
   id: string;
   title: string;
-  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image";
   status: "recording" | "processing" | "ready" | "failed";
   folder_id: string;
   languages: string[];
@@ -1446,7 +1457,7 @@ export interface KbMaterialGuard {
 export interface KbMaterialHit {
   id: string;
   title: string;
-  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image";
   folder_id: string;
   folder_name: string;
   created_at: string;
@@ -1486,7 +1497,7 @@ export interface KbMaterialRepeats {
 export interface KbMaterialSummary {
   id: string;
   title: string;
-  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image";
   status: "recording" | "processing" | "ready" | "failed";
   folder_id: string;
   languages: string[];
@@ -1701,6 +1712,12 @@ export interface KbOrigin {
   url: string | null;
   file_name: string | null;
   fetched_at?: string | null;
+  mime_type?: string | null;
+  format?: string | null;
+  size_bytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  sha256?: string | null;
 }
 
 /** A concept page that already said some of the material (each repeat links to its page). */
@@ -3793,7 +3810,7 @@ export interface KbEndpoints {
   };
   "GET /kb/materials": {
     path: Record<string, never>;
-    query: { folder_id?: string | null; kind?: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | null };
+    query: { folder_id?: string | null; kind?: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image" | null };
     body: never;
     response: KbMaterialSummary[];
     status: 200;
@@ -3819,12 +3836,26 @@ export interface KbEndpoints {
     response: KbDatedMaterials;
     status: 200;
   };
+  "POST /kb/materials/clipboard-image": {
+    path: Record<string, never>;
+    query: { folder_id?: string; file_name?: string; title?: string | null };
+    body: never;
+    response: KbMaterialAdded;
+    status: 201;
+  };
   "POST /kb/materials/file": {
     path: Record<string, never>;
     query: Record<string, never>;
     body: KbAddFile;
     response: KbMaterialAdded;
     status: 201;
+  };
+  "POST /kb/materials/image-preview": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbImagePreviewRequest;
+    response: void;
+    status: 200;
   };
   "POST /kb/materials/link": {
     path: Record<string, never>;

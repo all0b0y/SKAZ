@@ -20,21 +20,28 @@ import { DateFilter } from './DateFilter';
 import { useDatedMaterials, type YearWindow } from './publicationWindow';
 import { enginePauseText } from '../material/enginePause';
 
-type TypeFilter = 'all' | 'recordings' | 'documents' | 'links' | 'text';
+type TypeFilter = 'all' | 'recordings' | 'documents' | 'images' | 'links' | 'text';
 type Sort = 'newest' | 'oldest' | 'name';
 type Layout = 'table' | 'cards';
 
-const TYPE_KINDS: Record<Exclude<TypeFilter, 'all'>, ReadonlyArray<KbMaterialSummary['kind']>> = {
-  recordings: ['recording', 'audio', 'video', 'video_link'],
-  documents: ['pdf', 'book'],
-  links: ['web'],
-  text: ['text'],
+const KIND_FILTER: Record<KbMaterialSummary['kind'], Exclude<TypeFilter, 'all'>> = {
+  recording: 'recordings',
+  audio: 'recordings',
+  video: 'recordings',
+  video_link: 'recordings',
+  pdf: 'documents',
+  book: 'documents',
+  docx: 'documents',
+  image: 'images',
+  web: 'links',
+  text: 'text',
 };
 
 const TYPE_OPTIONS: ReadonlyArray<{ value: TypeFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'recordings', label: 'Recordings' },
   { value: 'documents', label: 'Documents' },
+  { value: 'images', label: 'Images' },
   { value: 'links', label: 'Links' },
   { value: 'text', label: 'Text' },
 ];
@@ -135,9 +142,8 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
   };
 
   const rows = useMemo(() => {
-    const kinds = type === 'all' ? null : TYPE_KINDS[type];
     const inside = dated.load === 'ready' ? dated.ids.inside : null;
-    const out = all.filter((m) => (!kinds || kinds.includes(m.kind)) && (!folderId || m.folder_id === folderId)
+    const out = all.filter((m) => (type === 'all' || KIND_FILTER[m.kind] === type) && (!folderId || m.folder_id === folderId)
       && (!inside || inside.has(m.id)));
     out.sort((a, b) => (sort === 'name' ? a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
       : sort === 'oldest' ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));

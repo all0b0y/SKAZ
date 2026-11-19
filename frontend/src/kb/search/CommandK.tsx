@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 
 import type { KbChatSummary, KbSearchResults } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Icon, Modal, type IconName } from '../ui';
+import { KIND_ICON } from '../library/materialMeta';
 import { Highlight, Snippet } from '../ui/Highlight';
 import { clock, shortTime } from '../ui/time';
 import { useAgents, useServices, useUi } from '../state/context';
@@ -24,9 +25,6 @@ export interface Hit {
 
 const PAGE_ICON: Record<string, IconName> = { concept: 'concept', note: 'note', analysis: 'analysis', folder: 'folder' };
 const PAGE_KIND: Record<string, string> = { concept: 'concept', note: 'notes', analysis: 'analysis', folder: 'folder overview' };
-const MAT_ICON: Record<string, IconName> = {
-  recording: 'mic', audio: 'audio', video: 'video', video_link: 'video', pdf: 'pdf', book: 'pdf', web: 'link', text: 'text',
-};
 
 /** Wiki · Materials · Chats hits in one list; a page hit and its blocks are one row. */
 export function toHits(res: KbSearchResults | null, chats: KbChatSummary[] | null): Hit[] {
@@ -48,14 +46,14 @@ export function toHits(res: KbSearchResults | null, chats: KbChatSummary[] | nul
     const mats = new Set<string>();
     for (const m of res.materials ?? []) {
       mats.add(m.id);
-      out.push({ key: `m-${m.id}`, section: 'materials', icon: MAT_ICON[m.kind] ?? 'pdf', title: m.title, snippet: null,
+      out.push({ key: `m-${m.id}`, section: 'materials', icon: KIND_ICON[m.kind], title: m.title, snippet: null,
         meta: m.folder_name, open: { doc: { type: 'material', id: m.id } } });
     }
     for (const f of res.fragments) {
       const key = `f-${f.material_id}-${f.seg}`;
       if (mats.has(f.material_id)) continue;
       mats.add(f.material_id);
-      out.push({ key, section: 'materials', icon: MAT_ICON[f.material_kind] ?? 'pdf', title: f.material_title, snippet: f.snippet,
+      out.push({ key, section: 'materials', icon: KIND_ICON[f.material_kind], title: f.material_title, snippet: f.snippet,
         meta: f.start_ms !== null ? clock(f.start_ms) : f.page !== null ? `p. ${f.page}` : '', open: { doc: { type: 'material', id: f.material_id, seg: f.seg } } });
     }
   }

@@ -26,6 +26,8 @@ from .pdf import extract_pdf
 
 TEXT_EXTENSIONS = frozenset({".txt", ".md", ".markdown"})
 PDF_EXTENSIONS = frozenset({".pdf"})
+DOCX_EXTENSIONS = frozenset({".docx"})
+IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".heic"})
 #: A PDF with at least this many pages is filed as a book.
 BOOK_PAGES = 100
 _TEXT_FINDING_KINDS = frozenset({"unicode_tags", "hidden_html", "html_comment", "hidden_pdf_text"})
@@ -42,6 +44,8 @@ class Original:
     name: str
     data: bytes | None = None
     path: Path | None = None
+    expected_size: int | None = None
+    expected_sha256: str | None = None
 
 
 @dataclass(frozen=True)

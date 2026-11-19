@@ -376,6 +376,23 @@ function useFolderDrop(folder: KbFolder) {
       if (!hasDragFiles(e.dataTransfer)) return;
       e.preventDefault();
       const files = Array.from(e.dataTransfer.files ?? []);
+      if (bridge.nativeIntake) {
+        void bridge.nativeIntake.droppedMaterialFiles(files).then((batch) => {
+          ui.getState().setAddMaterialOpen(true, {
+            folderId: folder.id,
+            files: batch.accepted.map((a) => ({
+              path: a.path,
+              name: a.name,
+              size: a.size,
+              selectionId: a.selectionId,
+              sha256: a.sha256,
+            })),
+            unreadable: Math.max(0, files.length - batch.accepted.length - batch.rejected.length),
+            rejected: batch.rejected.map((r) => `${r.name}: ${r.reason}`),
+          });
+        });
+        return;
+      }
       const read = bridge.droppedMediaFile
         ? files.map((f) => ({ choice: bridge.droppedMediaFile!(f), size: f.size }))
           .filter((x): x is { choice: NonNullable<typeof x.choice>; size: number } => x.choice !== null)

@@ -395,3 +395,107 @@ describe('Already in your wiki (N2): one quiet line at the material', () => {
     expect(within(doc).queryByTestId('material-overlap')).not.toBeInTheDocument();
   });
 });
+
+describe('DOCX and image materials in MaterialView', () => {
+  it('renders DOCX with extracted text, word count, and allows adding to wiki', async () => {
+    const user = userEvent.setup();
+    const world = docWorld();
+    const base = world.materials.find((m) => m.id === 'm-txt')!;
+    world.materials.unshift({
+      ...base,
+      id: 'm-docx',
+      title: 'Lecture Notes - KV Cache',
+      kind: 'docx',
+      status: 'ready',
+      origin: { type: 'file', url: null, file_name: 'sample-note.docx', format: 'docx', size_bytes: 12_288 },
+      fragment_count: 1,
+      fragments: [fragment('m-docx', 1, 'Key and value tensors remain cached across decoding steps.')],
+      wiki: materialWiki('not_in_wiki'),
+      wiki_state: 'not_in_wiki',
+    });
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-docx' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    expect(await within(doc).findByRole('heading', { level: 2, name: 'Lecture Notes - KV Cache' })).toBeInTheDocument();
+    expect(within(doc).getByText('DOCX')).toBeInTheDocument();
+    expect(within(doc).getByText(/^DOCX · .* · 9 words$/)).toBeInTheDocument();
+    expect(within(doc).getByText('Text extracted')).toBeInTheDocument();
+    expect(within(doc).getByText('Key and value tensors remain cached across decoding steps.')).toBeInTheDocument();
+    await user.click(within(doc).getByRole('button', { name: 'Add to wiki' }));
+    await waitFor(() => expect(r.fake.calls.some((c) => c.path === '/kb/materials/m-docx/ingest')).toBe(true));
+    expect(await within(doc).findByText('Checking recognition')).toBeInTheDocument();
+  });
+
+  it('renders image truthfully without claiming text extraction or enabling Add to wiki', async () => {
+    const world = docWorld();
+    const base = world.materials.find((m) => m.id === 'm-txt')!;
+    world.materials.unshift(
+      {
+        ...base,
+        id: 'm-img',
+        title: 'sample-chart',
+        kind: 'image',
+        status: 'ready',
+        origin: {
+          type: 'file', url: null, file_name: 'sample-chart.heic',
+          mime_type: 'image/heic', format: 'heic', width: 64, height: 48, size_bytes: 2048,
+        },
+        fragment_count: 0,
+        fragments: [],
+        wiki: materialWiki('not_in_wiki'),
+        wiki_state: 'not_in_wiki',
+      },
+      {
+        ...base,
+        id: 'm-img-proc',
+        title: 'processing-chart',
+        kind: 'image',
+        status: 'processing',
+        origin: { type: 'file', url: null, file_name: 'processing-chart.png' },
+        fragment_count: 0,
+        fragments: [],
+        wiki: materialWiki('not_in_wiki'),
+        wiki_state: 'not_in_wiki',
+      },
+      {
+        ...base,
+        id: 'm-img-fail',
+        title: 'bad-chart',
+        kind: 'image',
+        status: 'failed',
+        failure_reason: "This HEIC image is damaged and can't be decoded.",
+        can_retry: false,
+        origin: { type: 'file', url: null, file_name: 'bad-chart.heic' },
+        fragment_count: 0,
+        fragments: [],
+        wiki: materialWiki('not_in_wiki'),
+        wiki_state: 'not_in_wiki',
+      },
+    );
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-img' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    expect(await within(doc).findByRole('heading', { level: 2, name: 'sample-chart' })).toBeInTheDocument();
+    expect(within(doc).getByText('Image')).toBeInTheDocument();
+    expect(within(doc).getByText(/^Image · .* · 64 × 48$/)).toBeInTheDocument();
+    expect(within(doc).getByText('Image saved')).toBeInTheDocument();
+    expect(within(doc).queryByText('Text extracted')).not.toBeInTheDocument();
+    expect(within(doc).queryByText('This material has no text.')).not.toBeInTheDocument();
+    expect(within(doc).getByRole('button', { name: 'Add to wiki' })).toBeDisabled();
+    expect(within(doc).getByText('Images are stored without OCR, so there is no text to add.')).toBeInTheDocument();
+    const details = within(doc).getByRole('note', { name: 'Image details' });
+    expect(details).toHaveTextContent('sample-chart.heic');
+    expect(details).toHaveTextContent('HEIC · 64 × 48 · 2 KB');
+    expect(details).toHaveTextContent('Stored locally as an image without OCR or text extraction.');
+
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-img-proc' }));
+    expect(await within(doc).findByText('This image is being prepared.')).toBeInTheDocument();
+
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-img-fail' }));
+    expect(await within(doc).findByText("This HEIC image is damaged and can't be decoded.")).toBeInTheDocument();
+    expect(within(doc).getByText('Couldn’t read')).toBeInTheDocument();
+  });
+});

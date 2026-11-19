@@ -61,6 +61,12 @@ class KbOrigin(BaseModel):
     file_name: str | None
     #: W-3 web page snapshots: when SKAZ fetched the page (UTC, ISO 8601); ``null`` otherwise.
     fetched_at: str | None = None
+    mime_type: str | None = None
+    format: str | None = None
+    size_bytes: int | None = None
+    width: int | None = None
+    height: int | None = None
+    sha256: str | None = None
 
 
 #: ``paused``: stopped at the material's wiki budget (C1-d); "Continue" is ``POST /kb/materials/{id}/ingest``.

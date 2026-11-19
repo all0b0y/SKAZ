@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Annotated, cast
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from ..errors import KnowledgeError
 from ..library.library import INBOX_ID
+from ..sources.intake import SourceRejected
 from ..sources.links import LinkInfo, classify_offline
+from ..sources.native_intake041 import MAX_IMAGE_BYTES
 from ..sources.service import GuardReport, IntakeResult, SourceService, location_label
 from ..sources.web_page import WebPageUnavailable
 from ..speech.service import SpeechInvalid, SpeechService, SpeechView
@@ -26,6 +28,7 @@ from .schemas_sources import (
     KbExcludedFragment,
     KbFragmentLocation,
     KbHiddenFinding,
+    KbImagePreviewRequest,
     KbLinkInfo,
     KbMaterialAdded,
     KbMaterialGuard,
@@ -135,11 +138,79 @@ async def add_text(payload: KbAddText, request: Request) -> KbMaterialAdded:
 async def add_file(payload: KbAddFile, request: Request, response: Response) -> KbMaterialAdded:
     """201 = a new material; 200 = the same file is already in the library (N2, ``already_in_library``)."""
     sources = get_sources(request)
-    result = await kb_call(sources.add_file, payload.path, payload.folder_id, payload.title,
-                           to_wiki=payload.to_wiki)
+    result = await kb_call(
+        sources.add_file,
+        payload.path,
+        payload.folder_id,
+        payload.title,
+        to_wiki=payload.to_wiki,
+        selection_source=payload.selection_source or "picker",
+        expected_size=payload.expected_size,
+        expected_sha256=payload.expected_sha256,
+    )
     if result.existing:
         response.status_code = 200
     return await _added(sources, result)
+
+
+async def _read_bounded_image_body(request: Request) -> bytes:
+    limit_mb = MAX_IMAGE_BYTES // (1024 * 1024)
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > MAX_IMAGE_BYTES:
+        raise SourceRejected(f"This image is larger than {limit_mb} MB.")
+    parts: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_IMAGE_BYTES:
+            raise SourceRejected(f"This image is larger than {limit_mb} MB.")
+        parts.append(chunk)
+    return b"".join(parts)
+
+
+@router.post("/kb/materials/clipboard-image", status_code=201)
+async def add_clipboard_image(
+    request: Request,
+    response: Response,
+    folder_id: Annotated[str, Query(min_length=1, max_length=64)] = INBOX_ID,
+    file_name: Annotated[str, Query(min_length=1, max_length=255)] = "Screenshot",
+    title: Annotated[str | None, Query(max_length=255)] = None,
+) -> KbMaterialAdded:
+    """Import bounded clipboard image bytes sent by Electron main (no OCR or auto-wiki ingest)."""
+    sources = get_sources(request)
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    try:
+        data = await _read_bounded_image_body(request)
+    except SourceRejected as error:
+        raise HTTPException(status_code=error.status_code, detail=error.message) from error
+    result = await kb_call(
+        sources.add_clipboard_image,
+        data,
+        folder_id,
+        mime_type=content_type,
+        file_name=file_name,
+        title=title,
+    )
+    if result.existing:
+        response.status_code = 200
+    return await _added(sources, result)
+
+
+@router.post("/kb/materials/image-preview", response_class=Response)
+async def image_preview(payload: KbImagePreviewRequest, request: Request) -> Response:
+    """Decode an authorized disk or material image (including HEIC) into bounded PNG bytes."""
+    sources = get_sources(request)
+    if payload.path is not None:
+        png = await kb_call(
+            sources.preview_trusted_image,
+            payload.path,
+            expected_size=payload.expected_size,
+            expected_sha256=payload.expected_sha256,
+        )
+    else:
+        assert payload.material_id is not None
+        png = await kb_call(sources.preview_material_image, payload.material_id)
+    return Response(content=png, media_type="image/png")
 
 
 def _http(error: KnowledgeError) -> HTTPException:

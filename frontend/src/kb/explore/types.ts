@@ -75,6 +75,8 @@ export const MATERIAL_KIND_ICON: Record<KbAreaMaterial['kind'], IconName> = {
   video: 'video',
   pdf: 'pdf',
   book: 'materials',
+  docx: 'pdf',
+  image: 'image',
   video_link: 'link',
   web: 'link',
   text: 'text',

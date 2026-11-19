@@ -105,9 +105,18 @@ def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, fold
     """The material with the applied recognition corrections (W2) and its wiki/translation state (S3)."""
     origin = None
     if detail.origin is not None:
-        origin = KbOrigin(type=detail.origin["type"], url=detail.origin.get("url"),
-                          file_name=detail.origin.get("file_name"),
-                          fetched_at=detail.origin.get("fetched_at"))
+        origin = KbOrigin(
+            type=detail.origin["type"],
+            url=detail.origin.get("url"),
+            file_name=detail.origin.get("file_name"),
+            fetched_at=detail.origin.get("fetched_at"),
+            mime_type=detail.origin.get("mime_type"),
+            format=detail.origin.get("format"),
+            size_bytes=detail.origin.get("size_bytes"),
+            width=detail.origin.get("width"),
+            height=detail.origin.get("height"),
+            sha256=detail.origin.get("sha256"),
+        )
     fragments: list[KbFragment]
     if corrections is None:  # no wiki service (tests of the index alone): the recognised text as is
         fragments = [KbFragment(id=f.id, seg=f.seg, text=f.text, start_ms=f.start_ms, end_ms=f.end_ms,

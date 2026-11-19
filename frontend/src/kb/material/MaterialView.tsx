@@ -4,6 +4,7 @@ import type { KbCorrection, KbCorrectionChange, KbJob, KbMaterial } from '../../
 import { errorText, KbApiError } from '../api/client';
 import { Banner, Button, Icon, IconButton, Menu, Segmented, Spinner } from '../ui';
 import { KIND_ICON, KIND_LABEL, formatTime } from '../library/materialMeta';
+import { formatBytes } from '../materials/addItems';
 import { PanelFrameButtons, useAskAbout } from '../document/parts';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
@@ -49,7 +50,7 @@ function durationOf(material: KbMaterial): number | null {
 
 const count = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 
-/** How big the material is: duration of speech, pages of a PDF, words of a text. */
+/** How big the material is: duration of speech, pages of a PDF, dimensions/size of an image, words of a text. */
 function sizeOf(material: KbMaterial): string | null {
   if (SPEECH.has(material.kind)) {
     const d = durationOf(material);
@@ -59,8 +60,31 @@ function sizeOf(material: KbMaterial): string | null {
     const pages = new Set(material.fragments.map((f) => f.page).filter((p) => p !== null));
     if (pages.size) return count(pages.size, 'page', 'pages');
   }
+  if (material.kind === 'image') {
+    if (material.origin?.width && material.origin?.height) return `${material.origin.width} × ${material.origin.height}`;
+    return material.origin?.size_bytes ? formatBytes(material.origin.size_bytes) : null;
+  }
   const words = material.fragments.reduce((n, f) => n + (f.text.match(/\S+/g)?.length ?? 0), 0);
   return words ? count(words, 'word', 'words') : null;
+}
+
+function ImageDetails({ material }: { material: KbMaterial }) {
+  const o = material.origin;
+  const specs = [
+    o?.format ? o.format.toUpperCase() : o?.mime_type,
+    o?.width && o?.height ? `${o.width} × ${o.height}` : null,
+    o?.size_bytes ? formatBytes(o.size_bytes) : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <div className="kb-excl" role="note" aria-label="Image details">
+      <div className="kb-excl__toggle">
+        <Icon name="image" size={14} />
+        <span>{o?.file_name ?? material.title}</span>
+      </div>
+      {specs && <p className="kb-muted">{specs}</p>}
+      <p className="kb-muted">Stored locally as an image without OCR or text extraction.</p>
+    </div>
+  );
 }
 
 /** One muted line under the title: type · date · size (and the translation, when there is one). */
@@ -280,6 +304,10 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             )}
             {isWithoutSpeech(material) ? (
               <NoSpeech material={material} onDelete={() => setDialog('delete')} />
+            ) : material.kind === 'image' && material.fragments.length === 0 ? (
+              material.status === 'failed' ? null
+                : material.status === 'ready' ? <ImageDetails material={material} />
+                : <p className="kb-muted">This image is being prepared.</p>
             ) : material.fragments.length === 0 ? (
               material.status === 'failed' ? null
                 : <p className="kb-muted">{material.status === 'ready' ? 'This material has no text.' : 'The text appears here as soon as it is ready.'}</p>

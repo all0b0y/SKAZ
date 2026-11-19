@@ -52,8 +52,10 @@ _SUMMARY_CHARS = 160
 _TRUNCATED = " …[truncated]"
 #: Decks and tests are no wiki pages (N4-7): the study tools read them, these tools never do.
 WikiPageKind = Literal["concept", "note", "folder", "analysis"]
-SearchKind = Literal["recording", "audio", "video", "video_link", "pdf", "book", "web", "text",
-                     "concept", "note", "folder", "analysis"]
+SearchKind = Literal[
+    "recording", "audio", "video", "video_link", "pdf", "book", "web", "text", "docx", "image",
+    "concept", "note", "folder", "analysis",
+]
 assert set(get_args(SearchKind)) == set(MATERIAL_KINDS) | (set(PAGE_KINDS) - STUDY_KINDS)
 assert set(get_args(WikiPageKind)) == set(PAGE_KINDS) - STUDY_KINDS
 STUDY_PAGE = "This is a saved deck or test, not a wiki page. Read it with skaz_study_read."

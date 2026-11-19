@@ -50,6 +50,7 @@ function RunningPill({ job }: { job: KbJob }) {
 }
 
 const SPEECH: ReadonlyArray<KbMaterial['kind']> = ['recording', 'audio', 'video', 'video_link'];
+const NO_IMAGE_WIKI_REASON = 'Images are stored without OCR, so there is no text to add.';
 /** `KbMaterialWiki.error_code`: the agent can't work until it is fixed in Settings → Accounts & keys. */
 const AGENT_UNAVAILABLE = 'AGENT_UNAVAILABLE';
 
@@ -152,13 +153,22 @@ export function StatusChips({ material, jobs, onAddToWiki, adding, onJobChanged 
   const openSettings = useUi((s) => s.openSettings);
   const { prefs } = useServices();
   const speech = SPEECH.includes(material.kind);
-  const first = speech ? 'Recognised' : material.kind === 'web' ? 'Text cleaned' : material.kind === 'text' ? 'Text saved' : 'Text extracted';
+  const first = speech
+    ? 'Recognised'
+    : material.kind === 'web'
+      ? 'Text cleaned'
+      : material.kind === 'text'
+        ? 'Text saved'
+        : material.kind === 'image'
+          ? 'Image saved'
+          : 'Text extracted';
   const running = jobs.find((j) => j.state === 'running');
   const quota = jobs.find((j) => (j.state === 'queued' || j.state === 'paused') && j.engine_pause);
   // Package-1 backends have no `wiki`: then nothing is claimed about the wiki.
   const wiki = material.wiki as KbMaterialWiki | undefined;
   const counts = material.correction_counts;
   const silent = isWithoutSpeech(material);
+  const noWikiReason = silent ? NO_SPEECH_REASON : material.kind === 'image' ? NO_IMAGE_WIKI_REASON : null;
   // Any running status in this strip: one indeterminate dot strip in its own row (no percentages
   // exist). It is the only progress indicator: the running pills carry no spinner (FX B2).
   const inProgress = material.status === 'recording' || material.status === 'processing' || !!running
@@ -191,10 +201,10 @@ export function StatusChips({ material, jobs, onAddToWiki, adding, onJobChanged 
       {wiki?.state === 'not_in_wiki' && material.status === 'ready' && (
         <>
           <Pill tone="todo">Not in wiki</Pill>
-          {silent ? (
+          {noWikiReason ? (
             <>
               <Button size="sm" variant="quiet" icon="plus" disabled aria-describedby={`kb-nowiki-${material.id}`}>Add to wiki</Button>
-              <span id={`kb-nowiki-${material.id}`} className="kb-muted kb-pipe__why">{NO_SPEECH_REASON}</span>
+              <span id={`kb-nowiki-${material.id}`} className="kb-muted kb-pipe__why">{noWikiReason}</span>
             </>
           ) : (
             <Button size="sm" variant="quiet" icon="plus" busy={adding} onClick={onAddToWiki}>Add to wiki</Button>

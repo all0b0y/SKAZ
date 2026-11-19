@@ -13,6 +13,12 @@ function deps(over: Partial<KbBridgeDeps> = {}): KbBridgeDeps {
     showOpenDialog: vi.fn(async () => ({ canceled: false, filePaths: ['/Users/me/a.pdf', '/Users/me/b.mp3', '/Users/me/run.sh', '/Users/me/gone.pdf'] })),
     writeTextFile: vi.fn(),
     fileSize: (path: string) => (path.includes('gone') ? null : 1234),
+    realPath: (path: string) => (path.includes('gone') ? null : path),
+    readHeader: (path: string) => {
+      if (path.endsWith('.pdf')) return new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]);
+      if (path.endsWith('.mp3')) return new Uint8Array([0x49, 0x44, 0x33]);
+      return null;
+    },
     documentsDir: '/Users/me/Documents',
     downloadsDir: '/Users/me/Downloads',
     materialExtensions: MATERIAL_EXTENSIONS,

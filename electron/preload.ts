@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { CHANNELS } from './channels';
+import { createPreloadIntakeBoundary } from './nativeIntake041/preloadBoundary';
 import { systemAudioSupported } from './systemAudio';
 import type {
   AudioFileChoice,
@@ -11,6 +12,7 @@ import type {
   JsonResponse,
   MaterialFileChoice,
   MediaAccess,
+  NativeIntakeApi,
   RevealTarget,
   UpdateState,
   TextFileSave,
@@ -41,6 +43,17 @@ const api: BridgeApi = {
   chooseMaterialFiles(): Promise<MaterialFileChoice[]> {
     return ipcRenderer.invoke(CHANNELS.chooseMaterialFiles) as Promise<MaterialFileChoice[]>;
   },
+  nativeIntake: createPreloadIntakeBoundary({
+    getPathForFile: (file) => webUtils.getPathForFile(file),
+    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+    channels: {
+      chooseMaterialFiles: CHANNELS.chooseMaterialBatch,
+      droppedMaterialFiles: CHANNELS.droppedMaterialFiles,
+      validateClipboardImage: CHANNELS.validateClipboardImage,
+      importSelection: CHANNELS.importMaterialSelection,
+      imagePreview: CHANNELS.materialImagePreview,
+    },
+  }) as NativeIntakeApi,
   openLogsFolder(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.openLogsFolder) as Promise<boolean>;
   },

@@ -6,6 +6,40 @@
 
 import type { NativeAudioMeta, NativeFailure, NativeOpened, NativeSaved, NativeStopped } from './nativeLive';
 import type { KbDictation } from './kb/types.gen';
+import type {
+  ClipboardImageInput,
+  ClipboardImageSelection,
+  ClipboardImageValidation,
+  MaterialIntakeBatch,
+  NativeIntakeBridgeApi,
+  NativeIntakeImagePreview,
+  NativeIntakeImportRequest,
+  PreloadNativeIntakeApi,
+  RejectedMaterialSelection,
+  SelectionSource,
+  TrustedMaterialSelection,
+} from '../../../electron/nativeIntake041/contracts';
+import type { ImageFormat, IntakeCategory, IntakeRoute } from '../../../electron/nativeIntake041/formats';
+
+export type {
+  ClipboardImageInput,
+  ClipboardImageSelection,
+  ClipboardImageValidation,
+  ImageFormat,
+  IntakeCategory,
+  IntakeRoute,
+  MaterialIntakeBatch,
+  NativeIntakeBridgeApi,
+  NativeIntakeImagePreview,
+  NativeIntakeImportRequest,
+  PreloadNativeIntakeApi,
+  RejectedMaterialSelection,
+  SelectionSource,
+  TrustedMaterialSelection,
+};
+
+/** Public typed Electron/preload boundary exposed to V2 for trusted picker, drop, clipboard, import and image preview. */
+export type NativeIntakeApi = NativeIntakeBridgeApi;
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -70,16 +104,19 @@ export interface MaterialFileChoice {
   size: number;
 }
 
-/** Documents the backend reads (`sources/intake.py` PDF_EXTENSIONS | TEXT_EXTENSIONS). */
-export const DOCUMENT_EXTENSIONS = ['pdf', 'txt', 'md', 'markdown'] as const;
+/** Documents the backend reads (`sources/intake.py` PDF_EXTENSIONS | TEXT_EXTENSIONS | DOCX_EXTENSIONS). */
+export const DOCX_EXTENSIONS = ['docx'] as const;
+export const DOCUMENT_EXTENSIONS = ['pdf', 'txt', 'md', 'markdown', ...DOCX_EXTENSIONS] as const;
+/** Images the backend decodes locally (`sources/intake.py` IMAGE_EXTENSIONS). */
+export const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'heic'] as const;
 /** Audio and video the speech import takes (`speech/media.py`: the provider list + video containers). */
 export const SPEECH_EXTENSIONS = [...AUDIO_EXTENSIONS, 'mkv', 'mov', 'avi', 'm4v'] as const;
 /** Video containers among them (`speech/media.py` VIDEO_EXTENSIONS). */
 export const VIDEO_EXTENSIONS = ['mp4', 'm4v', 'mov', 'mkv', 'webm', 'avi'] as const;
 
-/** File types the "+ Material" chooser offers: only what the backend takes (QA B2). Documents go to
- * `/kb/materials/file`, audio and video to the speech import (`/kb/imports`). */
-export const MATERIAL_EXTENSIONS = [...DOCUMENT_EXTENSIONS, ...SPEECH_EXTENSIONS] as const;
+/** File types the "+ Material" chooser offers: only what the backend takes (QA B2). Documents and
+ * images go to `/kb/materials/file`, audio and video to the speech import (`/kb/imports`). */
+export const MATERIAL_EXTENSIONS = [...DOCUMENT_EXTENSIONS, ...IMAGE_EXTENSIONS, ...SPEECH_EXTENSIONS] as const;
 
 /** macOS privacy state of SKAZ for a capture kind (`systemPreferences.getMediaAccessStatus`). */
 export type MediaAccessStatus = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown';
@@ -123,8 +160,10 @@ export interface BridgeApi {
   dictate?(wav: ArrayBuffer, language?: string): Promise<JsonResponse<DictationResult>>;
   /** Native save dialog for a text file; `saved: false` when the user cancelled. */
   saveTextFile?(file: TextFileSave): Promise<{ saved: boolean; path?: string }>;
-  /** Native chooser for material files (PDF, text, audio, video); empty when cancelled. */
+  /** Native chooser for material files (PDF, DOCX, text, images, audio, video); empty when cancelled. */
   chooseMaterialFiles?(): Promise<MaterialFileChoice[]>;
+  /** Scoped 0.4.1 intake boundary for V2 (native picker batch, drop via webUtils, clipboard validation, selection import & HEIC preview). */
+  nativeIntake?: NativeIntakeApi;
   /** Native PCM lifecycle, authenticated and bounded in Electron main. */
   openNative(sessionId: string, sampleRate: number): Promise<JsonResponse<NativeOpened>>;
   sendNativeAudio(sessionId: string, meta: NativeAudioMeta, pcm: ArrayBuffer): Promise<JsonResponse<NativeSaved>>;

@@ -33,8 +33,9 @@ export function dragBlockReason(m: Pick<KbMaterialSummary, 'status' | 'wiki_stat
   return null;
 }
 
-/** Ready and not in the wiki yet (or the last try failed): "Add to wiki · N" counts these. */
-export const canAddToWiki = (m: KbMaterialSummary) => m.status === 'ready' && (m.wiki_state === 'not_in_wiki' || m.wiki_state === 'failed');
+/** Ready and not in the wiki yet (or the last try failed): "Add to wiki · N" counts these (images have no extracted text). */
+export const canAddToWiki = (m: KbMaterialSummary) =>
+  m.kind !== 'image' && m.status === 'ready' && (m.wiki_state === 'not_in_wiki' || m.wiki_state === 'failed');
 
 export interface MovedMaterial { id: string; from: string }
 
