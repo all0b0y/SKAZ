@@ -2281,6 +2281,7 @@ export interface KbSelection {
   intent?: "ask" | "explain" | "wrong";
 }
 
+/** Send a message with non-whitespace text or saved attachments. An attachment caption may be blank. */
 export interface KbSend {
   text: string;
   mentions?: KbRef[];

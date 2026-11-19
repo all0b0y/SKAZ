@@ -14,6 +14,12 @@ type StreamingHost = Host & {
   deliverGrowth?: () => void;
   returnLanding?: { initialHeight: number; heightAtEnd: number; topAtEnd: number };
 };
+type FindDuringReturn = {
+  started: boolean;
+  opening: { top: number; bottom: number; trusted: boolean } | null;
+  positions: number[];
+};
+type FindHost = Window & { findDuringReturn: FindDuringReturn };
 let browser: Browser;
 let bundle: OutputFile[];
 before(async () => {
@@ -221,3 +227,58 @@ test('two exact hits in the same reply retain the viewport until Escape restores
   await expect.poll(() => gap(log)).toBeLessThanOrEqual(1);
   t.diagnostic(JSON.stringify({ positions, restored: start }));
 });
+
+for (const query of ['', 'absent']) {
+  test(`Find with ${query ? 'no matches' : 'an empty query'} holds the viewport during a smooth Return`, { timeout: 15_000 }, async (t) => {
+    const { page, log, latest } = await openThread(t, 'full');
+    const start = await log.evaluate((el) => new Promise<number>((resolve) => {
+      el.addEventListener('scrollend', () => resolve(el.scrollTop), { once: true });
+      el.scrollTop = 650;
+    }));
+    await expect(latest).toBeVisible();
+    await log.evaluate((el) => {
+      const trace: FindDuringReturn = { started: false, opening: null, positions: [] };
+      (window as unknown as FindHost).findDuringReturn = trace;
+      el.addEventListener('scroll', () => {
+        trace.started = true;
+        if (trace.opening) trace.positions.push(el.scrollTop);
+      });
+      document.addEventListener('keydown', (event) => {
+        if (!event.ctrlKey || event.code !== 'KeyF') return;
+        trace.opening = { top: el.scrollTop, bottom: el.scrollHeight - el.clientHeight, trusted: event.isTrusted };
+      }, true);
+    });
+    await latest.press('Enter');
+    await page.waitForFunction(() => (window as unknown as FindHost).findDuringReturn.started);
+    await page.keyboard.press('Control+f');
+
+    const panel = page.getByRole('search', { name: 'Find in this chat' });
+    const field = panel.getByRole('textbox');
+    await expect(field).toBeFocused();
+    await expect(latest).toHaveCount(0);
+    if (query) await field.fill(query);
+    await expect(panel.getByRole('status')).toHaveText(query ? /No matches/ : '0 / 0');
+
+    // Observe every scroll event and the final position through the native animation window.
+    const { opening, positions } = await log.evaluate(async (el) => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const trace = (window as unknown as FindHost).findDuringReturn;
+      return { opening: trace.opening, positions: [...trace.positions, el.scrollTop] };
+    });
+    assert.ok(opening?.trusted, 'the browser delivered a trusted Ctrl+F');
+    assert.ok(opening.top > start && opening.top < opening.bottom - 250, 'Return was still in motion at Ctrl+F');
+    await field.press('Escape');
+    await expect(panel).toHaveCount(0);
+    const restored = await log.evaluate((el) => new Promise<number>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(el.scrollTop)))));
+
+    const held = [Math.min(...positions), Math.max(...positions)];
+    t.diagnostic(JSON.stringify({ start, opening, held, restored }));
+    assert.ok(held.every((top) => Math.abs(top - opening.top) <= 1), 'the viewport stayed at the Find opening position');
+    assert.ok(Math.abs(restored - opening.top) <= 1, 'Escape restored the Find opening position');
+    await expect(latest).toBeVisible();
+    await expect(latest).toBeFocused();
+    await latest.click();
+    await expect.poll(() => gap(log)).toBeLessThanOrEqual(1);
+  });
+}

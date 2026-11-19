@@ -41,7 +41,7 @@ from ..markdown.text import format_timestamp
 from ..service import KnowledgeService
 from ..sources.guard.detector import detect_instruction
 from ..store.records import PageRecord
-from .model import CitePart, ConnectionPart, PagePart, Part, TextPart
+from .model import CitePart, ConnectionPart, FrameCitation, PagePart, Part, TextPart
 from .resolve import MaterialReader
 
 TITLE_CHARS = 80
@@ -76,7 +76,7 @@ def uncited_diagrams_warning(count: int) -> str | None:
     return f"Saved without {count} diagrams: they have no quotes from your materials."
 
 ChunkKind = Literal["heading", "paragraph", "list", "quote", "table", "code"]
-Chip = CitePart | PagePart
+Chip = CitePart | PagePart | FrameCitation
 
 
 class AnalysisRefused(KnowledgeError):
@@ -267,12 +267,27 @@ def paragraphs(parts: Sequence[Part], time_of: TimeOf | None = None) -> list[Chu
             out.append(chunk)
         stream.clear()
 
+    def add_chip(chip: Chip) -> None:
+        stream.append(f"{_SLOT_OPEN}{len(chips)}{_SLOT_CLOSE}")
+        chips.append(chip)
+
+    def add_text(text: str) -> None:
+        stream.append(text.replace(_SLOT_OPEN, "").replace(_SLOT_CLOSE, ""))
+
     for part in parts:
         if isinstance(part, TextPart):
-            stream.append(part.text.replace(_SLOT_OPEN, "").replace(_SLOT_CLOSE, ""))
+            start = 0
+            for frame in part.frame_citations:
+                end = frame.offset + len(frame.markdown)
+                if (not frame.markdown or frame.offset < start
+                        or part.text[frame.offset:end] != frame.markdown):
+                    continue
+                add_text(part.text[start:frame.offset])
+                add_chip(frame)
+                start = end
+            add_text(part.text[start:])
         elif isinstance(part, CitePart | PagePart):
-            stream.append(f"{_SLOT_OPEN}{len(chips)}{_SLOT_CLOSE}")
-            chips.append(part)
+            add_chip(part)
         elif isinstance(part, ConnectionPart):
             flush()
             chips = []
@@ -409,6 +424,10 @@ class AnalysisWriter:
     def _chip_link(self, chip: Chip, cites: list[Cite]) -> str | None:
         if isinstance(chip, PagePart):
             return self._page_link(chip)
+        if isinstance(chip, FrameCitation):
+            if self.kb.material_repo.get(chip.material_id) is not None:
+                self.cited.setdefault(chip.material_id, None)
+            return chip.markdown
         checked = self._checked(chip.material_id, chip.seg, chip.quote)
         if checked is not None and checked not in cites:
             cites.append(checked)

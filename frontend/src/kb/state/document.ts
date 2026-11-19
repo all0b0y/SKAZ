@@ -45,6 +45,8 @@ interface ReaderFocusRequest {
 interface ReaderNavigation extends ReaderFocusRequest {
   returnFocus?: ReaderFocusTarget;
   closeFocus?: ChatCitationFocus;
+  /** Keep the originating chat citation when switching between linked Notes and Transcript. */
+  preserveCloseFocus?: boolean;
 }
 
 /** The two code-written wiki files shown read-only (B20). */
@@ -173,7 +175,9 @@ export function createNavSlice(set: SetNav): NavState & NavActions {
       ...show({
         kind: 'doc', target: normalizeTarget(target), nonce: ++nonce,
         focus: navigation && { destination: navigation.destination, origin: navigation.origin },
-        closeFocus: navigation?.closeFocus,
+        closeFocus: navigation?.closeFocus ?? (
+          navigation?.preserveCloseFocus && s.right?.kind === 'doc' ? s.right.closeFocus : undefined
+        ),
       }, navigation?.returnFocus)(s),
       ...(target.type === 'page' ? { recentPages: [target.id, ...s.recentPages.filter((id) => id !== target.id)].slice(0, RECENT_PAGES) } : {}),
     })),

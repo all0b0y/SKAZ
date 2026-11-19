@@ -9,9 +9,13 @@ const chat = () => within(screen.getByRole('region', { name: 'Chat' }));
 const conversation = () => chat().getByRole('log', { name: 'Conversation' });
 const sourceName = 'Source 1: Lecture 5';
 
-async function openFromChat(user: ReturnType<typeof userEvent.setup>, source: HTMLElement) {
-  act(() => source.focus());
+async function pressEnter(user: ReturnType<typeof userEvent.setup>, control: HTMLElement) {
+  act(() => control.focus());
   await user.keyboard('{Enter}');
+}
+
+async function openFromChat(user: ReturnType<typeof userEvent.setup>, source: HTMLElement) {
+  await pressEnter(user, source);
   const jump = await screen.findByRole('button', { name: /^Open at fragment/ });
   await waitFor(() => expect(jump).toHaveFocus());
   await user.keyboard('{Enter}');
@@ -19,8 +23,7 @@ async function openFromChat(user: ReturnType<typeof userEvent.setup>, source: HT
 }
 
 async function closeReader(user: ReturnType<typeof userEvent.setup>) {
-  reader().getByRole('button', { name: 'Close document' }).focus();
-  await user.keyboard('{Enter}');
+  await pressEnter(user, reader().getByRole('button', { name: 'Close document' }));
   expect(screen.queryByRole('complementary', { name: 'Document' })).toBeNull();
 }
 
@@ -32,6 +35,47 @@ it('returns keyboard focus to the original chat citation after closing the expan
   await openFromChat(user, source);
   await user.click(reader().getByRole('button', { name: 'Expand to the centre' }));
   await closeReader(user);
+  expect(source).toBeVisible();
+  expect(source).toHaveFocus();
+  expect(source).toHaveAttribute('aria-expanded', 'false');
+});
+
+it.each([
+  ['from Notes', null],
+  ['after Back from Notes', 'Back'],
+  ['after reopening the transcript', 'Transcript'],
+] as const)('returns keyboard focus to the originating chat citation on Close %s', async (_route, action) => {
+  const lecture = 'Lecture 8 — entropy';
+  const quote = 'S equals k times the log of W';
+  const world = { ...docWorld(), chats: chatWorld().chats };
+  const message = world.chats.find(({ id }) => id === 'c1')!.messages.find(({ id }) => id === 'c1-a1')!;
+  const sourcePart = message.parts.find((part) => part.type === 'cite')!;
+  sourcePart.citation = { ...sourcePart.citation, material_id: 'm-lec8', material_title: lecture,
+    seg: 1, start_ms: 492_000, quote };
+
+  const user = userEvent.setup();
+  renderKb({ world });
+  await user.click(await screen.findByRole('button', { name: /Why is there a logarithm/ }));
+  const draft = await chat().findByRole('textbox', { name: 'Message' });
+  await user.type(draft, 'Retained draft');
+  const source = (await chat().findAllByRole('button', { name: 'Source 1: ' + lecture }))[0]!;
+
+  await pressEnter(user, source);
+  const jump = await screen.findByRole('button', { name: 'Open at quote, 08:12' });
+  await waitFor(() => expect(jump).toHaveFocus());
+  await user.keyboard('{Enter}');
+  expect(await reader().findByText(quote, { selector: 'mark' })).toHaveFocus();
+
+  await pressEnter(user, reader().getByRole('button', { name: 'Open the notes' }));
+  expect(await reader().findByRole('button', { name: 'Transcript' })).toHaveFocus();
+  if (action) {
+    await pressEnter(user, reader().getByRole('button', { name: action }));
+    expect(await reader().findByRole('button', { name: 'Open the notes' })).toHaveFocus();
+  }
+
+  await closeReader(user);
+  expect(chat().getByRole('textbox', { name: 'Message' })).toBe(draft);
+  expect(draft).toHaveTextContent('Retained draft');
   expect(source).toBeVisible();
   expect(source).toHaveFocus();
   expect(source).toHaveAttribute('aria-expanded', 'false');

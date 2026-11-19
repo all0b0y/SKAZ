@@ -308,14 +308,19 @@ class EngineRegistry:
         return AgentView(engine, name, status, state, action, models,
                          current if isinstance(current, str) else None, _now(), first_run)
 
-    async def require(self, engine: EngineId) -> AgentEngine:
-        """The engine for a run, or a plain error with the fixing action. Never another engine."""
-        view = await self.view(engine)
-        if view.state != "ready":
+    async def require_view(self, engine: EngineId, *, refresh: bool = False) -> AgentView:
+        """A ready view for selecting a model, or a plain error with the fixing action."""
+        view = await self.view(engine, refresh=refresh)
+        if view.state != "ready" and not refresh:
             view = await self.view(engine, refresh=True)
         if view.state != "ready":
             message = view.status.reason or f"{view.name} is not ready."
             raise EngineUnavailable(engine, message, view.action or "check")
+        return view
+
+    async def require(self, engine: EngineId) -> AgentEngine:
+        """The engine for a run, or a plain error with the fixing action. Never another engine."""
+        await self.require_view(engine)
         return self.engines[engine]
 
     async def require_known(self, engine: EngineId) -> AgentEngine:

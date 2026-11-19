@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from threading import Event
 
@@ -9,12 +10,19 @@ import pytest
 
 from skaz.knowledge.agents.engine import AgentTurn, EngineId, EngineStatus, Failed, ModelOption
 from skaz.knowledge.agents.fake import Gate, ScriptItem
+from skaz.knowledge.agents.registry import EngineRegistry
+from skaz.knowledge.chats.model import TextPart
 from skaz.knowledge.chats.service import ChatConflict
-from skaz.knowledge.markdown.page import PageDocument
-from tests.knowledge.chat_support import limit_failure, text
+from skaz.knowledge.library.library import INBOX_ID
+from skaz.knowledge.markdown.page import PageDocument, parse_page
+from skaz.knowledge.markdown.source import Origin
+from skaz.knowledge.sources.visual import LinkedFramePolicy, RetrievedFrame
+from tests.knowledge.chat_support import all_text, limit_failure, text
 from tests.knowledge.ingest_support import settle
 from tests.knowledge.test_chats_api import Env
 from tests.knowledge.test_chats_api import env as env
+from tests.knowledge.test_source_visual import make_png
+from tests.knowledge.test_visual_transport041_wiring import _setup_routing_matrix
 
 EDIT = '{"omit":[],"break_before":[]}'
 
@@ -153,22 +161,28 @@ async def test_failing_interrupt_returns_cancelled_and_allows_retry(
     assert saved.status_code == 200 and (await env.message(*key))["saved_page_id"] == saved.json()["id"]
 
 
-@pytest.mark.parametrize(("alternate", "reported"), [
-    ("codex", "engine-choice"), ("codex", None), ("claude_code", "engine-choice"), ("claude_code", None),
+@pytest.mark.parametrize(("alternate", "reported", "configured"), [
+    ("codex", "engine-choice", None), ("codex", None, None),
+    ("claude_code", "engine-choice", None), ("claude_code", None, None),
+    ("claude_code", "default", "default"),
 ])
 async def test_unconfigured_wiki_model_discloses_default_without_guessing(
     env: Env, monkeypatch: pytest.MonkeyPatch, alternate: EngineId, reported: str | None,
+    configured: str | None,
 ) -> None:
     async def models() -> list[ModelOption]:
-        return [ModelOption(name, name) for name in ("first-listed", "chat-choice", "engine-choice")]
+        names = ("first-listed", "chat-choice", "engine-choice", "default")
+        return [ModelOption(name, name) for name in names]
 
     for engine in env.agents.engines.values():
         monkeypatch.setattr(engine, "models", models)
     monkeypatch.setattr(env.agents.engines[alternate], "current_model", reported, raising=False)
     key = await answer_key(env, model="chat-choice")
     env.runtime.kb.settings.set("wiki_engine", alternate)
+    if configured:
+        env.runtime.kb.settings.set("wiki_model", configured)
     if alternate != "codex":
-        # A cached catalog can outlive the selection it showed. require() checks the fake again.
+        # The model selected in the engine can change after its last check.
         monkeypatch.setattr(env.agents.engines[alternate], "current_model", "old-choice")
         await env.chats.registry.view(alternate, refresh=True)
         monkeypatch.setattr(env.agents.engines[alternate], "current_model", reported)
@@ -191,9 +205,166 @@ async def test_unconfigured_wiki_model_discloses_default_without_guessing(
     notice = response.json()["warning"]
     assert "Chat model reached its limit" in notice
     assert ("Codex" if alternate == "codex" else "Claude Code") in notice
-    assert "default" in notice.lower() and (reported or "not reported") in notice
+    confirmed = reported if reported != "default" else None
+    assert "default" in notice.lower() and (confirmed or "not reported") in notice
     assert "first-listed" not in notice and "old-choice" not in notice and len(attempts) == 2
-    assert attempts[-1].model is None and attempts[-1].tools is None and attempts[-1].web is None
+    assert attempts[-1].model == confirmed and attempts[-1].tools is None and attempts[-1].web is None
+
+
+@pytest.mark.parametrize(("chat_engine", "chat_choice", "wiki_choice", "reported", "models"), [
+    pytest.param("codex", "chat-choice", None, "new-model", ("chat-choice", "new-model"), id="cross-engine"),
+    pytest.param("codex", "chat-choice", None, None, ("chat-choice", None), id="cross-engine-unknown"),
+    pytest.param("hermes", "new-model", None, "new-model", ("new-model",), id="same-effective-model"),
+    pytest.param("hermes", "chat-choice", None, None, ("chat-choice",), id="same-engine-unknown-wiki"),
+    pytest.param("hermes", None, "new-model", None, (None,), id="same-engine-unknown-primary"),
+    pytest.param("hermes", None, "new-model", "new-model", ("new-model",), id="explicit-wiki-matches"),
+    pytest.param("hermes", None, "wiki-choice", "new-model", ("new-model", "wiki-choice"),
+                 id="explicit-wiki"),
+    pytest.param("hermes", "chat-choice", None, "new-model", ("chat-choice", "new-model"),
+                 id="distinct-default"),
+])
+async def test_warm_registry_shapes_with_one_consistent_model_choice(
+    env: Env, monkeypatch: pytest.MonkeyPatch, chat_engine: EngineId, chat_choice: str | None,
+    wiki_choice: str | None, reported: str | None, models: tuple[str | None, ...],
+) -> None:
+    settings = env.runtime.kb.settings
+    env.runtime.kb_agents.registry = EngineRegistry(env.agents.engines, settings)
+    wiki = env.agents.engines["hermes"]
+    selectable = ("first-listed", "old-model", "new-model", "chat-choice", "wiki-choice")
+
+    async def options() -> list[ModelOption]:
+        return [ModelOption(id_, id_) for id_ in selectable]
+
+    for engine in env.agents.engines.values():
+        monkeypatch.setattr(engine, "models", options)
+    monkeypatch.setattr(wiki, "current_model", "old-model", raising=False)
+    choices = {"engine": chat_engine, **({"model": chat_choice} if chat_choice else {})}
+    chat_id, message_id = await answer_key(env, **choices)
+    warm = await env.chats.registry.view("hermes", refresh=True)
+    assert warm.current_model == "old-model"
+    monkeypatch.setattr(wiki, "current_model", reported)
+    settings.set("wiki_engine", "hermes")
+    if wiki_choice:
+        settings.set("wiki_model", wiki_choice)
+
+    attempts: list[tuple[str | None, str]] = []
+
+    def shape(turn: AgentTurn) -> list[ScriptItem]:
+        # The engine's default can change after discovery and before the fallback runs.
+        drifted = attempts and chat_engine == "codex" and reported
+        effective_default = "changed-after-discovery" if drifted else "new-model"
+        attempts.append((turn.model, turn.model or effective_default))
+        assert turn.tools is None and turn.web is None and turn.visuals == ()
+        if len(attempts) == 1:
+            return [limit_failure()]
+        return list(text(EDIT))
+
+    env.agents.shape_scripts[chat_engine] = env.agents.shape_scripts["hermes"] = shape
+    before = {page.id for page in env.runtime.kb.pages(kind="analysis")}
+    response = await env.client.post(f"/kb/chats/{chat_id}/messages/{message_id}/save")
+    message = await env.message(chat_id, message_id)
+    after = {page.id for page in env.runtime.kb.pages(kind="analysis")}
+    assert attempts == [(model, model or "new-model") for model in models]
+    if len(models) == 1:
+        assert response.status_code == 409 and response.json()["code"] == "ENGINE_LIMIT"
+        assert "No distinct wiki model" in response.json()["detail"]
+        assert before == after and message["saved_page_id"] is None
+    else:
+        assert response.status_code == 200, response.text
+        notice = response.json()["warning"]
+        model = models[-1]
+        if wiki_choice:
+            assert f"Shaped with Wiki LLM: Hermes Agent ({model})" in notice
+        else:
+            detail = f"reported as {model}" if model else "model not reported"
+            assert f"Shaped with Wiki LLM: Hermes Agent (engine default, {detail})" in notice
+        assert "old-model" not in notice and "first-listed" not in notice
+        assert after - before == {message["saved_page_id"]} == {response.json()["id"]}
+
+
+@pytest.mark.parametrize("mode", ["retained", "transient", "legacy", "borrowed"])
+async def test_save_preserves_verified_frame_claim_and_actual_time(
+    env: Env, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    engine = _setup_routing_matrix(env.runtime)["claude_code"]
+    video = env.runtime.kb.create_material(
+        INBOX_ID, "Synthetic linked video", "video_link", [], status="ready",
+        origin=Origin(type="url", url="https://vimeo.com/42424242"),
+    )
+    material_id = video.manifest.id
+    sources = env.runtime.kb_sources
+    sources.visual.frame_policy = LinkedFramePolicy(True, mode != "transient")
+    pixels = make_png(3, 3)
+    calls: list[tuple[int, ...]] = []
+
+    def retrieve(_source: object, times: tuple[int, ...]) -> list[RetrievedFrame]:
+        calls.append(times)
+        assert times == (10_000,)
+        return [RetrievedFrame(data=pixels, requested_timestamp_ms=10_000, actual_timestamp_ms=11_120)]
+
+    sources.visual.frame_retriever = retrieve
+    label = "[Video frame at 00:11.120](https://vimeo.com/42424242#t=11s)"
+    rows: list[dict[str, str | int | bool]] = []
+
+    def script(turn: AgentTurn) -> list[ScriptItem]:
+        if turn.response_schema:
+            assert turn.tools is None and turn.web is None and turn.visuals == ()
+            rows.extend(json.loads(turn.messages[-1].content))
+            omit = [row["id"] for row in rows
+                    if not row["required"] and row["text"] != "Observation retained."]
+            return list(text(json.dumps({"omit": omit, "break_before": []})))
+        return list(text("Observation retained. The chart is red. ",
+                         f"⟦frame:{turn.visuals[0].visual_id}⟧", "\n\nI can tell you more."))
+
+    monkeypatch.setattr(engine, "_script", script)
+    chat = (await env.chat(engine="claude_code", model="sonnet"))["id"]
+    answer = await env.answered(chat, "Inspect the chart at 00:10", attachments=[material_id])
+    assert label in all_text(answer)
+    stored = env.chats.repo.message(chat, answer["id"])
+    assert stored is not None
+    (verified,) = [frame for part in stored.parts if isinstance(part, TextPart)
+                   for frame in part.frame_citations]
+    assert (verified.material_id, verified.timestamp_ms, verified.markdown) == (material_id, 11_120, label)
+    frames = sources.list_retained_frames(material_id)
+    if mode == "transient":
+        assert frames == ()
+    else:
+        (frame,) = frames
+        assert frame.citation_refs == (answer["id"],)
+        assert frame.locator.material_id == material_id and frame.locator.timestamp_ms == 11_120
+        assert sources.read_retained_frame(material_id, frame.frame_id).data == pixels
+
+    if mode == "legacy":
+        env.chats.repo.save_message(stored.with_parts([
+            TextPart(part.text) if isinstance(part, TextPart) else part for part in stored.parts
+        ]))
+    if mode == "borrowed":
+        # An identical Markdown link from a sibling does not inherit the first answer's evidence.
+        monkeypatch.setattr(engine, "_script", lambda turn: (
+            script(turn) if turn.response_schema else text(f"Observation retained. The chart is red. {label}")
+        ))
+        answer = await env.answered(chat, "Inspect the frame again at 00:10", attachments=[material_id])
+
+    rendered = await env.client.post(f"/kb/chats/{chat}/messages/{answer['id']}/save")
+    assert rendered.status_code == 200, rendered.text
+    page_id = rendered.json()["id"]
+    record = env.runtime.kb.page_repo.get(page_id)
+    assert record is not None
+    saved = parse_page((env.runtime.kb.library_root / record.rel_path).read_text())
+    (block,) = saved.blocks()
+    assert block.kind == "explanation" and not block.cites
+    assert "I can tell you more." not in block.body
+    assert saved.meta.extra["skaz_chat"] == chat
+    assert (await env.message(chat, answer["id"]))["saved_page_id"] == page_id
+    assert calls == [(10_000,)] * (2 if mode == "borrowed" else 1)
+    assert sources.list_retained_frames(material_id) == frames
+    if mode == "borrowed":
+        assert "The chart is red." not in block.body and label not in block.body and not saved.meta.sources
+    else:
+        assert f"The chart is red. {label}" in block.body
+        assert saved.meta.sources == (material_id,)
+        protected = [row["text"] for row in rows if row["required"] and not row["breakable"]]
+        assert "The chart is red." in protected and "[source]" in protected
 
 
 @pytest.mark.parametrize(("refusal", "status"), [

@@ -8,7 +8,7 @@ as it is now. Everything round-trips through plain JSON for the database.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Literal, cast
 
 from ..agents.engine import EngineId, FailureKind
@@ -40,8 +40,20 @@ class TextOnlyPart:
 
 
 @dataclass(frozen=True)
+class FrameCitation:
+    """An authorized linked frame at its actual time, with the exact span in a text part."""
+
+    material_id: str
+    timestamp_ms: int
+    markdown: str
+    offset: int = 0
+
+
+@dataclass(frozen=True)
 class TextPart:
     text: str
+    #: The chat still presents Markdown. Only these server-written spans carry frame provenance.
+    frame_citations: tuple[FrameCitation, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -154,7 +166,10 @@ def part_to_json(part: Part) -> dict[str, Any]:
     if isinstance(part, TextOnlyPart):
         return {"type": "text_only", "label": part.label}
     if isinstance(part, TextPart):
-        return {"type": "text", "text": part.text}
+        result: dict[str, Any] = {"type": "text", "text": part.text}
+        if part.frame_citations:
+            result["frame_citations"] = [asdict(frame) for frame in part.frame_citations]
+        return result
     if isinstance(part, CitePart):
         return {"type": "cite", "material_id": part.material_id, "seg": part.seg, "quote": part.quote}
     if isinstance(part, PagePart):
@@ -197,7 +212,10 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
     if kind == "text_only":
         return TextOnlyPart(str(data.get("label") or "Text only · Image not analysed"))
     if kind == "text":
-        return TextPart(str(data.get("text", "")))
+        frames = tuple(FrameCitation(str(frame["material_id"]), int(frame["timestamp_ms"]),
+                                     str(frame["markdown"]), int(frame["offset"]))
+                       for frame in data.get("frame_citations", ()))
+        return TextPart(str(data.get("text", "")), frames)
     if kind == "cite":
         return CitePart(str(data["material_id"]), int(data["seg"]), _optional(data.get("quote")))
     if kind == "page":

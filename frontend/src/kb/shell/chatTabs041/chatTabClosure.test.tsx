@@ -29,9 +29,17 @@ const lecture = /What did I miss in lecture 8/;
 const paper = /Transformer paper review/;
 const tab = (name: RegExp) => screen.getByRole('tab', { name });
 
-async function activityHost(refusedSend?: ReturnType<typeof deferred<void>>) {
+async function activityHost({ refusedSend, initialPermission, beforeSwitch, decisionGate }: {
+  refusedSend?: ReturnType<typeof deferred<void>>;
+  initialPermission?: ReturnType<typeof permissionPart>;
+  beforeSwitch?: (user: ReturnType<typeof userEvent.setup>) => Promise<void>;
+  decisionGate?: Promise<void>;
+} = {}) {
   const user = userEvent.setup();
-  const fake = createFakeBridge(streamedWorld());
+  const world = streamedWorld();
+  if (initialPermission) world.chats.find((chat) => chat.id === 'c2')!.messages[0]!.parts.push(initialPermission);
+  const fake = createFakeBridge(world);
+  const decisionCalls: BridgeRequest[] = [];
   const list = deferred<{ chats: KbChatSummary[]; cursor: number }>();
   const details: ReturnType<typeof deferred<{ events: KbChatEvent[]; cursor: number }>>[] = [];
   let listCount = 0;
@@ -51,14 +59,19 @@ async function activityHost(refusedSend?: ReturnType<typeof deferred<void>>) {
         if (listCount++) return new Promise<never>(() => {});
         return { ok: true as const, status: 200, data: await list.promise as T };
       }
+      if (req.method === 'POST' && req.path.endsWith('/decide')) {
+        decisionCalls.push(req);
+        if (decisionGate) await decisionGate;
+      }
       return fake.bridge.request<T>(req);
     },
   } });
   const side = within(screen.getByRole('region', { name: 'Chats' }));
   await user.click(await side.findByRole('button', { name: lecture }));
-  expect(within(tab(lecture)).getByLabelText('Working')).toBeVisible();
+  expect(within(tab(lecture)).getByLabelText(initialPermission ? 'Waiting for you' : 'Working')).toBeVisible();
   expect(details.length).toBeGreaterThan(0);
   const stopped = details.at(-1)!;
+  await beforeSwitch?.(user);
   await user.click(side.getByRole('button', { name: paper }));
   const track = screen.getByRole('tablist', { name: 'Open chats' });
   Object.defineProperties(track, { clientWidth: { value: 170 }, scrollWidth: { value: 500 } });
@@ -67,7 +80,7 @@ async function activityHost(refusedSend?: ReturnType<typeof deferred<void>>) {
     const summary = services.chats.getState().list.find((c) => c.id === 'c2')!;
     await act(async () => list.resolve({ chats: [{ ...summary, ...patch }], cursor: 12 }));
   };
-  return { user, fake, services, details, stopped, publish };
+  return { user, fake, services, details, stopped, publish, decisionCalls };
 }
 
 it('ignores the stopped follower after the inactive completion reaches the strip and overflow', async () => {
@@ -143,9 +156,112 @@ it('keeps a background waiting indication until detail provides the permission t
   expect(within(tab(lecture)).queryByLabelText('Waiting for you')).toBeNull();
 });
 
+const permissionCard = (title: string) => within(screen.getByRole('region', { name: `Codex wants to edit ${title}` }));
+const review = () => within(screen.getByRole('complementary', { name: 'Review' }));
+const decisionLabels = ['Deny', 'Allow in this chat', 'Allow'];
+
+it('disables stale permission decisions in the card and open review until detail records cancellation', async () => {
+  const pending = permissionPart('cached-edit');
+  const { user, services, publish, details, decisionCalls } = await activityHost({
+    initialPermission: pending,
+    beforeSwitch: async (user) => {
+      const card = permissionCard('Entropy');
+      expect(card.getByRole('button', { name: 'Allow' })).toBeEnabled();
+      await user.click(card.getByRole('button', { name: 'Review beside the chat' }));
+    },
+  });
+  await user.click(review().getByRole('button', { name: 'Deny' }));
+  const reason = review().getByRole('textbox', { name: 'Reason for Codex (optional)' });
+  await user.type(reason, 'Keep the original');
+  expect(reason).toHaveFocus();
+  await publish({ state: 'idle', unread: true, waiting_for_user: false });
+  expect(review().getByRole('list', { name: 'Changes' })).toBeInTheDocument();
+  expect(reason).toBeDisabled();
+  expect(review().getByRole('button', { name: 'Send' })).toBeDisabled();
+  await user.keyboard('{Enter}');
+  fireEvent.submit(reason.closest('form')!);
+  expect(decisionCalls).toHaveLength(0);
+
+  await user.click(tab(lecture));
+  await user.click(review().getByRole('button', { name: 'Cancel' }));
+  const cachedChat = () => services.chats.getState().chats.c2?.chat;
+  expect(cachedChat()?.cursor).toBe(1);
+  expect(cachedChat()?.messages[0]?.parts).toContainEqual(pending);
+  const expectDisabledDecisions = () => {
+    for (const surface of [permissionCard('Entropy'), review()]) {
+      expect(surface.getByRole('list', { name: 'Changes' })).toBeInTheDocument();
+      for (const name of decisionLabels) expect(surface.getByRole('button', { name })).toBeDisabled();
+    }
+    expect(within(tab(lecture)).queryByLabelText('Waiting for you')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Stop the answer' })).toBeNull();
+  };
+  expectDisabledDecisions();
+  await act(async () => details.at(-1)!.resolve({ cursor: 2, events: [
+    { seq: 2, type: 'state', message_id: 'reply', text: 'done' },
+  ] }));
+  expect(cachedChat()?.cursor).toBe(2);
+  expect(cachedChat()?.messages[0]?.parts).toContainEqual(pending);
+  expectDisabledDecisions();
+  expect(await services.chats.getState().decide('c2', pending.id, { decision: 'allow' })).toMatchObject({ ok: false });
+  expect(decisionCalls).toHaveLength(0);
+
+  const cancelled = { ...pending, status: 'cancelled' as const };
+  await act(async () => details.at(-1)!.resolve({ cursor: 3, events: [
+    { seq: 3, type: 'part_update', message_id: 'reply', part: cancelled },
+  ] }));
+  expect(cachedChat()?.cursor).toBe(3);
+  expect(cachedChat()?.messages[0]).toMatchObject({ state: 'done', parts: expect.arrayContaining([cancelled]) });
+  expect(screen.getAllByRole('group', { name: 'Cancelled: Entropy' })).toHaveLength(2);
+  expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
+  expect(decisionCalls).toHaveLength(0);
+});
+
+it.each(['allow', 'deny'] as const)('sends a current permission %s once across the card and review', async (decision) => {
+  const settling = deferred<void>();
+  const previous = permissionPart('previous-edit');
+  const { user, fake, services, publish, details, decisionCalls } = await activityHost({
+    initialPermission: previous, decisionGate: settling.promise,
+  });
+  await publish({ state: 'answering', waiting_for_user: false });
+  await user.click(tab(lecture));
+  const decided = { ...previous, status: 'denied' as const, reason: 'Earlier reason' };
+  const current = permissionPart('current-edit', { title: 'Cross-entropy' });
+  const reply = fake.world.chats.find((chat) => chat.id === 'c2')!.messages[0]!;
+  reply.parts = [reply.parts[0]!, decided, current];
+  await act(async () => details.at(-1)!.resolve({ cursor: 3, events: [
+    { seq: 2, type: 'part_update', message_id: 'reply', part: decided },
+    { seq: 3, type: 'part', message_id: 'reply', part: current },
+  ] }));
+  expect(screen.getByRole('group', { name: 'Denied: Entropy' })).toHaveTextContent('Earlier reason');
+  const card = permissionCard('Cross-entropy');
+  await user.click(card.getByRole('button', { name: 'Review beside the chat' }));
+  await user.click(review().getByRole('button', { name: 'Deny' }));
+  const reason = review().getByRole('textbox', { name: 'Reason for Codex (optional)' });
+  await user.type(reason, 'Keep the original');
+  const allow = card.getByRole('button', { name: 'Allow' });
+  if (decision === 'allow') allow.focus();
+  await user.keyboard('{Enter}');
+  const body = decision === 'deny' ? { decision, reason: 'Keep the original' } : { decision };
+  expect(decisionCalls).toMatchObject([{ path: '/kb/permissions/current-edit/decide', body }]);
+  expect(allow).toBeDisabled();
+  expect(review().getByRole('button', { name: 'Send' })).toBeDisabled();
+  fireEvent.submit(reason.closest('form')!);
+  await user.click(allow);
+  expect(await services.chats.getState().decide('c2', current.id, { decision: 'allow' })).toMatchObject({ ok: false });
+  expect(decisionCalls).toHaveLength(1);
+  expect(within(tab(lecture)).getByLabelText('Waiting for you')).toBeVisible();
+  await act(async () => settling.resolve());
+  const outcome = decision === 'deny' ? 'Denied: Cross-entropy' : 'Allowed: Edited Cross-entropy';
+  const outcomes = screen.getAllByRole('group', { name: outcome });
+  expect(outcomes).toHaveLength(2);
+  if (decision === 'deny') for (const result of outcomes) expect(result).toHaveTextContent('Keep the original');
+  expect(decisionCalls).toHaveLength(1);
+  expect(within(tab(lecture)).queryByLabelText('Waiting for you')).toBeNull();
+});
+
 it('shows an optimistic follow-up over the background report and restores its draft on refusal', async () => {
   const refusal = deferred<void>();
-  const { user, publish, services } = await activityHost(refusal);
+  const { user, publish, services } = await activityHost({ refusedSend: refusal });
   await publish({ state: 'idle', unread: true });
   await user.click(tab(lecture));
   const text = screen.getByRole('textbox', { name: 'Message' });

@@ -377,7 +377,9 @@ class KbSendTarget(_Request):
 
 
 class KbSend(_Request):
-    text: str = Field(min_length=1, max_length=MAX_TEXT)
+    """Send a message with non-whitespace text or saved attachments. An attachment caption may be blank."""
+
+    text: str = Field(max_length=MAX_TEXT)
     mentions: list[KbRef] = Field(default_factory=list, max_length=MAX_ITEMS)
     quotes: list[KbQuote] = Field(default_factory=list, max_length=MAX_ITEMS)
     attachments: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list,

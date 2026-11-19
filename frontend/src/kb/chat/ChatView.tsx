@@ -1,6 +1,6 @@
 import { usePageVisible } from './usePageVisible';
 import { useMotionLevel, useReducedMotion, useStillIndicators } from '../ui/motionLevel';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
@@ -163,7 +163,26 @@ export function ChatView({ hidden }: { hidden: boolean }) {
     inWiki,
     acceptsTarget: acceptsAttachmentDrop,
   });
-  const find = useFindInChat({ chatId: effectiveHidden ? null : currentId, scopeRef, scrollRef, reducedMotion: reduced });
+  const stopReturnForFind = useCallback((position: ScrollToOptions) => {
+    if (returnLanding.current === null) return;
+    returnLanding.current = null;
+    const el = scrollRef.current;
+    if (!el || typeof el.scrollTo !== 'function') return;
+    el.scrollTo(position);
+
+    // Chromium can deliver a final compositor update after the instant scroll.
+    const holdPosition = (event: Event) => { if (event.target === el) el.scrollTo(position); };
+    const release = () => el.removeEventListener('scroll', holdPosition, true);
+    el.addEventListener('scroll', holdPosition, true);
+    const frame = requestAnimationFrame(release);
+    return () => {
+      cancelAnimationFrame(frame);
+      release();
+    };
+  }, []);
+  const find = useFindInChat({
+    chatId: effectiveHidden ? null : currentId, scopeRef, scrollRef, reducedMotion: reduced, beforeOpen: stopReturnForFind,
+  });
   const findingChat = useRef<string | null>(null);
   // Decision 32: the main field is still only at «off» or the system's reduced motion; at «calm» it
   // keeps answering clicks and only its background drift stops.
@@ -177,7 +196,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const answerFrames = useAnswerFrames(effectiveHidden ? null : chat?.id ?? null, lastCompletedId);
   const background = backgroundActivity(open);
   const activeWorking = background ? background.state === 'answering' : isAnswering(chat);
-  const activeWaiting = background ? !!background.waiting_for_user : !!chat && chatWaits(chat);
+  const activeWaiting = background ? !!background.waiting_for_user : !!chat && chatWaits(chat, open?.stalePermissionIds);
   // B1 (decision 04): one stable anchor per assistant reply — the ordered ids the rail mirrors;
   // expose the action once the server admits the reply so focus survives settlement and deltas.
   const replyIds = useMemo(
@@ -212,7 +231,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         : itemSummary
           ? isWaitingForUser(itemSummary)
           : itemChat
-            ? chatWaits(itemChat)
+            ? chatWaits(itemChat, openChats[id]?.stalePermissionIds)
             : false,
       unread: itemSummary?.unread ?? itemChat?.unread ?? false,
       pinned: (isActive ? itemChat?.pinned : itemSummary?.pinned) ?? itemSummary?.pinned ?? itemChat?.pinned ?? false,
@@ -441,7 +460,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
                     onResume: () => void act(m, 'resume'),
                     onSave: () => void act(m, 'save'),
                     onCancelSave: async () => {
-                      const res = await chats.getState().stop(chat.id, m.id);
+                      const res = await chats.getState().stop(chat.id, m.id, 'shaping');
                       if (!res.ok && chats.getState().currentId === chat.id) setNotice(res.error);
                     },
                   }} />
@@ -499,7 +518,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         />
       )}
       <Composer chatId={currentId} active={!effectiveHidden} handleImagePaste={attachments.handlePaste}
-        placeholder={waitingHint(chat) ?? (recording ? 'Ask about the lecture · @ to reference' : 'Ask about your materials · @ to reference')} />
+        placeholder={(activeWaiting ? waitingHint(chat) : null) ?? (recording ? 'Ask about the lecture · @ to reference' : 'Ask about your materials · @ to reference')} />
       <ExternalAttachmentDropOverlay visible={attachments.over} />
       </SelectionProvider>
     </section>

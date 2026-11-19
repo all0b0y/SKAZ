@@ -130,6 +130,7 @@ from .model import (
     CitePart,
     ConnectionPart,
     Failure,
+    FrameCitation,
     KnowledgePart,
     MemoryPart,
     Message,
@@ -893,6 +894,9 @@ class ChatService:
         *,
         expected_target: tuple[EngineId, str | None, str | None] | None = None,
     ) -> tuple[Message, Message]:
+        has_text = bool(given.text.strip())
+        if not has_text and not given.attachments:
+            raise ChatInvalid("Write a message or attach a material.")
         chat = await self._chat(chat_id)
         if expected_target is not None and (chat.engine, chat.model, chat.effort) != expected_target:
             raise ChatConflict(
@@ -908,6 +912,8 @@ class ChatService:
                 raise ChatConflict(
                     "Finish the agent’s question before sending visual sources.", "WAITING_FOR_QUESTION",
                 )
+            if not has_text:
+                raise ChatInvalid("Write a reply to the agent’s question.")
             return await self._answer_question(chat, run, given)
         self._reserve(chat_id)
         try:
@@ -917,6 +923,12 @@ class ChatService:
                 checked = await self._checked_selection(prior, given.selection, chat_id)
                 given = replace(given, selection=checked)
             visuals, text_only_mode = await self._authorize_visuals(chat, given)
+            if not has_text and await disk_call(
+                lambda: any(
+                    self.kb.material_repo.get(material_id) is None for material_id in given.attachments
+                ),
+            ):
+                raise ChatInvalid("An attached material is no longer in the library.")
             now = utc_now()
             user = Message(id=new_id("msg"), chat_id=chat_id, seq=0, role="user", state="done",
                            created_at=now, parts=(TextPart(given.text),), input=given)
@@ -1511,7 +1523,11 @@ class ChatService:
                                if item.visual_id == output.visual_id and item.linked_frame is not None), None)
                 if visual is not None:
                     run.cited_frames[visual.visual_id] = visual
-                    self._append_text(run, frame_citation(visual))
+                    locator = visual.locator
+                    assert locator.timestamp_ms is not None and locator.source_url is not None
+                    link = frame_citation(locator.source_url, locator.timestamp_ms)
+                    frame = FrameCitation(locator.material_id, locator.timestamp_ms, link)
+                    self._append_text(run, link, frame=frame)
             elif isinstance(output, PageToken):
                 page = await disk_call(resolver.page, output)
                 if page is not None:
@@ -1545,16 +1561,20 @@ class ChatService:
         except Exception as error:  # the counter never touches the answer
             log.error("Counting an answer block failed: %s", error_note(error))
 
-    def _append_text(self, run: _Run, text: str) -> None:
+    def _append_text(self, run: _Run, text: str, *, frame: FrameCitation | None = None) -> None:
         if not text:
             return
         parts = list(run.message.parts)
-        if parts and isinstance(parts[-1], TextPart):
-            parts[-1] = TextPart(parts[-1].text + text)
+        previous = parts[-1] if parts else None
+        if isinstance(previous, TextPart):
+            frames = previous.frame_citations
+            if frame is not None:
+                frames = (*frames, replace(frame, offset=len(previous.text)))
+            parts[-1] = TextPart(previous.text + text, frames)
             run.message = run.message.with_parts(parts)
             self._feed(run.chat_id).emit("delta", run.message.id, text=text)
             return
-        self._add_part(run, TextPart(text))
+        self._add_part(run, TextPart(text, (frame,) if frame is not None else ()))
 
     async def _tool_result(self, run: _Run, event: ToolResult) -> None:
         """Record only the outcome, not raw tool output; failed reads have no looked-at target."""
@@ -1819,15 +1839,23 @@ class ChatService:
         raise ChatConflict("This answer is already saved in the wiki.", "ALREADY_SAVED",
                            saved_page_id=result[0])
 
-    def _shaping_model(self, engine: EngineId, model: str | None) -> tuple[str | None, str]:
-        """The requested model, or the default reported at the turn's engine check."""
-        if model and not (engine == "claude_code" and model == "default"):
-            return model, f"{ENGINE_NAMES[engine]} ({model})"
-        # A catalog lists choices. Its first entry need not be the engine's current model.
-        view = self.registry.last_view(engine)
-        current = view.current_model if view and view.state == "ready" else None
+    async def _shaping_target(
+        self, engine_id: EngineId, model: str | None,
+    ) -> tuple[AgentEngine, str | None, str]:
+        """Resolve one model to pass to the turn and disclose if it shapes the page."""
+        registry = self.registry
+        use_default = not model or (engine_id == "claude_code" and model == "default")
+        view = await registry.require_view(engine_id, refresh=use_default)
+        engine = registry.engine(engine_id)
+        if not use_default:
+            return engine, model, f"{view.name} ({model})"
+        # A catalog lists choices. Pin only a current model that the adapter reports and can select.
+        current = view.current_model
+        if (not current or (engine_id == "claude_code" and current == "default")
+                or not any(option.id == current for option in view.models)):
+            current = None
         detail = f"reported as {current}" if current else "model not reported"
-        return current, f"{ENGINE_NAMES[engine]} (engine default, {detail})"
+        return engine, current, f"{view.name} (engine default, {detail})"
 
     async def _shape_turn(self, engine: AgentEngine, model: str | None, effort: str | None,
                           edit: shaping.AnalysisEdit) -> tuple[str, Failed | None]:
@@ -1849,9 +1877,8 @@ class ChatService:
         primary = message.engine or chat.engine
         model = message.model if message.engine else chat.model
         effort = message.effort if message.engine else chat.effort
-        engine = await self.registry.require(primary)
-        chat_model, _ = self._shaping_model(primary, model)
-        text, failure = await self._shape_turn(engine, model, effort, edit)
+        engine, chat_model, _ = await self._shaping_target(primary, model)
+        text, failure = await self._shape_turn(engine, chat_model, effort, edit)
         if failure is None:
             return text, None
         if failure.kind != "limit" or failure.transient:
@@ -1863,11 +1890,10 @@ class ChatService:
             raise ChatConflict(limit + " The wiki agent is paused on a quota limit.", "ENGINE_LIMIT")
         label = f"{ENGINE_NAMES[alternate]} ({settings.model or 'engine default'})"
         try:
-            wiki_engine = await self.registry.require(alternate)
-            wiki_model, label = self._shaping_model(alternate, settings.model)
+            wiki_engine, wiki_model, label = await self._shaping_target(alternate, settings.model)
             if alternate == primary and (not chat_model or not wiki_model or chat_model == wiki_model):
                 raise ChatConflict(limit + " No distinct wiki model is available.", "ENGINE_LIMIT")
-            text, failure = await self._shape_turn(wiki_engine, settings.model, settings.effort, edit)
+            text, failure = await self._shape_turn(wiki_engine, wiki_model, settings.effort, edit)
         except ChatConflict:
             raise
         except KnowledgeError as error:
@@ -1896,8 +1922,9 @@ class ChatService:
             raise ChatConflict("This answer is already saved in the wiki.", "ALREADY_SAVED",
                                saved_page_id=saved.id)
         question = await disk_call(self.repo.message, chat_id, message.reply_to or "")
-        question_text = question.input.text if question is not None and question.input is not None else ""
-        edit = await disk_call(self._analysis_edit, question_text, message)
+        given = question.input if question is not None else None
+        question_text = given.text if given is not None else ""
+        edit = await disk_call(self._analysis_edit, question_text, message, given)
         response, alternate = await self._shape_analysis(chat, message, edit)
         try:
             items = edit.apply(response)
@@ -1930,13 +1957,60 @@ class ChatService:
         self._feed(chat_id).emit("state", updated.id, message=updated)
         return page_id, kind, title, warning
 
-    def _analysis_edit(self, question: str, message: Message) -> shaping.AnalysisEdit:
+    def _analysis_edit(
+        self, question: str, message: Message, given: MessageInput | None,
+    ) -> shaping.AnalysisEdit:
         writer = self._writer()
-        chunks = writer.chunks(message.parts)
+        parts = self._legacy_frame_parts(message, given) if given is not None else message.parts
+        chunks = writer.chunks(parts)
         # Apply the original instruction and content checks before sending anything to an agent.
         if not writer.section_blocks(question, chunks):
             raise AnalysisRefused(ONLY_UNCITED_DIAGRAMS if writer.left_out_diagrams else NOTHING_TO_SAVE)
         return shaping.AnalysisEdit(chunks)
+
+    def _legacy_frame_parts(self, message: Message, given: MessageInput) -> tuple[Part, ...]:
+        """Recover a pre-provenance link only when retained evidence identifies this answer and text span."""
+        texts = {i: part for i, part in enumerate(message.parts) if isinstance(part, TextPart)}
+        if any(part.frame_citations for part in texts.values()) or not any(
+            "[Video frame at " in part.text for part in texts.values()
+        ):
+            return message.parts
+        candidates = (*given.attachments, *(ref.id for ref in given.mentions if ref.type == "material"),
+                      given.context.material_id)
+        sources = self._sources()
+        owned: dict[str, set[tuple[str, int]]] = {}
+        for material_id in dict.fromkeys(candidates):
+            material = self.kb.material_repo.get(material_id) if material_id else None
+            if material is None or material.kind != "video_link":
+                continue
+            try:
+                retained = sources.list_retained_frames(material.id)
+            except (KnowledgeError, OSError):
+                continue
+            for record in retained:
+                loc = record.locator
+                if ("cited" not in record.retained_because or message.id not in record.citation_refs
+                        or loc.kind != "video_frame" or loc.material_id != material.id
+                        or loc.timestamp_ms is None or not loc.source_url):
+                    continue
+                with contextlib.suppress(ValueError):
+                    link = frame_citation(loc.source_url, loc.timestamp_ms)
+                    owned.setdefault(link, set()).add((material.id, loc.timestamp_ms))
+
+        found: dict[int, list[FrameCitation]] = {}
+        for link, origins in owned.items():
+            hits = [(i, part.text.count(link)) for i, part in texts.items() if link in part.text]
+            if len(origins) != 1 or len(hits) != 1 or hits[0][1] != 1:
+                continue
+            (material_id, timestamp), = origins
+            index, _ = hits[0]
+            frame = FrameCitation(material_id, timestamp, link, texts[index].text.index(link))
+            found.setdefault(index, []).append(frame)
+        parts = list(message.parts)
+        for index, frames in found.items():
+            ordered = tuple(sorted(frames, key=lambda frame: frame.offset))
+            parts[index] = replace(texts[index], frame_citations=ordered)
+        return tuple(parts)
 
     async def save_chat(self, chat_id: str) -> tuple[str, str, str, str | None]:
         chat = await self._chat(chat_id)

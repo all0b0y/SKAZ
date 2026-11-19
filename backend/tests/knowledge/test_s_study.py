@@ -1491,6 +1491,112 @@ async def test_request_level_explicit_request_accepts_agent_and_source_items_in_
     ("Сделай карточки по конспекту. Используй свои знания, чтобы добавить вопросы об энтропии.", True),
     ("Make flashcards using your own knowledge to help me learn biology.", True),
     ("Add cards from your own knowledge to help me learn biology.", True),
+    pytest.param(
+        "Make flashcards from the notes. Use your own knowledge for the biography.",
+        False, id="for-other-task",
+    ),
+    pytest.param(
+        "Сделай карточки по конспекту. Используй свои знания для биографии.", False, id="for-other-task-ru",
+    ),
+    pytest.param(
+        "Make flashcards from the notes. Use your own knowledge when you write the biography.",
+        False, id="when-other-task",
+    ),
+    pytest.param(
+        "Make flashcards from the notes and write a biography using your own knowledge.",
+        False, id="coordinated-other-task",
+    ),
+    pytest.param(
+        "Make a flashcard about how buds grow — using your own knowledge.", True, id="detached-dash",
+    ),
+    pytest.param(
+        "Create a quiz from the chapter. Draw on your own knowledge for additional practice questions.",
+        True, id="for-study-items",
+    ),
+    pytest.param(
+        "Составь тест по лекции. Используй свои знания для дополнительных вопросов.",
+        True, id="for-study-items-ru",
+    ),
+    pytest.param(
+        "Make flashcards from the notes. For the author profile, draw on your own knowledge.",
+        False, id="leading-purpose-other-task",
+    ),
+    pytest.param(
+        "Create a quiz from the chapter. Use your own knowledge when you add open questions.",
+        True, id="when-study-task",
+    ),
+    pytest.param(
+        "Create a quiz from the chapter. Use your own knowledge while drafting an overview of the quiz.",
+        False, id="while-other-task-about-study",
+    ),
+    pytest.param(
+        "Make flashcards from the notes and add review questions using your own knowledge.",
+        True, id="coordinated-study-task",
+    ),
+    pytest.param(
+        "Make flashcards from the notes and summarize the chapter using your own knowledge.",
+        False, id="coordinated-summary",
+    ),
+    pytest.param(
+        "Составь тест по заметкам и напиши обзор карточек из своих знаний.",
+        False, id="coordinated-other-task-about-study-ru",
+    ),
+    pytest.param("Составь тест о том, как работает память — из своих знаний.", True, id="detached-dash-ru"),
+    pytest.param(
+        "Could you make a flashcard about how tides work - using your own knowledge?",
+        True, id="polite-detached-hyphen",
+    ),
+    pytest.param(
+        "Make a flashcard about how tides work — the example says, use your own knowledge.",
+        False, id="dash-attribution",
+    ),
+    pytest.param(
+        "Make a flashcard about how tides work — do not use your own knowledge.", False, id="dash-negation",
+    ),
+    pytest.param(
+        "Make flashcards from the notes. Also use your own knowledge.", True, id="bare-study-follow-up",
+    ),
+    pytest.param(
+        "Make flashcards from the notes. Write an abstract. Also use your own knowledge.",
+        False, id="bare-follow-up-after-other-task",
+    ),
+    pytest.param("Use your own knowledge and make five flashcards.", True, id="coordination-before-study"),
+    pytest.param(
+        "Make flashcards from the notes. Use your own knowledge and draft an abstract.",
+        False, id="coordination-before-other-task",
+    ),
+    pytest.param("The notes mention flashcards. Use your own knowledge.", False, id="study-mention-only"),
+    pytest.param(
+        "Сделай 8 вопросов по конспекту и добавь 2 из своих знаний.", True, id="mixed-elliptical-ru",
+    ),
+    pytest.param(
+        "Make eight questions from the notes and add two from your own knowledge.",
+        True, id="mixed-elliptical-en",
+    ),
+    pytest.param(
+        "Make a quiz from the chapter, draft a synopsis and add two from your own knowledge.",
+        False, id="elliptical-addition-after-other-task",
+    ),
+    pytest.param(
+        "Make a batch of challenging flashcards using your own knowledge.", True, id="modified-study-object",
+    ),
+    pytest.param("Составь сложный тест из своих знаний.", True, id="modified-study-object-ru"),
+    pytest.param(
+        "Make flashcards from the notes. Use your own knowledge when needed.",
+        True, id="contextual-when-needed",
+    ),
+    pytest.param(
+        "Make flashcards drawing on your own knowledge.", True, id="inline-drawing-on-knowledge",
+    ),
+    pytest.param("Составь тест вне моих материалов.", True, id="outside-materials-ru"),
+    pytest.param(
+        "Make flashcards from the notes, but draft a profile using your own knowledge.",
+        False, id="contrastive-coordination",
+    ),
+    pytest.param(
+        "Make flashcards from the notes and compose a profile using your own knowledge.",
+        False, id="coordinated-composition",
+    ),
 ])
 async def test_request_level_knowledge_directive_applies_to_its_stated_purpose(
     kb_app: Any, kb_client: httpx.AsyncClient, prompt: str, allowed: bool,
@@ -1508,6 +1614,8 @@ async def test_request_level_knowledge_directive_applies_to_its_stated_purpose(
     assert deck_out["cards"] == test_out["questions"] == len(expected)
     assert [drop["card"] for drop in deck_out["dropped"]] == ([] if allowed else [2])
     assert [drop["question"] for drop in test_out["dropped"]] == ([] if allowed else [2])
+    for drop in deck_out["dropped"] + test_out["dropped"]:
+        assert "explicitly asks for it in this chat turn" in drop["reason"]
 
 
 async def test_request_level_negation_rejects_agent_basis_and_preserves_source_items(

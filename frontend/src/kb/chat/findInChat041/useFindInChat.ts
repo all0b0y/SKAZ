@@ -8,6 +8,8 @@ export interface FindInChatOptions {
   scopeRef: RefObject<HTMLElement>;
   scrollRef: RefObject<HTMLElement>;
   reducedMotion: boolean;
+  /** Releases host scrolling at the saved position before the panel changes layout. May return cleanup. */
+  beforeOpen?: (position: ScrollToOptions) => (() => void) | undefined;
 }
 
 export interface FindInChatController extends ChatFindResult {
@@ -55,17 +57,19 @@ function startFindSession(
   scroll: HTMLElement,
   publish: (query: string, result: ChatFindResult) => void,
   shouldReduceMotion: () => boolean,
+  beforeOpen?: FindInChatOptions['beforeOpen'],
 ) {
   const doc = scroll.ownerDocument;
   const view = doc.defaultView!;
   const highlights = createChatHighlights(doc);
   const renderedChat = createRenderedChatReader(scroll);
   const restoreFocus = keepFocusAndSelection(scope, scroll);
-  const positions = new Map<HTMLElement, ScrollToOptions>();
+  const openingPosition: ScrollToOptions = { top: scroll.scrollTop, left: scroll.scrollLeft, behavior: 'instant' };
+  const positions = new Map<HTMLElement, ScrollToOptions>([[scroll, openingPosition]]);
+  const finishHandoff = beforeOpen?.(openingPosition);
   const rememberScroll = (el: HTMLElement) => {
     if (!positions.has(el)) positions.set(el, { top: el.scrollTop, left: el.scrollLeft, behavior: 'instant' });
   };
-  rememberScroll(scroll);
 
   let frame: number | null = null;
   let query = '';
@@ -80,7 +84,10 @@ function startFindSession(
       const reduced = shouldReduceMotion() || view.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
       revealChatMatch(scroll, runs, result.activeMatch, reduced ? 'instant' : 'smooth', (element) => {
         rememberScroll(element);
-        if (element === scroll) scrolledConversation = true;
+        if (element === scroll) {
+          finishHandoff?.();
+          scrolledConversation = true;
+        }
       });
     }
   };
@@ -141,6 +148,7 @@ function startFindSession(
       show(true);
     },
     dispose(restore: boolean) {
+      finishHandoff?.();
       observer.disconnect();
       view.removeEventListener('resize', onResize);
       if (frame !== null) view.cancelAnimationFrame(frame);
@@ -160,7 +168,7 @@ function startFindSession(
 }
 
 /** Attach current-chat find to a stable chat scope and its conversation scroller. */
-export function useFindInChat({ chatId, scopeRef, scrollRef, reducedMotion }: FindInChatOptions): FindInChatController {
+export function useFindInChat({ chatId, scopeRef, scrollRef, reducedMotion, beforeOpen }: FindInChatOptions): FindInChatController {
   const [panel, setPanel] = useState<PanelState | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const reduce = useRef(reducedMotion);
@@ -205,7 +213,8 @@ export function useFindInChat({ chatId, scopeRef, scrollRef, reducedMotion }: Fi
           inputRef.current?.focus({ preventScroll: true });
           inputRef.current?.select();
         } else {
-          session.current = startFindSession(scope, scroll, (query, result) => setPanel({ chatId, query, result }), () => reduce.current);
+          session.current = startFindSession(scope, scroll,
+            (query, result) => setPanel({ chatId, query, result }), () => reduce.current, beforeOpen);
         }
       }
     };
@@ -216,7 +225,7 @@ export function useFindInChat({ chatId, scopeRef, scrollRef, reducedMotion }: Fi
       session.current = null;
       restoreOnClose.current = undefined;
     };
-  }, [chatId, scopeRef, scrollRef, close]);
+  }, [chatId, scopeRef, scrollRef, beforeOpen, close]);
 
   useLayoutEffect(() => {
     if (isOpen) {

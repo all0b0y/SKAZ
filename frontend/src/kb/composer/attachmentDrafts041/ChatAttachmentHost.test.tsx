@@ -75,12 +75,15 @@ const speechAdded = (id: string) => ({ ok: true, status: 201, data: { material_i
 
 describe('attachments in the production chat', () => {
   it.each([
-    { source: 'clipboard', hasText: false, document: 'none' },
-    { source: 'picker', hasText: false, document: 'default' },
-    { source: 'drop', hasText: false, document: 'opt-out' },
-    { source: 'picker', hasText: true, document: 'none' },
-  ] as const)('sends the saved image from $source (text: $hasText, document: $document) with the intended wiki choices', async ({
-    source, hasText, document,
+    { source: 'clipboard', withoutCaption: true, hasText: false, document: 'none' },
+    { source: 'picker', withoutCaption: true, hasText: false, document: 'none' },
+    { source: 'drop', withoutCaption: true, hasText: false, document: 'none' },
+    { source: 'clipboard', withoutCaption: false, hasText: false, document: 'none' },
+    { source: 'picker', withoutCaption: false, hasText: false, document: 'default' },
+    { source: 'drop', withoutCaption: false, hasText: false, document: 'opt-out' },
+    { source: 'picker', withoutCaption: false, hasText: true, document: 'none' },
+  ] as const)('sends the saved image from $source (without caption: $withoutCaption, text: $hasText, document: $document) with the intended wiki choices', async ({
+    source, withoutCaption, hasText, document,
   }) => {
     const user = userEvent.setup();
     const nativeIntake = nativeBridge();
@@ -88,7 +91,7 @@ describe('attachments in the production chat', () => {
     const imageId = 'saved-chart';
     const documentName = 'notes.docx';
     const documentId = 'saved-notes';
-    const caption = 'Describe this chart';
+    const caption = withoutCaption ? '' : 'Describe this chart';
     const imageSelection: TrustedMaterialSelection = {
       ...diskSelection(imageName), ext: 'png', formatId: 'png', category: 'image', route: 'image',
       mimeType: 'image/png', source: source === 'picker' ? 'picker' : 'drop', nativePreviewable: true,
@@ -196,6 +199,8 @@ describe('attachments in the production chat', () => {
     expect(outbound(fake.calls)).toEqual([]);
     expect(wikiCalls()).toEqual([]);
     expect(chat.messages).toHaveLength(priorMessages);
+    expect(editor().textContent).toBe(caption);
+    expect(send()).not.toHaveAttribute('aria-disabled', 'true');
 
     await user.click(send());
     await waitFor(() => expect(draft().getDraft('c1').attachments).toEqual([]));

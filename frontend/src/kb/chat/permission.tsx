@@ -3,6 +3,7 @@ import { m } from 'motion/react';
 import { Button, Icon, IconButton, type IconName } from '../ui';
 import { SPRING_SMALL } from '../ui/motion';
 import { useChats, useServices } from '../state/context';
+import { permissionNeedsDetail } from '../state/chats';
 import { ENGINE_NAME } from '../state/agents';
 import type { KbPermissionChange, KbPermissionDecision, KbPermissionKind, KbPermissionPart } from '../api/permissions';
 
@@ -89,11 +90,13 @@ export function KindNote({ part }: { part: KbPermissionPart }) {
  */
 export function DecisionBar({ chatId, part }: { chatId: string; part: KbPermissionPart }) {
   const { chats } = useServices();
+  const needsDetail = useChats((s) => permissionNeedsDetail(s, chatId, part.id));
+  const busy = useChats((s) => s.permissionDecisionsInFlight[part.id]);
+  const disabled = needsDetail || !!busy;
   const agent = agentName(part.engine);
   const del = part.kind === 'delete';
   const [denying, setDenying] = useState(false);
   const [reason, setReason] = useState('');
-  const [busy, setBusy] = useState<KbPermissionDecision['decision'] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const denyRef = useRef<HTMLButtonElement | null>(null);
   const backToDeny = useRef(false);
@@ -106,12 +109,10 @@ export function DecisionBar({ chatId, part }: { chatId: string; part: KbPermissi
   }, [denying]);
 
   const send = async (decision: KbPermissionDecision['decision'], why?: string) => {
-    if (busy) return;
-    setBusy(decision);
+    if (disabled) return;
     setError(null);
     const body: KbPermissionDecision = why ? { decision, reason: why } : { decision };
     const res = await chats.getState().decide(chatId, part.id, body);
-    setBusy(null);
     if (!res.ok) setError(res.error);
   };
   const cancelDeny = () => { backToDeny.current = true; setDenying(false); };
@@ -126,20 +127,21 @@ export function DecisionBar({ chatId, part }: { chatId: string; part: KbPermissi
         <form className="kb-perm__deny" onSubmit={submitDeny}>
           <input
             className="kb-perm__reason" autoFocus value={reason} maxLength={500}
+            disabled={disabled}
             aria-label={`Reason for ${agent} (optional)`} placeholder={`Tell ${agent} why (optional)`}
             onChange={(e) => setReason(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelDeny(); } }}
           />
-          <Button type="submit" size="sm" variant="fill" busy={busy === 'deny'}>Send</Button>
+          <Button type="submit" size="sm" variant="fill" busy={busy === 'deny'} disabled={disabled}>Send</Button>
           <Button size="sm" onClick={cancelDeny}>Cancel</Button>
         </form>
       ) : (
         <div className="kb-perm__foot" role="group" aria-label="Decision">
-          <Button ref={denyRef} size="sm" onClick={() => setDenying(true)} disabled={!!busy}>Deny</Button>
+          <Button ref={denyRef} size="sm" onClick={() => setDenying(true)} disabled={disabled}>Deny</Button>
           <span className="kb-perm__spacer" />
-          {!del && <Button size="sm" busy={busy === 'allow_chat'} disabled={!!busy} onClick={() => void send('allow_chat')}>Allow in this chat</Button>}
+          {!del && <Button size="sm" busy={busy === 'allow_chat'} disabled={disabled} onClick={() => void send('allow_chat')}>Allow in this chat</Button>}
           <Button size="sm" variant={del ? 'danger' : 'fill'} className={del ? 'kb-perm__delete' : undefined}
-            busy={busy === 'allow'} disabled={!!busy} onClick={() => void send('allow')}>{del ? 'Delete page' : 'Allow'}</Button>
+            busy={busy === 'allow'} disabled={disabled} onClick={() => void send('allow')}>{del ? 'Delete page' : 'Allow'}</Button>
         </div>
       )}
       {error && <p className="kb-inline-error kb-perm__error" role="alert">{error}</p>}

@@ -18,6 +18,8 @@ export interface OpenChat {
   error: string | null;
   /** List activity observed while detail was unfollowed, until its event feed catches up. */
   backgroundActivity?: Pick<KbChatSummary, 'state' | 'waiting_for_user'>;
+  /** IDs that were pending in cached detail when an inactive summary reported no wait. */
+  stalePermissionIds?: ReadonlySet<string>;
 }
 
 export interface AgentChoice {
@@ -50,6 +52,8 @@ export interface ChatsData {
   draftSearchRules: KbChatSearchRules | null;
   /** How the user answered a permission request in this window (to say «Allowed in this chat»). */
   decisions: Record<string, KbPermissionDecision['decision']>;
+  /** Shared by the chat card and review panel while one decision is being sent. */
+  permissionDecisionsInFlight: Partial<Record<string, KbPermissionDecision['decision']>>;
 }
 
 export interface ChatsActions {
@@ -75,7 +79,7 @@ export interface ChatsActions {
     initialAgent?: AgentChoice | null;
     expectedTarget?: AgentChoice;
   }) => Promise<ActionResult<string> & { visualRefusal?: KbVisualPreflightResponse }>;
-  stop: (chatId: string, messageId: string) => Promise<ActionResult>;
+  stop: (chatId: string, messageId: string, intent?: 'answer' | 'shaping') => Promise<ActionResult>;
   regenerate: (chatId: string, messageId: string) => Promise<ActionResult>;
   /** Your question changed in place: the messages after it go and it is answered again (409 while answering). */
   edit: (chatId: string, messageId: string, input: KbMessageInput) => Promise<ActionResult>;
@@ -214,22 +218,42 @@ export function replacePart(messages: KbMessage[], part: AnyMessagePart, message
   return null;
 }
 
-const waitingOf = (chat: Pick<KbChat, 'messages'>): Partial<KbChatSummaryP> => ({ waiting_for_user: chatWaits(chat) });
-
-/** A permission or a question of this chat still waits for the user. */
-export function chatWaits(chat: Pick<KbChat, 'messages'>): boolean {
-  return chat.messages.some((m) => partsOf(m).some(isWaitingPart));
+function pendingPermissionIds(chat: KbChat | null | undefined): ReadonlySet<string> | undefined {
+  const ids = new Set<string>();
+  for (const message of chat?.messages ?? []) {
+    for (const part of message.parts) {
+      if (part.type === 'permission' && part.status === 'pending') ids.add(part.id);
+    }
+  }
+  return ids.size ? ids : undefined;
 }
 
-function unmatchedActivity(chat: KbChat | null, summary: NonNullable<OpenChat['backgroundActivity']>) {
-  if (chat && isAnswering(chat) === (summary.state === 'answering') && chatWaits(chat) === !!summary.waiting_for_user) {
+/** A cached pending card can outlive the wait or the local decision that ended it. */
+export function permissionNeedsDetail(s: ChatsData, chatId: string, partId: string): boolean {
+  return s.chats[chatId]?.stalePermissionIds?.has(partId) === true || s.decisions[partId] !== undefined;
+}
+
+const waitingOf = (chat: KbChat, stalePermissionIds?: ReadonlySet<string>): Partial<KbChatSummaryP> =>
+  ({ waiting_for_user: chatWaits(chat, stalePermissionIds) });
+
+/** A permission or a question of this chat still waits for the user. */
+export function chatWaits(chat: Pick<KbChat, 'messages'>, stalePermissionIds?: ReadonlySet<string>): boolean {
+  return chat.messages.some((m) => partsOf(m).some((part) =>
+    isWaitingPart(part) && !(part.type === 'permission' && stalePermissionIds?.has(part.id))));
+}
+
+function unmatchedActivity(
+  chat: KbChat | null, summary: NonNullable<OpenChat['backgroundActivity']>, stalePermissionIds?: ReadonlySet<string>,
+) {
+  if (chat && isAnswering(chat) === (summary.state === 'answering') && chatWaits(chat, stalePermissionIds) === !!summary.waiting_for_user) {
     return undefined;
   }
   return { state: summary.state, waiting_for_user: summary.waiting_for_user };
 }
 
-function detailActivityChanged(before: KbChat, after: KbChat) {
-  return latestStreamingAnswer(before)?.id !== latestStreamingAnswer(after)?.id || chatWaits(before) !== chatWaits(after);
+function detailActivityChanged(before: KbChat, after: KbChat, stalePermissionIds?: ReadonlySet<string>) {
+  return latestStreamingAnswer(before)?.id !== latestStreamingAnswer(after)?.id
+    || chatWaits(before, stalePermissionIds) !== chatWaits(after, stalePermissionIds);
 }
 
 /** A pending send is newer than the background report. Keep the report for rollback if it fails. */
@@ -329,7 +353,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
       const messages = replacePart(open.chat.messages, part);
       if (!messages) return;
       const chat = { ...open.chat, messages };
-      const waiting = waitingOf(chat);
+      const waiting = waitingOf(chat, open.stalePermissionIds);
       set((s) => ({
         chats: { ...s.chats, [chatId]: { ...open, chat } },
         list: s.list.map((c) => (c.id === chatId ? { ...c, ...waiting } : c)),
@@ -364,6 +388,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
       draftAgent: null,
       draftSearchRules: null,
       decisions: {},
+      permissionDecisionsInFlight: {},
 
       loadList: async () => {
         set({ listLoad: get().listLoad === 'ready' ? 'ready' : 'loading', listError: null });
@@ -393,9 +418,13 @@ export function createChatsStore(client: KbClient): ChatsStore {
               }
               if (open) {
                 const useSummary = c.id !== s.currentId && !hasLocal;
+                // The summary can supersede the wait for cached IDs without deciding what happened to them.
+                const stalePermissionIds = useSummary && c.waiting_for_user === false
+                  ? pendingPermissionIds(open.chat) : open.stalePermissionIds;
                 chats[c.id] = {
                   ...open,
-                  backgroundActivity: useSummary ? unmatchedActivity(open.chat, c) : open.backgroundActivity,
+                  stalePermissionIds,
+                  backgroundActivity: useSummary ? unmatchedActivity(open.chat, c, stalePermissionIds) : open.backgroundActivity,
                   chat: open.chat && {
                     ...open.chat,
                     title: c.title,
@@ -513,8 +542,9 @@ export function createChatsStore(client: KbClient): ChatsStore {
           const chat = await client.call('GET /kb/chats/{chat_id}', { path: { chat_id: id } });
           set((s) => {
             const activity = s.chats[id]?.backgroundActivity;
+            const stalePermissionIds = s.chats[id]?.stalePermissionIds;
             return { chats: { ...s.chats, [id]: { chat, load: 'ready', error: null,
-              backgroundActivity: activity && unmatchedActivity(chat, activity) } } };
+              stalePermissionIds, backgroundActivity: activity && unmatchedActivity(chat, activity, stalePermissionIds) } } };
           });
         } catch (error) {
           set((s) => ({ chats: { ...s.chats, [id]: { ...s.chats[id], chat: s.chats[id]?.chat ?? null, load: 'error', error: errorText(error) } } }));
@@ -536,12 +566,13 @@ export function createChatsStore(client: KbClient): ChatsStore {
           // Only a matching state or an actual transition on the resumed feed releases the summary.
           const prior = now.backgroundActivity;
           const resumed = get().currentId === id && prior === open.backgroundActivity;
-          const activity = prior && !(resumed && detailActivityChanged(now.chat, chat))
-            ? unmatchedActivity(chat, prior) : undefined;
+          const stalePermissionIds = now.stalePermissionIds;
+          const activity = prior && !(resumed && detailActivityChanged(now.chat, chat, stalePermissionIds))
+            ? unmatchedActivity(chat, prior, stalePermissionIds) : undefined;
           set((s) => ({
             chats: { ...s.chats, [id]: { ...now, chat, backgroundActivity: activity } },
             list: s.currentId !== id ? s.list : s.list.map((c) => (c.id === id
-              ? { ...c, title: chat.title, state: chat.state, ...waitingOf(chat), ...activity } : c)),
+              ? { ...c, title: chat.title, state: chat.state, ...waitingOf(chat, stalePermissionIds), ...activity } : c)),
           }));
         }
         return { cursor: res.cursor, changed: fresh.length > 0 };
@@ -636,10 +667,11 @@ export function createChatsStore(client: KbClient): ChatsStore {
         }
       },
 
-      stop: (chatId, messageId) => act(async () => {
+      stop: (chatId, messageId, intent = 'answer') => act(async () => {
         if (isLocal(messageId)) return; // not started on the backend yet: nothing to stop there
         const m = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/stop', { path: { chat_id: chatId, message_id: messageId } });
-        merge(chatId, [m]);
+        // Shaping settles through Save. The Stop snapshot can predate newer answer events.
+        if (intent === 'answer') merge(chatId, [m]);
       }),
       edit: (chatId, messageId, input) => act(async () => {
         const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/edit', {
@@ -738,10 +770,24 @@ export function createChatsStore(client: KbClient): ChatsStore {
       setDraftAgent: (choice) => set({ draftAgent: choice }),
       setDraftSearchRules: (rules) => set({ draftSearchRules: rules }),
       decide: (chatId, partId, body) => act(async () => {
-        const part = await decidePermission(client, partId, body);
-        set((s) => ({ decisions: { ...s.decisions, [partId]: body.decision } }));
-        putPart(chatId, part);
-        return part;
+        const state = get();
+        if (permissionNeedsDetail(state, chatId, partId) || !pendingPermissionIds(state.chats[chatId]?.chat)?.has(partId)) {
+          throw new Error('This permission request is no longer available.');
+        }
+        if (state.permissionDecisionsInFlight[partId]) throw new Error('A decision for this request is being sent.');
+        set({ permissionDecisionsInFlight: { ...state.permissionDecisionsInFlight, [partId]: body.decision } });
+        try {
+          const part = await decidePermission(client, partId, body);
+          set((s) => ({ decisions: { ...s.decisions, [partId]: body.decision } }));
+          putPart(chatId, part);
+          return part;
+        } finally {
+          set((s) => {
+            const inFlight = { ...s.permissionDecisionsInFlight };
+            delete inFlight[partId];
+            return { permissionDecisionsInFlight: inFlight };
+          });
+        }
       }),
       undo: (chatId, partId) => act(async () => {
         const part = await undoPermission(client, partId);

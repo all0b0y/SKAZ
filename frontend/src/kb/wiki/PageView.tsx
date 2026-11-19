@@ -456,6 +456,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
               <Button size="sm" variant="quiet" data-reader-action="transcript"
                 onClick={() => openDocument({ type: 'material', id: transcriptId }, {
                   destination: 'notes', returnFocus: 'transcript', origin: document.activeElement,
+                  preserveCloseFocus: true,
                 })}>Transcript</Button>
             )}
             <WikiTermsButton />

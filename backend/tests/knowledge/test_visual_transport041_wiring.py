@@ -808,13 +808,13 @@ async def test_preflight_send_text_only_and_revalidation_over_chat_api(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("reverse", [False, True])
-@pytest.mark.parametrize("second_source", ["image", "missing", "denied", "pdf"])
+@pytest.mark.parametrize("second_source", ["image", "missing", "denied", "pdf", "mixed_pdf"])
 async def test_text_only_admission_applies_to_the_entire_selection(
     kb_client: httpx.AsyncClient,
     runtime: Runtime,
     tmp_path: Path,
     reverse: bool,
-    second_source: Literal["image", "missing", "denied", "pdf"],
+    second_source: Literal["image", "missing", "denied", "pdf", "mixed_pdf"],
 ) -> None:
     await connect(kb_client, runtime)
     engines = _setup_routing_matrix(runtime)
@@ -831,7 +831,8 @@ async def test_text_only_admission_applies_to_the_entire_selection(
         other = "deleted-source"
     else:
         path = tmp_path / "report.pdf"
-        path.write_bytes(make_pdf([line("Inflation chart and caption", 720)]))
+        caption = line("Inflation chart and caption", 720)
+        path.write_bytes(make_pdf([b"", caption] if second_source == "mixed_pdf" else [caption]))
         other = runtime.kb_sources.add_file(str(path), INBOX_ID).material_id
     chat = await kb_client.post("/kb/chats", json={"engine": "claude_code", "model": "sonnet"})
     assert chat.status_code == 201
@@ -846,7 +847,12 @@ async def test_text_only_admission_applies_to_the_entire_selection(
     assert preflight.status_code == 200, preflight.text
     assert preflight.json()["requires_visual"] and not preflight.json()["supported"]
     assert preflight.json()["text_only_available"] == (second_source == "pdf")
-    sent = await kb_client.post(f"/kb/chats/{chat_id}/messages", json={**body, "text_only": True})
+    messages = f"/kb/chats/{chat_id}/messages"
+    refused = await kb_client.post(messages, json=body)
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["text_only_available"] == (second_source == "pdf")
+    assert not engines["claude_code"].turns
+    sent = await kb_client.post(messages, json={**body, "text_only": True})
     if second_source == "pdf":
         assert sent.status_code == 202, sent.text
         assert any(part["type"] == "text_only" for part in sent.json()["assistant"]["parts"])
@@ -1188,13 +1194,39 @@ async def test_plain_text_preflight_does_not_report_verified_image_support(
 
 
 @pytest.mark.parametrize("failure", ["known", "late"])
-@pytest.mark.parametrize("with_text", [True, False])
+@pytest.mark.parametrize(("pages", "query", "first_page", "with_text"), [
+    pytest.param([line("Chart caption", 690)], "Inspect the chart on page 1", 1, True, id="text"),
+    pytest.param([b""], "Inspect the chart on page 1", 1, False, id="scan"),
+    pytest.param(
+        [b"", line("Chart caption", 690)], "Inspect the chart on page 2", 2, True, id="selected-text",
+    ),
+    pytest.param(
+        [line("Chart caption", 690), b""], "Inspect the chart on page 2", 2, False, id="selected-blank",
+    ),
+    pytest.param(
+        [line("Chart caption", 690), b"q 0.2 0.4 0.6 rg 72 600 200 60 re f Q"],
+        "Inspect the chart on page 2", 2, False, id="selected-figure",
+    ),
+    pytest.param(
+        [line("Chart caption", 690), b"", b""], "Compare charts on pages 2 and 3", 2, False,
+        id="several-textless-pages",
+    ),
+    pytest.param(
+        [line("Chart caption", 690), b""], "Compare charts on pages 2 and 1", 2, True, id="mixed-pages",
+    ),
+    pytest.param(
+        [line("Chart caption", 690), b""], "Inspect the chart caption", 1, True, id="implicit-page",
+    ),
+])
 async def test_pdf_renderer_refusal_with_explicit_text_only_retry(
     kb_client: httpx.AsyncClient,
     runtime: Runtime,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     failure: str,
+    pages: list[bytes],
+    query: str,
+    first_page: int,
     with_text: bool,
 ) -> None:
     await connect(kb_client, runtime)
@@ -1202,12 +1234,13 @@ async def test_pdf_renderer_refusal_with_explicit_text_only_retry(
     chat = await kb_client.post("/kb/chats", json={"engine": "claude_code", "model": "sonnet"})
     cid = chat.json()["id"]
     path = tmp_path / "report.pdf"
-    path.write_bytes(make_pdf([line("Chart caption", 690) if with_text else b""]))
+    path.write_bytes(make_pdf(pages))
     material = runtime.kb_sources.add_file(path, INBOX_ID)
-    body = {"attachments": [material.material_id], "text": "Inspect the chart on page 1"}
+    body = {"attachments": [material.material_id], "text": query}
+    render_calls: list[int] = []
 
     def unavailable(_page_bytes: bytes, number: int) -> Never:
-        assert number == 1
+        render_calls.append(number)
         raise VisualSourceUnsupported("pdf_render_unavailable", "The renderer stopped.")
 
     if failure == "known":
@@ -1220,16 +1253,17 @@ async def test_pdf_renderer_refusal_with_explicit_text_only_retry(
     pre = await kb_client.post("/kb/chats/visual-preflight", json={"chat_id": cid, **body})
     assert pre.status_code == 200, pre.text
     assert pre.json()["supported"] is (failure == "late")
+    assert pre.json()["text_only_available"] is with_text
+    assert not render_calls
     if failure == "known":
         assert pre.json()["title"] == "PDF pages are unavailable"
-        assert pre.json()["text_only_available"] is with_text
 
     refused = await kb_client.post(f"/kb/chats/{cid}/messages", json=body)
     assert refused.status_code == 422, refused.text
     assert refused.json()["title"] == "PDF pages are unavailable"
     assert refused.json()["text_only_available"] is with_text
     assert refused.json()["locator"]["material_id"] == material.material_id
-    assert refused.json()["locator"]["page"] == 1
+    assert refused.json()["locator"]["page"] == first_page
     assert not engines["claude_code"].turns
     assert (await kb_client.get(f"/kb/chats/{cid}")).json()["messages"] == []
 
@@ -1244,6 +1278,75 @@ async def test_pdf_renderer_refusal_with_explicit_text_only_retry(
         assert retried.status_code == 422
         assert retried.json()["code"] == "VISUAL_TEXT_ONLY_UNAVAILABLE"
         assert not engines["claude_code"].turns
+        assert (await kb_client.get(f"/kb/chats/{cid}")).json()["messages"] == []
+    assert render_calls == ([first_page] if failure == "late" else [])
+
+
+async def test_unsupported_model_does_not_offer_other_pdf_pages_as_text(
+    kb_client: httpx.AsyncClient, runtime: Runtime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await connect(kb_client, runtime)
+    engine = _setup_routing_matrix(runtime)["codex"]
+    path = tmp_path / "report.pdf"
+    path.write_bytes(make_pdf([line("Chart caption", 690), b""]))
+    material = runtime.kb_sources.add_file(path, INBOX_ID)
+    chat = await kb_client.post("/kb/chats", json={"engine": "codex", "model": "gpt-text"})
+    assert chat.status_code == 201, chat.text
+    cid = chat.json()["id"]
+    messages = f"/kb/chats/{cid}/messages"
+    body = {"attachments": [material.material_id], "text": "Inspect the chart on page 2"}
+
+    def unexpected_render(_page_bytes: bytes, _page: int) -> Never:
+        pytest.fail("An unsupported model must not trigger PDF rendering")
+
+    monkeypatch.setattr(runtime.kb_sources.visual, "page_renderer", unexpected_render)
+    pre = await kb_client.post("/kb/chats/visual-preflight", json={"chat_id": cid, **body})
+    assert pre.status_code == 200, pre.text
+    refused = await kb_client.post(messages, json=body)
+    assert refused.status_code == 422, refused.text
+    for response in (pre, refused):
+        assert response.json()["reason_code"] == "model_no_image_input"
+        assert response.json()["text_only_available"] is False
+        assert "selected pages" in response.json()["detail"]
+    retry = await kb_client.post(messages, json={**body, "text_only": True})
+    assert retry.status_code == 422 and retry.json()["code"] == "VISUAL_TEXT_ONLY_UNAVAILABLE"
+    assert not engine.turns
+
+
+@pytest.mark.parametrize("reference", ["page 0", "page 99", "pages 2 and 99"])
+async def test_invalid_pdf_page_reference_preserves_source_wide_text_only(
+    kb_client: httpx.AsyncClient, runtime: Runtime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    reference: str,
+) -> None:
+    await connect(kb_client, runtime)
+    engine = _setup_routing_matrix(runtime)["claude_code"]
+    path = tmp_path / "report.pdf"
+    path.write_bytes(make_pdf([line("Chart caption", 690), b""]))
+    material = runtime.kb_sources.add_file(path, INBOX_ID)
+    chat = await kb_client.post("/kb/chats", json={"engine": "claude_code", "model": "sonnet"})
+    assert chat.status_code == 201, chat.text
+    cid = chat.json()["id"]
+    messages = f"/kb/chats/{cid}/messages"
+    body = {"attachments": [material.material_id], "text": f"Inspect the chart on {reference}"}
+
+    def unexpected_render(_page_bytes: bytes, _number: int) -> Never:
+        pytest.fail("An out-of-range selection must never render a PDF page")
+
+    monkeypatch.setattr(runtime.kb_sources.visual, "page_renderer", unexpected_render)
+    pre = await kb_client.post("/kb/chats/visual-preflight", json={"chat_id": cid, **body})
+    assert pre.status_code == 200, pre.text
+    assert not pre.json()["supported"] and pre.json()["text_only_available"]
+    assert pre.json()["title"] == "PDF page is out of range"
+    refused = await kb_client.post(messages, json=body)
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["title"] == "PDF page is out of range" and refused.json()["text_only_available"]
+    assert not engine.turns
+    retried = await kb_client.post(messages, json={**body, "text_only": True})
+    assert retried.status_code == 202, retried.text
+    assert {"type": "text_only", "label": TEXT_ONLY_DISCLOSURE} in retried.json()["assistant"]["parts"]
+    await settle(lambda: runtime.kb_chats.state_of(cid) == "idle")
+    (turn,) = engine.turns
+    assert turn.visuals == ()
 
 
 async def test_actual_pdf_pages_keep_order_labels_and_original_digest(
