@@ -1,13 +1,13 @@
 import { usePageVisible } from './usePageVisible';
 import { useMotionLevel, useReducedMotion, useStillIndicators } from '../ui/motionLevel';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
 import type { KbMessage } from '../../api/kb/types.gen';
 import { Banner, Button, Spinner } from '../ui';
 import { Composer } from '../composer/Composer';
-import { useAgents, useChats, useServices } from '../state/context';
+import { useAgents, useChats, usePrefs, useServices } from '../state/context';
 import { agentOf } from '../state/agents';
 import { AgentFix } from './AgentFix';
 import { useOpenDocument } from '../state/document';
@@ -15,17 +15,18 @@ import { ChatMenu, RenameForm } from './ChatMenu';
 import { AssistantMessage, SystemMessage, UserMessage } from './Message';
 import { DiscussPaperBar } from './DiscussPaperBar';
 import { useQuestionActions } from './useQuestionActions';
-import { partsOf } from '../api/permissions';
+import { isWaitingForUser, partsOf } from '../api/permissions';
 import { WebSearchChip } from './webSearch';
 import { ChatOverviewButton } from '../overview/ChatOverviewButton';
 import { savedText } from './saved';
 import type { KbChat } from '../../api/kb/types.gen';
-import { isAnswering, type ChatsData, type ChatsStore } from '../state/chats';
+import { chatWaits, isAnswering, isLocal, type ChatsData, type ChatsStore } from '../state/chats';
 import { DitherStage } from '../fx/dither/DitherStage';
 import { ChatBackdrop } from '../fx/backdrop/ChatBackdrop';
 import { SelectionProvider } from './select/context';
 import { useFollowSwitch } from './switchMotion';
 import { ScrollEdges } from './ScrollEdges';
+import { ChatTabStrip, ChatTabsEmptyState, useScopedReadingAnchor, type ChatTabItem } from '../shell/chatTabs041';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
@@ -112,8 +113,14 @@ function useFirstMessageLeave(chats: ChatsStore, reduced: boolean): LeaveState {
 export function ChatView({ hidden }: { hidden: boolean }) {
   const { chats } = useServices();
   const currentId = useChats((s) => s.currentId);
+  const openTabIds = useChats((s) => s.openTabIds);
+  const lastClosedTabId = useChats((s) => s.lastClosedTabId);
+  const allTabsClosed = useChats((s) => s.allTabsClosed);
+  const list = useChats((s) => s.list);
+  const openChats = useChats((s) => s.chats);
   const open = useChats((s) => (s.currentId ? s.chats[s.currentId] : undefined));
   const summary = useChats((s) => (s.currentId ? s.list.find((c) => c.id === s.currentId) : undefined));
+  const sideOpen = usePrefs((s) => s.sideOpen);
   const openDoc = useOpenDocument();
   const [renaming, setRenaming] = useState(false);
   const [busy, setBusy] = useState<{ id: string; what: string } | null>(null);
@@ -123,6 +130,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const agents = useAgents((s) => s.agents);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
+  const reopenBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [reopenFocus, setReopenFocus] = useState<{ id: string | null; seq: number }>({ id: null, seq: 0 });
   const stick = useRef(true);
   const reduced = useReducedMotion() ?? false;
   // Decision 32: the main field is still only at «off» or the system's reduced motion; at «calm» it
@@ -134,8 +143,53 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const chat = open?.chat ?? null;
   const questionActions = useQuestionActions(currentId, chat);
   const title = chat?.title ?? summary?.title ?? 'New chat';
+  const effectiveHidden = hidden || allTabsClosed;
+  const leavingHere = !!currentId && leaving === currentId;
+  const tabItems = useMemo<ChatTabItem[]>(() => openTabIds.map((id) => {
+    const itemSummary = list.find((c) => c.id === id);
+    const itemChat = openChats[id]?.chat ?? null;
+    const isActive = id === currentId && !allTabsClosed;
+    const hasLocalStream = !!itemChat?.messages.some((m) => isLocal(m.id) && m.role === 'assistant' && m.state === 'streaming');
+    return {
+      id,
+      title: (isActive ? itemChat?.title : itemSummary?.title) ?? itemSummary?.title ?? itemChat?.title ?? 'New chat',
+      working: isActive && itemChat
+        ? isAnswering(itemChat)
+        : hasLocalStream || (itemSummary ? itemSummary.state === 'answering' : isAnswering(itemChat)),
+      waiting: isActive && itemChat
+        ? chatWaits(itemChat)
+        : itemSummary
+          ? isWaitingForUser(itemSummary)
+          : itemChat
+            ? chatWaits(itemChat)
+            : false,
+      unread: itemSummary?.unread ?? itemChat?.unread ?? false,
+      pinned: (isActive ? itemChat?.pinned : itemSummary?.pinned) ?? itemSummary?.pinned ?? itemChat?.pinned ?? false,
+    };
+  }), [openTabIds, list, openChats, currentId, allTabsClosed]);
+  const lastClosedTitle = useMemo(() => {
+    if (!lastClosedTabId) return null;
+    return list.find((c) => c.id === lastClosedTabId)?.title ?? openChats[lastClosedTabId]?.chat?.title ?? null;
+  }, [lastClosedTabId, openChats, list]);
+
   // Decision 25: switching chats, the thread follows the tab's direction; the title crossfades.
-  useFollowSwitch(currentId, hidden, scrollRef, titleRef);
+  useFollowSwitch(currentId, effectiveHidden, scrollRef, titleRef);
+
+  const readingAnchor = useScopedReadingAnchor({
+    chatId: currentId,
+    scrollRef,
+    ready: !!chat && chat.messages.length > 0 && !leavingHere,
+    hidden: effectiveHidden,
+    stickRef: stick,
+    defaultBottom: true,
+    getAnchor: (id) => chats.getState().getReadingAnchor(id),
+    setAnchor: (id, anchor) => chats.getState().setReadingAnchor(id, anchor),
+  });
+  const captureNowRef = useRef(readingAnchor.captureNow);
+  captureNowRef.current = readingAnchor.captureNow;
+  useEffect(() => chats.getState().registerBeforeSwitch((outgoingId) => {
+    if (outgoingId) captureNowRef.current(outgoingId);
+  }), [chats]);
 
   useEffect(() => {
     if (!currentId) return undefined;
@@ -145,12 +199,17 @@ export function ChatView({ hidden }: { hidden: boolean }) {
 
   const pageVisible = usePageVisible();
   useEffect(() => {
-    if (!hidden && pageVisible && currentId && summary?.unread) void chats.getState().markRead(currentId);
-  }, [chats, currentId, summary?.unread, hidden, pageVisible]);
+    if (!effectiveHidden && pageVisible && currentId && summary?.unread) void chats.getState().markRead(currentId);
+  }, [chats, currentId, summary?.unread, effectiveHidden, pageVisible]);
 
   // A notice or an error belongs to the chat it was about (QA D10).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setRenaming(false); stick.current = true; setNotice(null); setActionError(null); }, [currentId]);
+  useEffect(() => {
+    setRenaming(false);
+    stick.current = currentId ? (chats.getState().getReadingAnchor(currentId)?.stickToBottom ?? true) : true;
+    setNotice(null);
+    setActionError(null);
+  }, [currentId]);
 
   // Keep the newest text in view while the user is at the bottom.
   useLayoutEffect(() => {
@@ -183,7 +242,6 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   // FX §1: the field only behind an empty chat — none selected, or open with no messages yet —
   // and through the first message's burn-out. A chat that already has messages never shows it.
   const emptyView = !currentId || (!!chat && chat.messages.length === 0);
-  const leavingHere = !!currentId && leaving === currentId;
   const showField = emptyView || leavingHere;
   // CHAT-BACKDROP-SPEC: a chat with messages has the backdrop instead — never both: it comes when the
   // first message's burn-out has ended, and moves only while an answer is being written.
@@ -194,29 +252,56 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   // answer (and «Writing an answer…») appears once the thread is on its solid ground again.
   const messages = chat ? (leavingHere ? chat.messages.slice(0, 1) : chat.messages) : [];
 
+  const showTabs = openTabIds.length > 0 || allTabsClosed;
+
   return (
     <section className="kb-center" data-pane="center" aria-label="Chat" hidden={hidden}>
       <SelectionProvider chatId={currentId}>
       <header className="kb-head kb-head--chat">
         {renaming && chat ? (
-          <RenameForm title={chat.title} onCancel={() => setRenaming(false)} onSave={async (next) => {
-            const r = await chats.getState().rename(chat.id, next);
-            if (!r.ok) return r.error;
-            setRenaming(false);
-            return null;
-          }} />
+          <>
+            <RenameForm title={chat.title} onCancel={() => setRenaming(false)} onSave={async (next) => {
+              const r = await chats.getState().rename(chat.id, next);
+              if (!r.ok) return r.error;
+              setRenaming(false);
+              return null;
+            }} />
+            <span className="kb-head__spacer" />
+          </>
+        ) : showTabs ? (
+          <>
+            <ChatTabStrip
+              tabs={tabItems}
+              activeId={currentId}
+              onSelect={(id) => {
+                if (currentId && id !== currentId) readingAnchor.captureNow(currentId);
+                chats.getState().selectTab(id);
+              }}
+              onClose={(id) => {
+                if (id === currentId) readingAnchor.captureNow(currentId);
+                chats.getState().closeTab(id);
+              }}
+              onEmptyFocus={() => reopenBtnRef.current?.focus({ preventScroll: true })}
+              focusTabId={reopenFocus.id}
+              focusSeq={reopenFocus.seq}
+            />
+            {!allTabsClosed && <h1 className="kb-visually-hidden" ref={titleRef}>{title}</h1>}
+          </>
         ) : (
-          <h1 className="kb-head__title" ref={titleRef}>{title}</h1>
+          <>
+            <h1 className="kb-head__title" ref={titleRef}>{title}</h1>
+            <span className="kb-head__spacer" />
+          </>
         )}
         {recording && <span className="kb-tag kb-tag--static">during recording</span>}
-        <span className="kb-head__spacer" />
         {chat && <WebSearchChip chatId={chat.id} messages={chat.messages} />}
         {chat && <ChatOverviewButton chatId={chat.id} />}
         {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)} />}
       </header>
       {notice && <p className="kb-notice" role="status">{notice}</p>}
-      <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={fieldStill} calm={fieldCalm}>
-      {showBackdrop && <ChatBackdrop working={isAnswering(chat)} active={!hidden} reduced={reduced} />}
+      <div className="kb-chat__workspace" hidden={allTabsClosed}>
+      <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!effectiveHidden} reduced={fieldStill} calm={fieldCalm}>
+      {showBackdrop && <ChatBackdrop working={isAnswering(chat)} active={!effectiveHidden} reduced={reduced} />}
       <div className="kb-chat__scroll" ref={scrollRef} role="log" aria-label="Conversation" aria-live="off"
         onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>
         {currentId && open?.load === 'loading' && !chat && <div className="kb-chat__wait"><Spinner label="Opening the chat" /></div>}
@@ -266,6 +351,21 @@ export function ChatView({ hidden }: { hidden: boolean }) {
           onAdded={() => { if (currentId) void chats.getState().load(currentId); }}
           onOpenMaterial={(id) => openDoc({ type: 'material', id })}
           onNotice={setNotice}
+        />
+      )}
+      </div>
+      {allTabsClosed && (
+        <ChatTabsEmptyState
+          ref={reopenBtnRef}
+          canReopen={lastClosedTabId !== null}
+          lastClosedTitle={lastClosedTitle}
+          sidebarHidden={!sideOpen}
+          autoFocusReopen
+          onReopenLast={() => {
+            const reopened = chats.getState().reopenLastTab();
+            if (reopened) setReopenFocus((f) => ({ id: reopened, seq: f.seq + 1 }));
+          }}
+          onNewChat={() => chats.getState().open(null)}
         />
       )}
       <Composer chatId={currentId}

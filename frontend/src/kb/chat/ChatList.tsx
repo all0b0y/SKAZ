@@ -31,9 +31,10 @@ function useOpenChat() {
  */
 export function useOpenChatKey(): string | null {
   const currentId = useChats((s) => s.currentId);
+  const allTabsClosed = useChats((s) => s.allTabsClosed);
   const center = useUi((s) => s.center);
   const docInCenter = useUi((s) => s.right !== null && s.docExpanded);
-  if (center !== 'chat' || docInCenter) return null;
+  if (center !== 'chat' || docInCenter || allTabsClosed) return null;
   return currentId ?? NEW_CHAT_KEY;
 }
 
