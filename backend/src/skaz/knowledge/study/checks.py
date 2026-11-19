@@ -285,7 +285,7 @@ _EN_DIRECTIVE_PREFIX = (
     r"|you're\s+(?:allowed|free|welcome)\s+to"
     r"|(?:can|could|would|will)\s+you(?:\s+please)?"
     r"|feel\s+free\s+to|go\s+ahead\s+and)\s+(?:also\s+|freely\s+|please\s+)*"
-    r"|(?:^|(?<=[.!?;:\n])\s*|,\s*(?:and\s+|or\s+|then\s+|so\s+)?|\b(?:and|or|then)\s+)"
+    r"|(?:^|(?<=[.!?;:—–\n])\s*|(?<=\s-)\s+|,\s*(?:and\s+|or\s+|then\s+|so\s+)?|\b(?:and|or|then)\s+)"
     r"(?:please\s+|also\s+|freely\s+|just\s+)*"
     r")"
 )
@@ -314,6 +314,16 @@ _RU_INST_KNOWLEDGE = (
     r"|собственн(?:ыми|ым)\s+)(?:общ(?:ими|им)\s+)?знани\w*(?:\s+" + _RU_AGENT_OWNER + r")?"
 )
 
+_EN_BASIS_LINK = (
+    r"(?:from|out\s+of|based\s+on|using|by\s+using"
+    r"|(?:by\s+)?(?:drawing|relying|leaning)\s+(?:also\s+)?on)"
+)
+_RU_BASIS_LINK = (
+    r"(?:из|на\s+основе|на\s+базе|с\s+использованием|с\s+помощью|при\s+помощи"
+    r"|используя|привлекая|применяя|задействуя"
+    r"|(?:опираясь|полагаясь)\s+(?:также\s+|еще\s+)?на)"
+)
+
 _AGENT_KNOWLEDGE_OPT_IN = re.compile(
     r"(?:(?P<en_directive>"
     + _EN_DIRECTIVE_PREFIX
@@ -324,8 +334,7 @@ _AGENT_KNOWLEDGE_OPT_IN = re.compile(
     + r"(?:from|out\s+of|based\s+on|using)\s+)?"
     + _EN_AGENT_KNOWLEDGE
     + r")"
-    + r"|\b(?:from|out\s+of|based\s+on|using|by\s+using"
-    + r"|(?:by\s+)?(?:drawing|relying|leaning)\s+(?:also\s+)?on)\s+(?:also\s+)?"
+    + rf"|\b{_EN_BASIS_LINK}\s+(?:also\s+)?"
     + _EN_AGENT_KNOWLEDGE
     + r"|\b(?:(?:make|create|generate|add|include|write|take|draw|bring\s+in"
     + r"|supplement|go|use|using)\b[^.!?;:\n]{0,45}\b(?:from\s+)?|from\s+)"
@@ -340,9 +349,7 @@ _AGENT_KNOWLEDGE_OPT_IN = re.compile(
     + r"(?:из|на\s+основе|с\s+использованием|с\s+помощью)\s+)?"
     + _RU_AGENT_KNOWLEDGE
     + r")"
-    + r"|\b(?:из|на\s+основе|на\s+базе|с\s+использованием|с\s+помощью|при\s+помощи"
-    + r"|используя|привлекая|применяя|задействуя"
-    + r"|(?:опираясь|полагаясь)\s+(?:также\s+|еще\s+)?на)\s+(?:также\s+|еще\s+|и\s+)?"
+    + rf"|\b{_RU_BASIS_LINK}\s+(?:также\s+|еще\s+|и\s+)?"
     + _RU_AGENT_KNOWLEDGE
     + r"|\b(?:(?:дополн(?:и|ите|яй|яйте|ить|ять|ив|яя)|добав(?:ь|ьте|ляй|ляйте|ить|лять|ив|ляя)"
     + r"|расшир(?:ь|ьте|яй|яйте|ить|ять|ив)|воспользуй(?:ся|тесь)|воспользоваться"
@@ -363,7 +370,12 @@ _AGENT_KNOWLEDGE_OPT_IN = re.compile(
     re.IGNORECASE,
 )
 
-_DIRECTIVE_PURPOSE = re.compile(r"(?:\s+to|\s*,?\s+чтобы)\s+(?P<work>[^,]+)", re.IGNORECASE)
+_DIRECTIVE_PURPOSE = re.compile(
+    r"^(?:(?:to|for|чтобы|для)\s+|(?:when|while)\s+(?!(?:needed|necessary|appropriate)\b)"
+    r"|(?:когда|пока)\s+(?!(?:нужно|необходимо)\b)|при\s+(?!необходимости\b))"
+    r"(?:you\s+(?:are\s+)?|(?:ты|вы)\s+)?(?:(?:будешь|будете)\s+)?",
+    re.IGNORECASE,
+)
 
 _SENTENCE_DISQUALIFIER = re.compile(
     r"\b(?:"
@@ -382,13 +394,54 @@ _POLITE_REQUEST_SENTENCE = re.compile(
     re.IGNORECASE,
 )
 
-_STUDY_REQUEST_START = re.compile(
-    r"^(?:(?:and|or|then|and\s+then|и|а|затем|потом|а\s+потом|и\s+потом)\s+)?"
+_TASK_CONNECTOR = r"(?:and(?:\s+then)?|or|but|then|plus|[иа](?:\s+(?:потом|затем))?|но|затем|потом)"
+_TASK_REQUEST_LEAD = (
     r"(?:(?:can|could|would|will)\s+you\s+|(?:ты\s+|вы\s+)?(?:можешь|можете)\s+)?"
-    r"(?:(?:please|also)\s+|пожалуйста[, ]+)?"
-    r"\b(?:make|create|generate|build|write|prepare|draft|add|include|give\s+me"
-    r"|сдела\w*|состав\w*|созда\w*|сгенерир\w*|придума\w*|подготов\w*|напиш\w*|написать"
-    r"|добав\w*|включ\w*|дай\w*)\b",
+    r"(?:(?:please|also)\s+|пожалуйста[, ]+)*"
+)
+_ADDITION_VERB = re.compile(r"(?:add(?:ing)?|includ(?:e|ing)|добав\w*|включ\w*)", re.IGNORECASE)
+_CREATION_VERB = (
+    r"(?:mak(?:e|ing)|creat(?:e|ing)|generat(?:e|ing)|build(?:ing)?|writ(?:e|ing)|prepar(?:e|ing)"
+    r"|draft(?:ing)?|compos(?:e|ing)|design(?:ing)?|produc(?:e|ing)|give\s+me"
+    r"|сдела\w*|состав\w*|созда\w*|сгенерир\w*|придума\w*|подготов\w*|напиш\w*|писать|написать"
+    rf"|дай\w*|{_ADDITION_VERB.pattern})"
+)
+_OTHER_TASK_VERB = (
+    r"(?:summari[zs](?:e|ing)|explain(?:ing)?|describ(?:e|ing)|translat(?:e|ing)|review(?:ing)?"
+    r"|analy[zs](?:e|ing)|compar(?:e|ing)|research(?:ing)?|read(?:ing)?|answer(?:ing)?|outlin(?:e|ing)"
+    r"|перескаж\w*|пересказ\w*|объясн\w*|опиш\w*|описать|перевед\w*|перевести"
+    r"|разбер\w*|разобрать|проанализир\w*|сравн\w*|прочита\w*)"
+)
+_TASK_REQUEST_START = re.compile(
+    rf"^(?:{_TASK_CONNECTOR}\s+)?{_TASK_REQUEST_LEAD}\b(?:(?P<create>{_CREATION_VERB})|{_OTHER_TASK_VERB})\b",
+    re.IGNORECASE,
+)
+_BASIS_SEPARATOR = re.compile(r"[,—–]\s*|\s+-\s+")
+_TASK_SEPARATOR = re.compile(
+    rf"(?:\b{_TASK_CONNECTOR}\s+|{_BASIS_SEPARATOR.pattern})"
+    rf"(?={_TASK_REQUEST_LEAD}\b(?:{_CREATION_VERB}|{_OTHER_TASK_VERB})\b)",
+    re.IGNORECASE,
+)
+_TARGET_COMPLEMENT = re.compile(
+    rf"[.!?:;]|{_BASIS_SEPARATOR.pattern}|(?<![\w-])(?:{_TASK_CONNECTOR}|{_EN_BASIS_LINK}|{_RU_BASIS_LINK}"
+    r"|about|on|of|with|in|to|for|regarding|concerning|covering|outside|beyond|not\s+only"
+    r"|по|про|о|об|с|на|для|чтобы|вне|за\s+пределами|помимо|не\s+только)(?![\w-])",
+    re.IGNORECASE,
+)
+_PARTITIVE = re.compile(r"^\s*(?:a\s+)?(?:pair|couple|set|batch|handful|series)\s+of\s+", re.IGNORECASE)
+_ADDITION_QUANTITY = re.compile(
+    r"(?:еще\s+)?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|a\s+few|some|more|another"
+    r"|один|одну|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять|пару|несколько)"
+    r"(?:\s+(?:more|extra))?",
+    re.IGNORECASE,
+)
+_STUDY_TARGET = re.compile(
+    r"(?:\b(?:flash\s*cards?|cards?|decks?|tests?|quiz(?:zes)?|questions?|study\s+items?)"
+    # Russian can qualify another object with a Study noun in the genitive without a preposition.
+    rf"|^(?:{_ADDITION_QUANTITY.pattern}\s+|(?:эт\w*|мо\w*|наш\w*|ваш\w*|сво\w*"
+    r"|[а-я]+(?:ый|ий|ой|ые|ие|ая|яя|ую|юю|ое|ее|ых|их|ого|его|ыми|ими|ому|ему))\s+)*"
+    r"(?:карточ\w*|флешкарт\w*|флэшкарт\w*|колод\w*|тест(?:ы|а|ов|у|ом|е|ам|ами|ах)?"
+    r"|квиз\w*|опросни\w*|вопрос\w*|задани\w*))$",
     re.IGNORECASE,
 )
 
@@ -549,44 +602,92 @@ _NOT_STRICTLY_MATERIALS = re.compile(
 )
 
 
-def _clause_is_affirmative_opt_in(sentence: str, match: re.Match[str]) -> bool:
+def _task_target(text: str) -> str:
+    # Inspect the requested item before its topic or purpose.
+    return _TARGET_COMPLEMENT.split(_PARTITIVE.sub("", text, count=1), maxsplit=1)[0].strip()
+
+
+def _study_action(task: str, context: bool | None = None) -> bool | None:
+    """Return whether an action requests Study items, if the task can be identified."""
+    start = _TASK_REQUEST_START.match(task)
+    if start is None:
+        return None
+    verb = start["create"]
+    if verb is None:
+        return False
+    target = _task_target(task[start.end():])
+    if _ADDITION_VERB.fullmatch(verb) and _ADDITION_QUANTITY.fullmatch(target):
+        # A count can refer back to the items already requested, as in "and add two from ...".
+        return context
+    return _STUDY_TARGET.search(target) is not None
+
+
+def _clause_is_affirmative_opt_in(sentence: str, match: re.Match[str], study_context: bool | None) -> bool:
     if _SENTENCE_DISQUALIFIER.search(sentence) is not None:
         return False
     if _SENTENCE_AFFIRMATIVE_DIRECTIVE.search(sentence) is None:
         return False
-    if (match["en_directive"] or match["ru_directive"]) and not _STUDY_WORK_CONTEXT.search(match[0]):
-        # A directive to use knowledge for another task does not grant it for nearby Study work.
-        purpose = _DIRECTIVE_PURPOSE.match(sentence, match.end())
-        if purpose and not _STUDY_WORK_CONTEXT.search(purpose["work"]):
-            return False
 
     # The directive pattern can consume the delimiter before the words that grant permission.
     prefix = sentence[: match.end() - len(match[0].lstrip(" ,:\t"))]
-    local_prefix = prefix.rsplit(",", 1)[-1]
-    direct_study_request = bool(_STUDY_REQUEST_START.match(prefix) and _STUDY_WORK_CONTEXT.search(prefix))
+    tail = sentence[match.end():]
+    *previous_actions, action = _TASK_SEPARATOR.split(sentence[:match.end()])
+    for previous in previous_actions:
+        scope = _study_action(previous, study_context)
+        if scope is not None:
+            study_context = scope
+    action_start = match.end() - len(action)
+    study_action = _study_action(action, study_context)
+    if study_action is False:
+        return False
+
+    directive = bool(match["en_directive"] or match["ru_directive"])
+    requests_study_items = _STUDY_WORK_CONTEXT.search(match[0]) is not None
+    if directive and not requests_study_items:
+        # A bare knowledge directive can take its own purpose before or after the knowledge phrase.
+        for text in (prefix.strip(), tail.lstrip(" ,—–-\t")):
+            purpose = _DIRECTIVE_PURPOSE.match(text)
+            if purpose is not None:
+                target = text[purpose.end():]
+                target_action = _study_action(target, study_context)
+                if target_action is None:
+                    target_action = _STUDY_TARGET.search(_task_target(target)) is not None
+                if not target_action:
+                    return False
+                requests_study_items = True
+
+    pieces = _BASIS_SEPARATOR.split(prefix)
+    detached = len(pieces) > 1 and not pieces[-1].strip()
+    lead_in = (pieces[-2] if detached else pieces[-1]).strip()
+    # A comma or dash can also introduce reported speech.
+    if _ATTRIBUTION.search(lead_in) and not _TASK_REQUEST_START.match(lead_in):
+        return False
+    local_prefix = _BASIS_SEPARATOR.split(prefix[action_start:])[-1]
     if ":" in prefix:
         heading, local_prefix = prefix.rsplit(":", 1)
-        if not direct_study_request or _ATTRIBUTION.search(heading):
+        if study_action is not True or _ATTRIBUTION.search(heading):
             return False
-    else:
-        # A comma can also introduce reported speech, so inspect its lead-in before a detached match.
-        lead_in = prefix.rstrip(" ,\t").rsplit(",", 1)[-1].lstrip()
-        if _ATTRIBUTION.search(lead_in) and not _STUDY_REQUEST_START.match(lead_in):
-            return False
-    if _STUDY_REQUEST_START.match(local_prefix.lstrip()) and not _STUDY_WORK_CONTEXT.search(local_prefix):
-        return False
     if sentence.rstrip().endswith("?") and (
         _POLITE_REQUEST_SENTENCE.match(sentence) is None
-        or (not direct_study_request and match.start() != 0)
+        or (study_action is not True and match.start() != 0)
     ):
         return False
     if _PREFIX_QUESTION_OR_NON_AGENT.search(local_prefix) or _TOPIC_IMMEDIATE_PREFIX.search(local_prefix):
         return False
     # A detached basis phrase can modify the main Study request after an embedded topic clause.
     # Within the topic itself, the same words could describe how someone else does the work.
-    if not local_prefix.strip() and prefix.rstrip().endswith(",") and direct_study_request:
+    if detached and _TOPIC_IMMEDIATE_PREFIX.search(lead_in) is not None:
+        return False
+    if _TOPIC_CLAUSE_PREFIX.search(prefix[action_start:]) and not (detached and study_action is True):
+        return False
+    if study_action is True or requests_study_items or _STUDY_TARGET.fullmatch(prefix.strip()):
         return True
-    return _TOPIC_CLAUSE_PREFIX.search(prefix) is None
+
+    # A preposed basis can govern the action that follows it in the same sentence.
+    following = _TASK_SEPARATOR.search(tail)
+    if following is not None and not tail[:following.start()].strip():
+        return _study_action(tail[following.end():], study_context) is True
+    return directive and study_context is True
 
 
 def allows_agent_knowledge(request_text: str | None) -> bool:
@@ -608,13 +709,20 @@ def allows_agent_knowledge(request_text: str | None) -> bool:
         return False
     if _STUDY_WORK_CONTEXT.search(unquoted) is None:
         return False
-    for sentence in re.findall(r"[^.!?\n;]+[.!?\n;]?", unquoted):
-        chunk = sentence.strip()
-        if not chunk:
-            continue
+    chunks = [sentence.strip() for sentence in re.findall(r"[^.!?\n;]+[.!?\n;]?", unquoted)]
+    actions = [
+        [scope for task in _TASK_SEPARATOR.split(chunk) if (scope := _study_action(task)) is not None]
+        for chunk in chunks
+    ]
+    first_action = next((scopes[0] for scopes in actions if scopes), None)
+    preceding: bool | None = None
+    for chunk, scopes in zip(chunks, actions, strict=True):
+        context = preceding if preceding is not None else first_action
         for match in _AGENT_KNOWLEDGE_OPT_IN.finditer(chunk):
-            if _clause_is_affirmative_opt_in(chunk, match):
+            if _clause_is_affirmative_opt_in(chunk, match, context):
                 return True
+        if scopes:
+            preceding = scopes[-1]
     return False
 
 
