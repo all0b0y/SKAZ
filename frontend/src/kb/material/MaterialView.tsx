@@ -24,6 +24,7 @@ import { useRecognitionRecheck } from './RecognitionRecheck';
 import { FreshnessNotice } from './FreshnessNotice';
 import { ReadMarks } from './ReadMarks';
 import { RepeatToggle, useMaterialRepeats, useRepeatView } from './RepeatMarks';
+import { documentTitleMark, HeadingMark, headingLineClass } from '../document/headingAccents041/headingAccents';
 
 const MATERIAL_GONE = 'This material is no longer in the library — it was deleted.';
 
@@ -243,7 +244,12 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
         {material && data && (
           <article className={`kb-doc__article kb-mat${expanded ? ' is-wide' : ''}`} data-material-kind={material.kind}>
             <div className="kb-mat__head">
-              <h2 className="kb-doc__title">{material.title}</h2>
+              {/* G1: the open material's decorative `@` — ink, never text: the accessible name,
+                  copies and exports keep the title's own words. */}
+              <h2 className={`kb-doc__title ${headingLineClass}`}>
+                <HeadingMark kind={documentTitleMark('material')} size="title" />
+                <span>{material.title}</span>
+              </h2>
               <p className="kb-doc__meta">{metaLine(material)}</p>
               <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} onJobChanged={reload} />
               {material.status === 'ready' && material.wiki?.state === 'in_wiki' && !material.wiki.note_page_id

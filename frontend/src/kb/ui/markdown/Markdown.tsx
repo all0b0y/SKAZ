@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from 'react';
 import { MathView } from './MathView';
 import { DiagramView, fenceCode, isMermaidFence } from './Diagram';
 import { markdownParser, mathSource, type SyntaxNode } from './parser';
+import { headingLineClass } from '../../document/headingAccents041/headingAccents';
 
 /**
  * The one safe Markdown renderer of the app (H4): chat answers, wiki pages and notes. The GFM parser
@@ -22,6 +23,14 @@ export interface MarkdownOptions {
   inAppLink?: InAppLink;
   linkClassName?: string;
   theadClassName?: string;
+  /**
+   * G1 heading accents (SKAZ 0.4.1): the decorative mark a host puts before the main (`#`)
+   * headings of this text — currently the chat answer's `//`. Only a host that passes the option
+   * is decorated; deeper headings and every other consumer (wiki blocks, wiki files) keep their
+   * plain headings. The mark must be ink, never text (HeadingMark: aria-hidden, no text node), so
+   * the heading's accessible name, selection text and copies keep exactly its own words.
+   */
+  mainHeadingMark?: ReactNode;
 }
 
 /** `index` is what the caller renders (one footnote number may stand in several places); `id` is unique. */
@@ -124,7 +133,11 @@ function render(node: SyntaxNode, ctx: Ctx): ReactNode {
   switch (node.name) {
     case 'Document': return inner();
     case 'Paragraph': return <p key={key}>{inner()}</p>;
-    case 'ATXHeading1': case 'SetextHeading1': return <h3 key={key}>{inner()}</h3>;
+    // G1: a host that opted in opens its main heading with the decorative mark; the heading text
+    // stays the only text — the mark is aria-hidden ink — on the one-line baseline layout.
+    case 'ATXHeading1': case 'SetextHeading1': return ctx.mainHeadingMark != null
+      ? <h3 key={key} className={headingLineClass}>{ctx.mainHeadingMark}<span>{inner()}</span></h3>
+      : <h3 key={key}>{inner()}</h3>;
     case 'ATXHeading2': case 'SetextHeading2': return <h4 key={key}>{inner()}</h4>;
     case 'ATXHeading3': return <h5 key={key}>{inner()}</h5>;
     case 'ATXHeading4': case 'ATXHeading5': case 'ATXHeading6': return <h6 key={key}>{inner()}</h6>;

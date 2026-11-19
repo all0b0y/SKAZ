@@ -25,6 +25,7 @@ import { DeletePageDialog, RenamePageDialog, type PageDialog } from './PageDialo
 import { DiagramPreviews } from '../ui/markdown/Diagram';
 import { WikiTermsButton } from './WikiTermsButton';
 import { ClaimLabel } from './ClaimLabel';
+import { documentTitleMark, HeadingMark, headingLineClass } from '../document/headingAccents041/headingAccents';
 import { useMotionLevel } from '../ui/motionLevel';
 import { usePixelSwap } from '../fx/pixel/usePixelSwap';
 import { PixelCover } from '../fx/pixel/PixelCover';
@@ -289,6 +290,9 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
                 <button type="button" className="kb-psec__toggle" aria-expanded={open} onClick={() => toggle(section.key)}>
                   <Icon name="chevronDown" size={13} className={`kb-psec__chev${open ? '' : ' is-closed'}`} />
                   {section.kind && namesItsKind(section) && <Icon name={CLAIM_ICON[section.kind]} size={13} className="kb-psec__kind" />}
+                  {/* G1: one star before each main section — decorative ink beside the chevron,
+                      never part of the toggle's name, the collapse state or a selection. */}
+                  <HeadingMark kind="star" />
                   <span className="kb-psec__title">{title}</span>
                 </button>
                 {section.kind && !namesItsKind(section) && <ClaimLabel kind={section.kind} />}
@@ -490,7 +494,12 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
         {finderError && <p className="kb-page__notice" role="alert">{finderError}</p>}
         {shown && (
           <article className={`kb-doc__article kb-page${expanded ? ' is-wide' : ''}`} data-page-kind={shown.kind}>
-            <h2 className="kb-doc__title">{shown.title}</h2>
+            {/* G1: the open document's decorative mark — `@` for a wiki page, a star for Notes —
+                ink, never text: the accessible name, copies and exports keep the title's words. */}
+            <h2 className={`kb-doc__title ${headingLineClass}`}>
+              <HeadingMark kind={documentTitleMark(shown.kind)} size="title" />
+              <span>{shown.title}</span>
+            </h2>
             <div className="kb-page__meta">
               {shown.folder_names.map((name, i) => <FolderTag key={name} name={name} tone={tone(shown.folders[i])} />)}
               <span className="kb-doc__meta">

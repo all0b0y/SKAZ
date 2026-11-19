@@ -1,0 +1,28 @@
+/* G1 (SKAZ 0.4.1) — decorative heading accents (09-HEADING-ACCENTS.md, the approved mock
+   heading-accents-selected.html). This file owns exactly the kb-ham classes; a host adds them
+   next to its own. The marker is ink, never text — the glyphs are drawn strokes — so quotes,
+   clipboard, accessible names and the Markdown export keep the heading's own words. Colour is
+   the existing Appearance accent token (`--kb-accent`): no new setting, no fx accent. */
+
+.kb-ham {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  line-height: 1;
+  color: var(--kb-accent);
+}
+.kb-ham svg { display: block; width: 14px; height: 14px; }
+.kb-ham--title svg { width: 19px; height: 19px; }
+
+/* The host heading: one line — mark first, then the title, on a shared baseline. The 2px nudge
+   sits a drawn glyph the way the approved mock sits its star; hosts that already lay the row
+   out (a section head's toggle) simply drop the mark in without this class. */
+.kb-ham-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--kb-sp-6);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kb-ham-line .kb-ham { align-self: baseline; transform: translateY(2px); }
