@@ -170,4 +170,22 @@ describe('⌘K', () => {
     } as never, null);
     expect(hits.map((h) => h.key)).toEqual(['p-p1', 'b-p2-b2', 'f-m1-1']);
   });
+
+  it('maps docx and image material hits to their truthful icons', () => {
+    const hits = toHits({
+      query: 'c', counts: null,
+      pages: [],
+      blocks: [],
+      fragments: [
+        { material_id: 'm-docx', material_title: 'Notes', material_kind: 'docx', seg: 1, start_ms: null, page: null, snippet: [] },
+      ],
+      materials: [
+        { id: 'm-img', title: 'Chart', kind: 'image', folder_id: 'inbox', folder_name: 'Inbox', created_at: '2026-11-18T10:00:00Z' },
+      ],
+    } as never, null);
+    expect(hits.map((h) => [h.key, h.icon])).toEqual([
+      ['m-m-img', 'image'],
+      ['f-m-docx-1', 'pdf'],
+    ]);
+  });
 });

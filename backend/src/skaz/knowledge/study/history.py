@@ -147,6 +147,8 @@ def _head(asked: Asked) -> dict[str, Any]:
         head["type"] = item.type
     head.update({"question": item.question, "in": asked.title, "page_id": asked.page_id,
                  "where": asked.where})
+    if item.basis == "agent":
+        head["basis"] = "agent"
     if asked.archived:
         head["archived"] = True
     return head

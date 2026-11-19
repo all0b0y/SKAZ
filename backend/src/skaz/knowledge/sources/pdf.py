@@ -556,9 +556,9 @@ def _filtered(
     return result
 
 
-def _variant_text(
+def _variant_writer(
     reader: PdfReader, page_number: int, analysis: _PageAnalysis, keep_hidden: bool
-) -> PageText:
+) -> tuple[PdfWriter, Any]:
     writer = PdfWriter()
     page = writer.add_page(reader.pages[page_number])
     for key, report in analysis.streams.items():
@@ -583,7 +583,49 @@ def _variant_text(
             stream = ContentStream(target, writer, "bytes")
             stream.operations = _filtered(stream.operations, report.hidden, keep_hidden)
             target.set_data(stream.get_data())
+    return writer, page
+
+
+def _variant_text(
+    reader: PdfReader, page_number: int, analysis: _PageAnalysis, keep_hidden: bool
+) -> PageText:
+    _writer, page = _variant_writer(reader, page_number, analysis, keep_hidden)
     return page_text(page)
+
+
+def single_page_pdf(reader: PdfReader, page_number: int) -> bytes:
+    """One 1-based page as standalone PDF bytes, with non-OCR hidden text stripped before rendering."""
+    index = page_number - 1
+    if index < 0 or index >= len(reader.pages):
+        raise PdfRejected(f"Page {page_number} is out of range (1–{len(reader.pages)}).")
+    try:
+        page = reader.pages[index]
+        box = page.cropbox
+        analyzer = _Analyzer(
+            reader, (float(box.left), float(box.bottom), float(box.right), float(box.top))
+        )
+        contents = page.get_contents()
+        resources = page.get("/Resources")
+        resources = resources.get_object() if resources is not None else None
+        if contents is not None:
+            analyzer.run(contents, resources, _GState())
+        analysis = analyzer.result
+        ocr_layer = (
+            analysis.show_count > 0
+            and analysis.hidden_count == analysis.show_count
+            and analysis.image_coverage >= OCR_IMAGE_COVERAGE
+            and set(analysis.reasons()) == {"invisible render mode (Tr 3)"}
+        )
+        if analysis.hidden_count and not ocr_layer:
+            writer, _page = _variant_writer(reader, index, analysis, keep_hidden=False)
+        else:
+            writer = PdfWriter()
+            writer.add_page(page)
+        buffer = BytesIO()
+        writer.write(buffer)
+        return buffer.getvalue()
+    except (PyPdfError, KeyError, ValueError, TypeError, AttributeError, RecursionError) as error:
+        raise PdfRejected(f"SKAZ can't read page {page_number} of this PDF.") from error
 
 
 @dataclass(frozen=True)

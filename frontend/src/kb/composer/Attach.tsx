@@ -1,16 +1,15 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { SPEECH_EXTENSIONS, type MaterialFileChoice } from '../../api/bridge';
+import { useEffect, useId, useRef, useState } from 'react';
+import { SPEECH_EXTENSIONS } from '../../api/bridge';
 import type { KbRef } from '../../api/kb/types.gen';
 import type { MaterialKind } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import { Button, Icon, IconButton, Menu } from '../ui';
 import { Popover } from '../ui/Popover';
-import { StippleRing } from '../fx/stipple/StippleWork';
 import { useLibrary, useServices } from '../state/context';
 
 /**
  * "+" in the message field (v3, decision 15): a file, a link, pasted text or one of my materials.
- * Everything new is saved to Materials right away (Inbox when no folder is chosen — decision 16)
+ * New attachments are saved to Materials (Inbox when no folder is chosen — decision 16)
  * through the existing material routes, held out of the wiki (``to_wiki: false``); "In wiki" starts
  * from Settings → Wiki (decision 15) and stays the user's to switch until the message is sent, when a
  * ticked one is added (an import once it is processed).
@@ -19,7 +18,7 @@ export interface Attachment {
   key: string;
   name: string;
   source: 'file' | 'link' | 'text' | 'existing';
-  state: 'adding' | 'ready' | 'failed';
+  state: 'adding' | 'confirming' | 'ready' | 'failed';
   materialId: string | null;
   error: string | null;
   inWiki: boolean;
@@ -62,27 +61,24 @@ export const attachmentKey = () => `att-${++seq}`;
 
 type Mode = null | 'link' | 'text' | 'materials';
 
-export function AttachButton({ onAdd, disabled }: {
-  onAdd: (items: Array<{ source: Attachment['source']; name: string; value: string; materialId?: string }>) => void;
+export function AttachButton({ onAdd, onChooseFiles, disabled }: {
+  onAdd: (items: Array<{ source: Exclude<Attachment['source'], 'file'>; name: string; value: string; materialId?: string }>) => void;
+  onChooseFiles?: () => void;
   disabled: boolean;
 }) {
-  const { bridge } = useServices();
   const anchor = useRef<HTMLButtonElement | null>(null);
   const [menu, setMenu] = useState(false);
   const [mode, setMode] = useState<Mode>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const chooseFiles = async () => {
-    const files: MaterialFileChoice[] = (await bridge.chooseMaterialFiles?.()) ?? [];
-    if (files.length) onAdd(files.map((f) => ({ source: 'file' as const, name: f.name, value: f.path })));
-  };
+  const fileAvailable = !!onChooseFiles;
 
   return (
     <>
       <IconButton ref={anchor} icon="plus" label="Add a file, link or text" aria-haspopup="menu" aria-expanded={menu || mode !== null}
         disabled={disabled} onClick={() => { setError(null); setMenu((v) => !v); }} tooltipPlacement="top-start" />
       <Menu open={menu} onClose={() => setMenu(false)} anchorRef={anchor} label="Add to the question" placement="top-start" items={[
-        { id: 'file', label: 'File…', icon: 'upload', disabled: !bridge.chooseMaterialFiles, note: bridge.chooseMaterialFiles ? undefined : 'not available here', onSelect: () => void chooseFiles() },
+        { id: 'file', label: 'File…', icon: 'upload', disabled: !fileAvailable, note: fileAvailable ? undefined : 'not available here', onSelect: () => onChooseFiles?.() },
         { id: 'link', label: 'Link…', icon: 'link', onSelect: () => setMode('link') },
         { id: 'text', label: 'Paste text…', icon: 'text', onSelect: () => setMode('text') },
         { id: 'materials', label: 'From my materials…', icon: 'materials', onSelect: () => setMode('materials') },
@@ -181,40 +177,6 @@ function MaterialPicker({ onDone }: { onDone: (ref: KbRef) => void }) {
         ))}
       </ul>
     </div>
-  );
-}
-
-export function AttachmentChips({ items, onToggleWiki, onRemove, renderName }: {
-  items: Attachment[];
-  /** Replaces the plain name (the pasted-text card's preview button); null keeps the default. */
-  renderName?: (a: Attachment) => ReactNode;
-  onToggleWiki: (key: string) => void;
-  onRemove: (key: string) => void;
-}) {
-  if (!items.length) return null;
-  return (
-    <ul className="kb-attachments" aria-label="Attachments">
-      {items.map((a) => {
-        return (
-          <li key={a.key} className={`kb-attachment is-${a.state}`}>
-            <Icon name={a.source === 'link' ? 'link' : a.source === 'text' ? 'text' : 'pdf'} size={13} />
-            {renderName?.(a) ?? <span className="kb-attachment__name" title={a.name}>{a.name}</span>}
-            {a.state === 'adding' && <span role="status" aria-label="Saving to Materials"><StippleRing className="kb-spinner kb-spinner--inline" /></span>}
-            {a.state === 'failed' && <span className="kb-attachment__err" role="alert" title={a.error ?? ''}><Icon name="error" size={13} />{a.error}</span>}
-            {a.alreadyInLibrary && <span className="kb-attachment__wiki" title="Nothing new was added; this is the material already in your library">Already in your library</span>}
-            {a.source !== 'existing' && !a.alreadyInLibrary && a.state !== 'failed' && (
-              <label className="kb-attachment__wiki">
-                <input type="checkbox" checked={a.inWiki} onChange={() => onToggleWiki(a.key)} />
-                In wiki
-              </label>
-            )}
-            <button type="button" className="kb-attachment__x" aria-label={`Remove ${a.name}`} onClick={() => onRemove(a.key)}>
-              <Icon name="close" size={12} />
-            </button>
-          </li>
-        );
-      })}
-    </ul>
   );
 }
 

@@ -20,6 +20,7 @@ import type { KbStudyPart } from '../study/api';
 import type { KbWebSearchPart } from '../api/webSearch';
 import { WebSearchCard } from './webSearch';
 import { KnowledgeNotice, usesGeneralKnowledge } from './KnowledgeNotice';
+import { TextOnlyDisclosure } from '../composer/visualFallback041/TextOnlyDisclosure';
 import { NotFromSources } from '../searchRules/NotFromSources';
 import { splitWindow, TimeWindowChip } from '../searchRules/TimeWindow';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
@@ -71,7 +72,7 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
     pendingSpace = null;
   };
   for (const part of parts) {
-    if (part.type === 'tool' || part.type === 'knowledge') continue;
+    if (part.type === 'tool' || part.type === 'knowledge' || part.type === 'text_only') continue;
     if (isMemoryPart(part)) {
       // N6 decision 7: an agent's edit of «Я» is its own compact line with Undo.
       flushSpace();
@@ -208,6 +209,7 @@ export interface AnswerActions {
   onRegenerate: () => void;
   onResume: () => void;
   onSave: () => void;
+  onCancelSave?: () => void;
   busy: string | null;
   /** Why Regenerate/Resume didn't start, shown by the buttons; `fix` is the way to fix the agent. */
   error?: string | null;
@@ -221,7 +223,8 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const [copyPlay, replayCopy] = useIconPlay();
   const [regenPlay, replayRegen] = useIconPlay();
   const open = useOpenDocument();
-  const empty = message.parts.filter((p) => p.type !== 'tool' && p.type !== 'knowledge').length === 0;
+  const empty = message.parts.filter((p) => p.type !== 'tool' && p.type !== 'knowledge' && p.type !== 'text_only').length === 0;
+  const textOnly = message.parts.some((p) => p.type === 'text_only');
   // U1: an answer that waits for its agent's update says so instead of «Writing an answer…».
   const waitingFor = useAgentUpdates((s) => (empty && message.state === 'streaming' ? updateWait(s.view, message.engine, message.id) : null));
   const interrupted = message.state === 'interrupted' || message.state === 'failed';
@@ -236,6 +239,7 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
       {/* Stage 6 B3: the agent's work (thinking line, live timer, a chip per tool call) folds into
           `N tool calls · M failed` after the answer. */}
       <ThoughtLine message={message} head={empty && message.state === 'streaming' ? waitingFor ?? 'Writing an answer…' : null} />
+      {textOnly && <TextOnlyDisclosure visible />}
       {usesGeneralKnowledge(message.parts) && <KnowledgeNotice />}
       <div className="kb-msg__body" {...quoteAttrs({ source: 'chat', id: chatId, message_id: message.id })}>
         <SourcesProvider index={sources}>
@@ -273,13 +277,18 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
               setCopied(ok);
               if (ok) replayCopy();
             }} />
-          <IconButton icon="retry" iconPlay={regenPlay} label="Regenerate" size="sm" disabled={actions.busy === 'regenerate'}
+          <IconButton icon="retry" iconPlay={regenPlay} label="Regenerate" size="sm" disabled={!!actions.busy}
             onClick={() => { replayRegen(); actions.onRegenerate(); }} />
           {message.saved_page_id ? (
             <IconButton icon="check" label="Saved to wiki — open" size="sm"
               onClick={() => open({ type: 'page', id: message.saved_page_id! })} />
+          ) : actions.busy === 'save' ? (
+            <>
+              <Button size="sm" variant="quiet" busy disabled>Shaping for wiki…</Button>
+              <IconButton icon="stop" size="sm" label="Cancel wiki shaping" onClick={actions.onCancelSave} />
+            </>
           ) : (
-            <IconButton icon="saveWiki" label="Save to wiki" size="sm" disabled={actions.busy === 'save' || message.state !== 'done'} onClick={actions.onSave} />
+            <IconButton icon="saveWiki" label="Save to wiki" size="sm" disabled={!!actions.busy || message.state !== 'done'} onClick={actions.onSave} />
           )}
         </div>
       )}

@@ -8,10 +8,11 @@ import { Banner, Button, EmptyState, Icon, IconButton, Menu, Modal, Spinner } fr
 import { useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
 import {
-  FolderTag, PAGE_KIND_ICON, PAGE_KIND_LABEL, PageChip, PanelFrameButtons, useAskAbout, useFolderTone,
+  FolderTag, PAGE_KIND_ICON, PAGE_KIND_LABEL, PageChip, useAskAbout, useFolderTone,
 } from '../document/parts';
 import { blockMarkdown, inAppTarget, plural, readableBlockText, relativeTime } from '../document/text';
 import { useInterval, useLoad } from '../document/useLoad';
+import { ReaderPanelHeader } from '../document/readerSurface041/ReaderPanelHeader';
 import { useScrollTarget } from '../document/useScrollTarget';
 import {
   canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, isNavigation, isSkazConnection, namesItsKind,
@@ -25,6 +26,7 @@ import { DeletePageDialog, RenamePageDialog, type PageDialog } from './PageDialo
 import { DiagramPreviews } from '../ui/markdown/Diagram';
 import { WikiTermsButton } from './WikiTermsButton';
 import { ClaimLabel } from './ClaimLabel';
+import { documentTitleMark, HeadingMark, headingLineClass } from '../document/headingAccents041/headingAccents';
 import { useMotionLevel } from '../ui/motionLevel';
 import { usePixelSwap } from '../fx/pixel/usePixelSwap';
 import { PixelCover } from '../fx/pixel/PixelCover';
@@ -289,6 +291,9 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
                 <button type="button" className="kb-psec__toggle" aria-expanded={open} onClick={() => toggle(section.key)}>
                   <Icon name="chevronDown" size={13} className={`kb-psec__chev${open ? '' : ' is-closed'}`} />
                   {section.kind && namesItsKind(section) && <Icon name={CLAIM_ICON[section.kind]} size={13} className="kb-psec__kind" />}
+                  {/* G1: one star before each main section — decorative ink beside the chevron,
+                      never part of the toggle's name, the collapse state or a selection. */}
+                  <HeadingMark kind="star" />
                   <span className="kb-psec__title">{title}</span>
                 </button>
                 {section.kind && !namesItsKind(section) && <ClaimLabel kind={section.kind} />}
@@ -343,6 +348,16 @@ function pageContent(page: KbPage): string {
 }
 
 /** Wiki page in the right panel (v7–v8, decisions 20–22). */
+/** A Notes page can link directly to its transcript when it has one available timed source. */
+function notesTranscriptId(page: KbPage | null): string | undefined {
+  if (page?.kind !== 'note' || page.sources.length !== 1) return undefined;
+  const id = page.sources[0];
+  const hasTranscript = page.blocks.some((block) => block.citations.some(
+    (citation) => citation.material_id === id && citation.available && citation.start_ms !== null,
+  ));
+  return hasTranscript ? id : undefined;
+}
+
 const FINDER_FAILED = 'Finder couldn’t show this page. It may have been moved or deleted.';
 
 export function PageView({ target, nonce }: { target: DocTarget; nonce: number }) {
@@ -351,6 +366,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   const make = useMakeStudy();
   const expanded = useUi((s) => s.docExpanded);
   const openGraph = useUi((s) => s.openGraph);
+  const openDocument = useUi((s) => s.openDocument);
   const tone = useFolderTone();
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const moreRef = useRef<HTMLButtonElement | null>(null);
@@ -434,49 +450,52 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   };
 
   const kind = shown?.kind ?? 'concept';
+  const transcriptId = notesTranscriptId(shown);
   return (
     <>
-      <header className="kb-head kb-head--doc">
-        <span className="kb-doc__type">
-          <Icon name={PAGE_KIND_ICON[kind]} size={14} />
-          <span>{shown ? PAGE_KIND_LABEL[kind] : 'Wiki page'}</span>
-        </span>
-        <span className="kb-head__spacer" />
-        <PanelFrameButtons
-          more={(
-            <>
-              <IconButton ref={moreRef} icon="more" label="Page actions" aria-haspopup="menu" aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((v) => !v)} />
-              <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Page actions" items={[
-                { id: 'graph', label: 'Show the graph', icon: 'graph', onSelect: () => openGraph(page?.id) },
-                ...(page && page.kind !== 'deck' && page.kind !== 'test' ? [
-                  { id: 'cards', label: 'Make cards from this', icon: 'deck' as const, onSelect: () => make('cards', [{ type: 'page', id: page.id, title: page.title }]) },
-                  { id: 'test', label: 'Make a test from this', icon: 'test' as const, onSelect: () => make('test', [{ type: 'page', id: page.id, title: page.title }]) },
-                ] : []),
-                { id: 'reload', label: 'Read the page again', icon: 'retry', onSelect: () => reload() },
-                ...(obsidian.open && page ? [{ id: 'obsidian', label: 'Open in Obsidian', icon: 'external' as const, onSelect: () => void obsidian.open!({ kind: 'page', id: page.id }) }] : []),
-                ...(bridge.showInFinder && page ? [{ id: 'finder', label: 'Show in Finder', icon: 'folder' as const, onSelect: () => {
-                  setFinderError(null);
-                  void bridge.showInFinder!({ kind: 'page', id: page.id }).then(
-                    (ok) => { if (!ok) setFinderError(FINDER_FAILED); }, () => setFinderError(FINDER_FAILED));
-                } }] : []),
-                ...(page ? [
-                  { id: 'rename', label: 'Rename', icon: 'pencil' as const, onSelect: () => setDialog('rename') },
-                  { id: 'delete', label: 'Delete page…', icon: 'trash' as const, danger: true, onSelect: () => setDialog('delete') },
-                ] : []),
-              ]} />
-            </>
-          )}
-        >
-          <WikiTermsButton />
-          <IconButton icon="chats" label="Ask about page" disabled={!page}
-            onClick={() => page && askAbout({ type: 'page', id: page.id, title: page.title })} />
-          {page?.kind !== 'deck' && page?.kind !== 'test' && (
-            <IconButton icon="newChat" label="My note" disabled={!page} aria-pressed={noteOpen}
-              onClick={() => setNoteOpen(true)} />
-          )}
-        </PanelFrameButtons>
-      </header>
+      <ReaderPanelHeader
+        typeLabel={shown ? PAGE_KIND_LABEL[kind] : 'Wiki page'}
+        typeIcon={PAGE_KIND_ICON[kind]}
+        actions={(
+          <>
+            {transcriptId && (
+              <Button size="sm" variant="quiet"
+                onClick={() => openDocument({ type: 'material', id: transcriptId })}>Transcript</Button>
+            )}
+            <WikiTermsButton />
+            <IconButton icon="chats" label="Ask about page" disabled={!page}
+              onClick={() => page && askAbout({ type: 'page', id: page.id, title: page.title })} />
+            {page?.kind !== 'deck' && page?.kind !== 'test' && (
+              <IconButton icon="newChat" label="My note" disabled={!page} aria-pressed={noteOpen}
+                onClick={() => setNoteOpen(true)} />
+            )}
+          </>
+        )}
+        more={(
+          <>
+            <IconButton ref={moreRef} icon="more" label="Page actions" aria-haspopup="menu" aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)} />
+            <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Page actions" className="kb-reader-menu" items={[
+              { id: 'graph', label: 'Show the graph', icon: 'graph', onSelect: () => openGraph(page?.id) },
+              ...(page && page.kind !== 'deck' && page.kind !== 'test' ? [
+                { id: 'cards', label: 'Make cards from this', icon: 'deck' as const, onSelect: () => make('cards', [{ type: 'page', id: page.id, title: page.title }]) },
+                { id: 'test', label: 'Make a test from this', icon: 'test' as const, onSelect: () => make('test', [{ type: 'page', id: page.id, title: page.title }]) },
+              ] : []),
+              { id: 'reload', label: 'Read the page again', icon: 'retry', onSelect: () => reload() },
+              ...(obsidian.open && page ? [{ id: 'obsidian', label: 'Open in Obsidian', icon: 'external' as const, onSelect: () => void obsidian.open!({ kind: 'page', id: page.id }) }] : []),
+              ...(bridge.showInFinder && page ? [{ id: 'finder', label: 'Show in Finder', icon: 'folder' as const, onSelect: () => {
+                setFinderError(null);
+                void bridge.showInFinder!({ kind: 'page', id: page.id }).then(
+                  (ok) => { if (!ok) setFinderError(FINDER_FAILED); }, () => setFinderError(FINDER_FAILED));
+              } }] : []),
+              ...(page ? [
+                { id: 'rename', label: 'Rename', icon: 'pencil' as const, onSelect: () => setDialog('rename') },
+                { id: 'delete', label: 'Delete page…', icon: 'trash' as const, danger: true, onSelect: () => setDialog('delete') },
+              ] : []),
+            ]} />
+          </>
+        )}
+      />
       <div className="kb-pxstage" data-px={swap.phase === 'idle' ? undefined : swap.phase}>
       <div className="kb-doc__body" ref={bodyRef}>
         {state.load === 'loading' && !page && <div className="kb-doc__wait"><Spinner label="Opening the page" /></div>}
@@ -490,7 +509,12 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
         {finderError && <p className="kb-page__notice" role="alert">{finderError}</p>}
         {shown && (
           <article className={`kb-doc__article kb-page${expanded ? ' is-wide' : ''}`} data-page-kind={shown.kind}>
-            <h2 className="kb-doc__title">{shown.title}</h2>
+            {/* G1: the open document's decorative mark — `@` for a wiki page, a star for Notes —
+                ink, never text: the accessible name, copies and exports keep the title's words. */}
+            <h2 className={`kb-doc__title ${headingLineClass}`}>
+              <HeadingMark kind={documentTitleMark(shown.kind)} size="title" />
+              <span>{shown.title}</span>
+            </h2>
             <div className="kb-page__meta">
               {shown.folder_names.map((name, i) => <FolderTag key={name} name={name} tone={tone(shown.folders[i])} />)}
               <span className="kb-doc__meta">

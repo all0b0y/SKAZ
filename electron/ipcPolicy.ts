@@ -61,6 +61,7 @@ const ROUTES: readonly Route[] = [
   // confined by the backend like every other material file.
   { method: 'GET', pattern: /^\/kb\/chats$/ },
   { method: 'POST', pattern: /^\/kb\/chats$/ },
+  { method: 'POST', pattern: /^\/kb\/chats\/visual-preflight$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/events$/ },
   { method: 'PUT', pattern: /^\/kb\/chats\/last-choice$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+$/ },
@@ -349,9 +350,12 @@ export function validateBridgeRequest(req: BridgeRequestShape): string | null {
     }
     // Pasted materials have no product length cap. Chat accepts 100,000 characters;
     // JSON may escape each of them to six characters. Keep other routes bounded.
+    const chatInput = req.method === 'POST' && (
+      req.path === '/kb/chats/visual-preflight' || /^\/kb\/chats\/[^/]+\/messages$/.test(req.path)
+    );
     const maxChars = req.method === 'POST' && req.path === '/kb/materials/text'
       ? Infinity
-      : req.method === 'POST' && /^\/kb\/chats\/[^/]+\/messages$/.test(req.path)
+      : chatInput
         ? 1_000_000
         : MAX_JSON_BODY_CHARS;
     if (serialized.length > maxChars) {

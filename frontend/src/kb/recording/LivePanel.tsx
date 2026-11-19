@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KbMaterial } from '../../api/kb/types.gen';
 import { Button, Icon, Spinner } from '../ui';
 import { formatTime } from '../library/materialMeta';
-import { PanelFrameButtons } from '../document/parts';
+import { ReaderPanelHeader } from '../document/readerSurface041/ReaderPanelHeader';
 import { useLoad } from '../document/useLoad';
 import { useLibrary, useRecording, useServices } from '../state/context';
 import { languageName } from '../material/MaterialView';
@@ -91,11 +91,8 @@ export function LivePanel({ materialId }: { materialId: string }) {
 
   return (
     <>
-      <header className="kb-head kb-head--doc">
-        {status ?? <span className="kb-live__status">Recording</span>}
-        <span className="kb-head__spacer" />
-        <PanelFrameButtons closeLabel="Close live transcript" />
-      </header>
+      <ReaderPanelHeader typeLabel="Recording" typeStatus={status ?? <span className="kb-live__status">Recording</span>}
+        closeLabel="Close live transcript" />
       <div className="kb-doc__body kb-live" ref={bodyRef} onScroll={onScroll} aria-live="off">
         {!material && state.load !== 'error' && <div className="kb-doc__wait"><Spinner label="Opening the recording" /></div>}
         {material && (

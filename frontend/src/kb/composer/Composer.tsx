@@ -1,22 +1,23 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { useMentionDrop } from './MentionDrop';
-import type { KbMessageInput, KbQuote } from '../../api/kb/types.gen';
+import type { KbMessageInput, KbOpenContext, KbQuote, KbRef, KbVisualPreflightResponse } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Icon, IconButton, useIconPlay } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { agentOf, answeringModel, startingChoice } from '../state/agents';
-import { isAnswering, isLocal, type AgentChoice } from '../state/chats';
+import { isAnswering, isLocal, type AgentChoice, type ChatsData } from '../state/chats';
 import { partsOf } from '../api/permissions';
 import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
 import { AgentPicker, EffortPicker } from './AgentPicker';
 import { ChatSearchButton } from '../searchRules/ChatSearchPanel';
-import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile, type Attachment } from './Attach';
+import { addMaterial, attachmentKey, AttachButton, isSpeechFile, type Attachment } from './Attach';
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
-import { clearEditor, fillEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
+import { clearEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
 import { MentionPopup, useMentions, type MentionOption } from './MentionPopup';
 import { isLongPaste, PastedCard, pastedName } from './PastedText';
 import { QuickQuestions } from './QuickQuestions';
 import { openTarget } from '../state/document';
+import { extensionOf } from '../materials/addItems';
 import { ingestWhenReady } from '../materials/ingestWhenReady';
 import { AgentFix } from '../chat/AgentFix';
 import { useOpenStudy } from '../study/useStudy';
@@ -24,29 +25,92 @@ import { StudyContextChip } from '../study/StudyBlock';
 import { useSelection, useSelectionStore } from '../chat/select/context';
 import { QUICK_TEXT, type QuickAsk } from '../chat/select/SelectionBar';
 import { SelectionPanel } from '../chat/select/WhereFrom';
+import { AttachmentDraftStrip } from './attachmentDrafts041/AttachmentDraftStrip';
+import { attachmentSendBlocker, NEW_CHAT_DRAFT, useAttachmentDraft, type DraftAttachment, type DraftFile } from './attachmentDrafts041/draft';
+import { prepareDraftSelection, prepareSpeechFile } from './attachmentDrafts041/nativeIntake';
+import { VisualFallbackCard } from './visualFallback041/VisualFallbackCard';
+import {
+  clearDraftFallback,
+  createFallbackSeam,
+  getDraftFallback,
+  resolveComposerSubmitGate,
+  setDraftFallback,
+  type DraftFallbackMap,
+} from './visualFallback041/state';
+import type {
+  UnsupportedVisualReason,
+  VisualCapabilityDecision,
+  VisualFallbackSeam,
+  VisualSourceKind,
+  VisualSourceLocator,
+} from './visualFallback041/types';
 
-const NEW_CHAT = 'new';
+function seamFromPreflight(res: KbVisualPreflightResponse): { seam: VisualFallbackSeam; locator: VisualSourceLocator } {
+  const decision: VisualCapabilityDecision = {
+    engine: res.engine,
+    modelId: res.model_id,
+    state: res.state,
+    supported: res.supported,
+    transportSupportsImage: res.reason_code !== 'adapter_no_image_transport',
+    modelSupportsImage: res.supported ? true : res.reason_code === 'model_no_image_input' ? false : null,
+    reasonCode: (res.reason_code as UnsupportedVisualReason | null) ?? undefined,
+    reason: res.detail,
+  };
+  const locator: VisualSourceLocator = {
+    materialId: res.locator?.material_id ?? 'attachment',
+    sourceKind: (res.locator?.source_kind as VisualSourceKind | undefined) ?? 'image',
+    page: res.locator?.page ?? null,
+    timestampMs: res.locator?.timestamp_ms ?? null,
+    label: res.locator?.label ?? 'Attachment',
+  };
+  const seam = createFallbackSeam({
+    decision,
+    locator,
+    textOnlyAvailable: res.text_only_available,
+    compatibleModels: res.compatible_models.map((m) => ({
+      engine: m.engine,
+      modelId: m.model_id,
+      label: m.label,
+      provider: m.provider,
+    })),
+    reasonCode: (res.reason_code as UnsupportedVisualReason | null) ?? undefined,
+    customDetail: res.detail,
+  });
+  return { seam, locator };
+}
 
 type Dictation = { phase: 'idle' } | { phase: 'recording'; started: number } | { phase: 'transcribing' };
 
+function chosenAgent(chat: AgentChoice | null, draft: AgentChoice | null, agents: Parameters<typeof startingChoice>[0] | null) {
+  if (chat) return { engine: chat.engine, model: chat.model, effort: chat.effort };
+  return draft ?? (agents ? startingChoice(agents, agents.default) : null);
+}
+
+const chatChoice = (state: ChatsData, chatId: string | null) =>
+  chatId ? state.list.find((c) => c.id === chatId) ?? state.chats[chatId]?.chat ?? null : null;
+
+function sameChoice(left: AgentChoice | null, right: AgentChoice | null): boolean {
+  return left?.engine === right?.engine && left?.model === right?.model && left?.effort === right?.effort;
+}
+
 /** What the composer offers for a chat: its own agent, or the draft/default one for a new chat. */
 export function useAgentChoice(chatId: string | null): AgentChoice | null {
-  const chat = useChats((s) => (chatId ? s.list.find((c) => c.id === chatId) ?? s.chats[chatId]?.chat ?? null : null));
+  const chat = useChats((s) => chatChoice(s, chatId));
   const draft = useChats((s) => s.draftAgent);
   const agents = useAgents((s) => s.agents);
-  return useMemo(() => {
-    if (chat) return { engine: chat.engine, model: chat.model, effort: chat.effort };
-    if (draft) return draft;
-    if (!agents) return null;
-    return startingChoice(agents, agents.default);
-  }, [chat, draft, agents]);
+  return useMemo(() => chosenAgent(chat, draft, agents), [chat, draft, agents]);
 }
 
 /**
  * Message field (v3/v4/v21/v39): text with @-mention and quote tokens, "+" attachments, agent +
  * model + effort, dictation, send/stop. Height grows like text up to five lines, then scrolls.
  */
-export function Composer({ chatId, placeholder }: { chatId: string | null; placeholder: string }) {
+export function Composer({ chatId, placeholder, active: paneActive = true, handleImagePaste }: {
+  chatId: string | null;
+  placeholder: string;
+  active?: boolean;
+  handleImagePaste?: (event: ClipboardEvent<HTMLDivElement>) => boolean;
+}) {
   const services = useServices();
   const { bridge, client, chats } = services;
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -54,19 +118,36 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const [empty, setEmpty] = useState(true);
   const [mention, setMention] = useState<MentionMatch | null>(null);
   const [active, setActive] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
   const [sendPlay, replaySend] = useIconPlay();
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dictation, setDictation] = useState<Dictation>({ phase: 'idle' });
   const [hover, setHover] = useState<{ text: string; left: number; top: number } | null>(null);
+  const [fallbacksByDraft, setFallbacksByDraft] = useState<DraftFallbackMap>({});
+  const [pickerOpenSeq, setPickerOpenSeq] = useState(0);
+  const chooseModelRef = useRef<HTMLButtonElement | null>(null);
+  const [draftSnapshot, setDraftSnapshot] = useState<{ text: string; mentions: KbRef[]; quotes: KbQuote[] }>({
+    text: '',
+    mentions: [],
+    quotes: [],
+  });
   const captureRef = useRef<Capture | null>(null);
-  const drafts = services.composer.getState().drafts;
+  const { drafts, attachmentDrafts } = services.composer.getState();
+  const draftState = attachmentDrafts.getState;
+  const key = chatId ?? NEW_CHAT_DRAFT;
+  const { attachments, sending, error } = useAttachmentDraft(attachmentDrafts, key);
   const draftKey = useRef<string | null>(null);
-  /** The chat a message is being sent from (its field must not be put aside as a draft). */
-  const sendingFrom = useRef<string | null>(null);
-  const attachmentsRef = useRef<Attachment[]>([]);
-  attachmentsRef.current = attachments;
+  const choosingFiles = useRef(new Set<string>());
+  const changingAgent = useRef(new Set<string>());
+  const activation = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    activation.current = paneActive ? {} : null;
+    return () => { activation.current = null; };
+  }, [key, paneActive]);
+  const canChangeDraft = () => paneActive && draftKey.current === key
+    && (chats.getState().currentId ?? NEW_CHAT_DRAFT) === key
+    && !draftState().getDraft(key).sending;
+  const setError = (message: string | null) => draftState().setError(key, message);
+  const setAttachments = (change: (items: readonly DraftAttachment[]) => readonly DraftAttachment[]) =>
+    draftState().update(key, change);
   /** The card of the paste just made: ⌘Z right after it puts the text into the field instead. */
   const lastPaste = useRef<string | null>(null);
 
@@ -106,6 +187,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     const root = editorRef.current;
     if (!root) return;
     setEmpty(isEmpty(root));
+    const serialized = serialize(root);
+    setDraftSnapshot({ text: serialized.text, mentions: serialized.mentions, quotes: serialized.quotes });
     const m = mentionAtCaret(root);
     setMention(m);
     if (!m) setActive(0);
@@ -115,39 +198,25 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     if (focusTick) editorRef.current?.focus({ preventScroll: true });
   }, [focusTick]);
 
-  useEffect(() => {
-    // Each chat keeps its own unsent draft (QA D3/A22): leaving a chat puts its field aside, coming
-    // back gives it back; another chat starts with its own draft or an empty field. A message that is
-    // being sent moves with the chat it creates.
+  useLayoutEffect(() => {
     const root = editorRef.current;
-    const key = chatId ?? NEW_CHAT;
-    const previous = draftKey.current;
+    if (!root) return;
     draftKey.current = key;
     lastPaste.current = null;
-    setError(null);
-    if (!root || previous === key) { refresh(); return; }
-    if (previous !== null && previous === sendingFrom.current) {
-      sendingFrom.current = key;
-      refresh();
-      return;
-    }
-    if (previous !== null) {
-      if (!isEmpty(root) || attachmentsRef.current.length) {
-        drafts.set(previous, { nodes: Array.from(root.childNodes), attachments: attachmentsRef.current });
-      } else drafts.delete(previous);
-    }
-    clearEditor(root);
-    const draft = drafts.get(key);
+    root.replaceChildren(...(drafts.get(key) ?? []));
     drafts.delete(key);
-    if (draft) root.replaceChildren(...draft.nodes);
-    setAttachments(draft ? (draft.attachments as Attachment[]) : []);
     refresh();
-  }, [chatId, refresh, drafts]);
+    return () => {
+      if (!isEmpty(root)) drafts.set(key, Array.from(root.childNodes));
+      clearEditor(root);
+      draftKey.current = null;
+    };
+  }, [key, refresh, drafts]);
 
   // Items handed over from elsewhere (selection toolbar, decisions). After the chat switch above, so
   // a hand-off that opens another chat lands in that chat's field (QA D2).
   useEffect(() => {
-    if (!queued) return;
+    if (!queued || !paneActive) return;
     const root = editorRef.current;
     if (!root) return;
     const items = services.composer.getState().take();
@@ -159,23 +228,23 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     }
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queued]);
+  }, [queued, key, paneActive]);
 
 
   // A material deleted while it is referenced here (QA B8): its token is marked and its
   // attachment says so; neither can be sent.
   useEffect(() => {
     if (editorRef.current) markGone(editorRef.current, gone);
-    setAttachments((list) => (list.some((a) => a.materialId && gone.has(a.materialId) && a.state !== 'failed')
+    draftState().update(key, (list) => (list.some((a) => a.materialId && gone.has(a.materialId) && a.state !== 'failed')
       ? list.map((a) => (a.materialId && gone.has(a.materialId) ? { ...a, state: 'failed', error: 'This material was deleted.' } : a))
       : list));
-  }, [gone, chatId]);
+  }, [gone, key, draftState]);
 
   useEffect(() => () => captureRef.current?.cancel(), []);
 
   const pickMention = (option: MentionOption) => {
     const root = editorRef.current;
-    if (!root) return;
+    if (!root || !canChangeDraft()) return;
     insertToken(root, { kind: 'mention', ref: option.ref }, mention);
     setMention(null);
     setActive(0);
@@ -185,13 +254,15 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
 
   const inboxId = folders.find((f) => f.system)?.id ?? null;
   // QA B7: a material made from an attachment is in Inbox at once — the Materials panel shows it.
+  const materialSaved = () => { void services.library.getState().loadContent(); };
   const saveMaterial = (source: 'file' | 'link' | 'text', value: string, folderId: string) =>
     addMaterial(client, source, value, folderId).then((added) => {
-      void services.library.getState().loadContent();
+      materialSaved();
       return added;
     });
 
-  const addAttachments = (items: Array<{ source: Attachment['source']; name: string; value: string; materialId?: string }>) => {
+  const addAttachments = (items: Array<{ source: Exclude<Attachment['source'], 'file'>; name: string; value: string; materialId?: string }>) => {
+    if (!canChangeDraft()) return;
     for (const item of items) {
       const key = attachmentKey();
       // Decision 15: the default comes from Settings → Wiki; the user may switch it either way.
@@ -205,8 +276,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'failed', error: 'Connect the library first.' } : a)));
         continue;
       }
-      const source = item.source as 'file' | 'link' | 'text';
-      saveMaterial(source, item.value, inboxId).then(
+      if (item.source === 'existing') continue;
+      saveMaterial(item.source, item.value, inboxId).then(
         (added) => setAttachments((list) => list.map((a) => (a.key === key
           ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready, ...(added.existing ? { alreadyInLibrary: true } : {}) }
           : a))),
@@ -215,26 +286,151 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     }
   };
 
+  const chooseFiles = async (replaceKey?: string) => {
+    if (!canChangeDraft() || choosingFiles.current.has(key)) return;
+    choosingFiles.current.add(key);
+    let files: DraftFile[];
+    try {
+      const native = bridge.nativeIntake;
+      if (native) {
+        const { accepted, rejected } = await native.chooseMaterialFiles();
+        files = [
+          ...accepted.map((selection) => ({
+            name: selection.name,
+            load: () => prepareDraftSelection(native, inboxId, selection, materialSaved),
+          })),
+          ...rejected.map(({ name, reason }) => ({
+            name,
+            load: async () => { throw new Error(reason); },
+          })),
+        ];
+      } else {
+        const chosen = await bridge.chooseMaterialFiles?.() ?? [];
+        files = chosen.map(({ name, path }) => ({
+          name,
+          load: () => prepareSpeechFile(name, extensionOf(path), async () => {
+            if (!inboxId) throw new Error('Connect the library first.');
+            return saveMaterial('file', path, inboxId);
+          }),
+        }));
+      }
+    } catch (e) {
+      setError(errorText(e));
+      return;
+    } finally {
+      choosingFiles.current.delete(key);
+    }
+    await draftState().addFiles(key, files, wiki?.auto_add_files_links ?? true, replaceKey);
+  };
+
   const study = useOpenStudy(chatId);
-  const openContext = () => ({
+  const openContext = useCallback((): KbOpenContext => ({
     ...(doc ? (doc.type === 'page' ? { open_page_id: doc.id } : { open_material_id: doc.id }) : {}),
     ...(study ? { open_study_id: study.id } : {}),
-  });
+  }), [doc, study]);
+
+  const readyAttachmentIds = useMemo(
+    () => attachments.filter((a) => a.state === 'ready' && a.materialId).map((a) => a.materialId!),
+    [attachments],
+  );
+  const readyAttachmentKeys = useMemo(
+    () => attachments.filter((a) => a.state === 'ready' && a.materialId).map((a) => a.key),
+    [attachments],
+  );
+  const openMaterialId = doc?.type === 'material' ? doc.id : null;
+  const hasVisualCandidate = readyAttachmentIds.length > 0
+    || draftSnapshot.mentions.some((m) => m.type === 'material')
+    || openMaterialId !== null;
+  const context = openContext();
+  const latestContext = useRef(openContext);
+  useLayoutEffect(() => { latestContext.current = openContext; }, [openContext]);
+  const admissionKey = (text: string, value: typeof draftSnapshot, ids: readonly string[], keys: readonly string[]) =>
+    JSON.stringify([choice?.engine, choice?.model, text, value.mentions, value.quotes, ids, keys, context]);
+  const displayedKey = admissionKey(draftSnapshot.text, draftSnapshot, readyAttachmentIds, readyAttachmentKeys);
+  const cachedFallback = getDraftFallback(fallbacksByDraft, key);
+  const activeFallback = cachedFallback?.requestKey === displayedKey ? cachedFallback : null;
+
+  useEffect(() => {
+    if (sending) return;
+    if (!paneActive || !hasVisualCandidate || !choice) {
+      setFallbacksByDraft((prev) => clearDraftFallback(prev, key));
+      return;
+    }
+    let cancelled = false;
+    void client.call('POST /kb/chats/visual-preflight', {
+      body: {
+        chat_id: chatId,
+        engine: choice.engine,
+        model: choice.model,
+        text: draftSnapshot.text,
+        mentions: draftSnapshot.mentions,
+        quotes: draftSnapshot.quotes,
+        attachments: readyAttachmentIds,
+        context: openContext(),
+      },
+    }).then((res) => {
+      if (cancelled) return;
+      if (!res.requires_visual || res.supported) {
+        setFallbacksByDraft((prev) => clearDraftFallback(prev, key));
+        return;
+      }
+      const { seam, locator } = seamFromPreflight(res);
+      setFallbacksByDraft((prev) => setDraftFallback(prev, key, {
+        seam,
+        draftText: draftSnapshot.text,
+        attachmentKeys: readyAttachmentKeys,
+        locator,
+        requestKey: displayedKey,
+      }));
+    }).catch(() => {
+      // Send revalidates visual requests on the server.
+    });
+    return () => { cancelled = true; };
+  }, [
+    paneActive,
+    sending,
+    hasVisualCandidate,
+    key,
+    chatId,
+    choice,
+    draftSnapshot,
+    readyAttachmentIds,
+    readyAttachmentKeys,
+    openContext,
+    displayedKey,
+    client,
+  ]);
+
+  const chooseAgent = async (next: AgentChoice) => {
+    if (changingAgent.current.has(key) || sameChoice(choice, next)) return;
+    changingAgent.current.add(key);
+    if (paneActive && draftKey.current === key) activation.current = {};
+    setError(null);
+    try {
+      const result = await chats.getState().setAgent(chatId, next);
+      if (!result.ok) setError(result.error);
+      else services.agents.getState().noteLastChoice(next.engine, next.model, next.effort);
+    } finally {
+      changingAgent.current.delete(key);
+    }
+  };
 
   // Quick questions while recording: the recording goes along as an attached material, so the agent
   // reads its transcribed fragments only — never the words still being recognised.
-  const quickReason = !agentReady ? unavailable : blocked ? 'The agent is still answering' : null;
+  const blocker = attachmentSendBlocker(attachments);
+  const quickReason = blocker ?? (!agentReady ? unavailable : blocked ? 'The agent is still answering' : null);
   const askQuick = async (text: string) => {
-    if (!recId || sending || quickReason) return;
-    setSending(true);
+    const draft = draftState().getDraft(key);
+    if (!recId || !canChangeDraft() || choosingFiles.current.has(key) || attachmentSendBlocker(draft.attachments) || quickReason) return;
+    draftState().setSending(key, true);
     setError(null);
     const result = await chats.getState().send({ text, mentions: [], quotes: [], attachments: [recId] }, openContext());
-    setSending(false);
+    draftState().setSending(key, false);
     if (!result.ok) setError(result.error);
   };
   const prefillQuick = (text: string) => {
     const root = editorRef.current;
-    if (!root || !recId || quickReason) return;
+    if (!root || !recId || !paneActive || sending || quickReason) return;
     if (!attachments.some((a) => a.materialId === recId)) {
       addAttachments([{ source: 'existing', name: recTitle ?? 'Recording', value: recId, materialId: recId }]);
     }
@@ -253,77 +449,181 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   };
 
   /** `quick`: a quick ask of the selection bar (P2) — its words, then what was typed, if anything. */
-  const submit = async (quick?: QuickAsk) => {
+  const submit = async (quick?: QuickAsk, opts?: { textOnly?: boolean }) => {
+    const textOnly = Boolean(opts?.textOnly);
     const root = editorRef.current;
-    if (!root || sending) return;
+    const admittedFrom = activation.current;
+    const initial = draftState().getDraft(key);
+    if (!root || !admittedFrom || !canChangeDraft() || choosingFiles.current.has(key)
+      || changingAgent.current.has(key) || attachmentSendBlocker(initial.attachments)) return;
     const value = serialize(root);
     const text = quick ? (value.text.trim() ? `${QUICK_TEXT[quick]}: ${value.text.trim()}` : QUICK_TEXT[quick]) : value.text;
-    // Long pastes are cards until now: they become pasted-text materials only with the message.
-    const unsaved = attachments.filter((a) => a.text !== undefined && !a.materialId);
-    if (!text.trim() && !value.mentions.length && !value.quotes.length && !unsaved.length
-      && !attachments.some((a) => a.state === 'ready' && a.materialId)) return;
-    if (attachments.some((a) => a.state === 'adding')) { setError('Wait until attachments are saved.'); return; }
-    const deleted = [...markGone(root, gone), ...attachments.filter((a) => a.materialId && gone.has(a.materialId)).map((a) => a.name)];
+    const unsaved = initial.attachments.filter((a) => a.text !== undefined && !a.materialId);
+    const initialReady = initial.attachments.filter((a) => a.state === 'ready' && a.materialId);
+    if (!text.trim() && !value.mentions.length && !value.quotes.length && !unsaved.length && !initialReady.length) return;
+    const deleted = [...markGone(root, gone), ...initial.attachments.filter((a) => a.materialId && gone.has(a.materialId)).map((a) => a.name)];
     if (deleted.length) { setError(`“${deleted[0]}” was deleted. Remove it from the message to send.`); return; }
     if (!agentReady) { setError(unavailable); return; }
     if (blocked) return;
-    setSending(true);
-    setError(null);
-    let list = attachments;
-    if (unsaved.length) {
-      if (!inboxId) { setSending(false); setError('Connect the library first.'); return; }
-      lastPaste.current = null;
-      const keys = new Set(unsaved.map((a) => a.key));
-      setAttachments((now) => now.map((a) => (keys.has(a.key) ? { ...a, state: 'adding', error: null } : a)));
-      const saved = await Promise.all(unsaved.map((a) => saveMaterial('text', a.text!, inboxId).then(
-        (added) => ({ key: a.key, id: added.id as string | null, ready: added.ready, error: null as string | null }),
-        (e: unknown) => ({ key: a.key, id: null, ready: false, error: errorText(e) }),
-      )));
-      const byKey = new Map(saved.map((r) => [r.key, r]));
-      const settle = (a: Attachment): Attachment => {
-        const r = byKey.get(a.key);
-        if (!r) return a;
-        return r.id ? { ...a, state: 'ready', materialId: r.id, materialReady: r.ready, error: null } : { ...a, state: 'failed', error: r.error };
-      };
-      list = list.map(settle);
-      setAttachments((now) => now.map(settle));
-      const failed = saved.find((r) => !r.id);
-      if (failed) { setSending(false); setError(`The pasted text couldn’t be saved: ${failed.error}`); return; }
+    if (unsaved.length && !inboxId) { setError('Connect the library first.'); return; }
+
+    const initialReadyIds = initialReady.map((a) => a.materialId!);
+    const initialReadyKeys = initialReady.map((a) => a.key);
+    const mayNeedVisual = initialReadyIds.length > 0
+      || value.mentions.some((m) => m.type === 'material')
+      || context.open_material_id != null;
+    const requestKey = admissionKey(text, value, initialReadyIds, initialReadyKeys);
+    const fallback = cachedFallback?.requestKey === requestKey ? cachedFallback : null;
+    if (textOnly && (!mayNeedVisual || !fallback?.seam.textOnlyAvailable || resolveComposerSubmitGate({
+      requiresVisual: true, seam: fallback.seam, explicitTextOnlyChoice: true,
+    }).action !== 'send_text_only')) return;
+    if (!textOnly && fallback?.seam.unsupported) {
+      chooseModelRef.current?.focus();
+      return;
     }
-    const ready = list.filter((a) => a.state === 'ready' && a.materialId);
-    const input: KbMessageInput = { text, mentions: value.mentions, quotes: value.quotes, attachments: ready.map((a) => a.materialId!),
-      ...(selection ? { selection: { ...selection, intent: quick ?? 'ask' } } : {}) };
-    sendingFrom.current = draftKey.current;
-    // The arrow moves as the message goes (it is replaced by Stop once the answer starts, so not after the reply).
-    replaySend();
-    // Bug 7: the message shows in the chat at once, so it leaves the field at once; a refusal puts it back.
-    clearEditor(root);
-    const result = await chats.getState().send(input, openContext());
-    sendingFrom.current = null;
-    setSending(false);
-    if (!result.ok) { fillEditor(root, { ...input, text: value.text }); setError(result.error); return; }
-    if (input.selection) clearSelection(); // asked: the next question starts with nothing picked
-    // "In wiki" (decision 15): new materials were held out of the wiki; the ticked ones go in now.
-    for (const a of ready) {
-      if (a.source !== 'existing' && !a.alreadyInLibrary && a.inWiki) {
-        ingestWhenReady(client, a.materialId!, a.materialReady, (text) => {
-          setError(`“${a.name}” is saved to Materials but couldn’t go to the wiki yet: ${text} You can add it from Materials later.`);
-        });
+
+    const editorSnapshot = root.innerHTML;
+    const currentChoice = (state: ChatsData) =>
+      chosenAgent(chatChoice(state, chatId), state.draftAgent, services.agents.getState().agents);
+    const stillSelected = (state: ChatsData) => state.currentId === chatId && !state.allTabsClosed;
+    let leftDraft = !stillSelected(chats.getState());
+    let targetChanged = !sameChoice(choice, currentChoice(chats.getState()));
+    const unsubscribe = chats.subscribe((state) => {
+      leftDraft ||= !stillSelected(state);
+      targetChanged ||= !sameChoice(choice, currentChoice(state));
+    });
+    const targetCurrent = () => !targetChanged && !changingAgent.current.has(key)
+      && sameChoice(choice, currentChoice(chats.getState()));
+    const stillAdmitting = () => !leftDraft && activation.current === admittedFrom
+      && editorRef.current === root && root.innerHTML === editorSnapshot && targetCurrent()
+      && latestContext.current === openContext
+      && (selectionStore?.getState().selection ?? null) === selection;
+    let owner = key;
+    let submittedNodes: Node[] = [];
+    const restore = () => {
+      if (!submittedNodes.length) return;
+      if (draftKey.current === owner && editorRef.current) {
+        editorRef.current.prepend(...submittedNodes);
+        refresh();
+      } else {
+        drafts.set(owner, [...submittedNodes, ...(drafts.get(owner) ?? [])]);
+      }
+    };
+
+    // Lock this draft before preflight or material preparation enters its first await.
+    draftState().setSending(key, true);
+    setError(null);
+    try {
+      if (mayNeedVisual && choice && !textOnly) {
+        const pre = await client.call('POST /kb/chats/visual-preflight', {
+          body: {
+            chat_id: chatId, engine: choice.engine, model: choice.model, text,
+            mentions: value.mentions, quotes: value.quotes, attachments: initialReadyIds, context,
+          },
+        }).catch(() => null); // The server remains authoritative if a preflight result is unavailable.
+        if (!stillAdmitting() || draftState().getDraft(key).attachments !== initial.attachments) return;
+        if (pre?.requires_visual && !pre.supported) {
+          const { seam, locator } = seamFromPreflight(pre);
+          setFallbacksByDraft((prev) => setDraftFallback(prev, key, {
+            seam, draftText: text, attachmentKeys: initialReadyKeys, locator, requestKey,
+          }));
+          window.requestAnimationFrame(() => {
+            if (activation.current === admittedFrom) chooseModelRef.current?.focus();
+          });
+          return;
+        }
+      }
+
+      if (!stillAdmitting() || draftState().getDraft(key).attachments !== initial.attachments) return;
+      // After admission, detach only its snapshot. V2 can finish an admitted paste for its owner
+      // while another tab is active, and any later handoff stays in the editor.
+      submittedNodes = Array.from(root.childNodes);
+      clearEditor(root);
+      lastPaste.current = null;
+      refresh();
+
+      let list = initial.attachments;
+      if (unsaved.length && inboxId) {
+        const keys = new Set(unsaved.map((a) => a.key));
+        setAttachments((now) => now.map((a) => (keys.has(a.key) ? { ...a, state: 'adding', error: null } : a)));
+        const preparing = draftState().getDraft(key).attachments;
+        const saved = await Promise.all(unsaved.map((a) => saveMaterial('text', a.text!, inboxId).then(
+          (added) => ({ key: a.key, id: added.id as string | null, ready: added.ready, error: null }),
+          (e: unknown) => ({ key: a.key, id: null, ready: false, error: errorText(e) }),
+        )));
+        const byKey = new Map(saved.map((r) => [r.key, r]));
+        const current = draftState().getDraft(key).attachments;
+        setAttachments((now) => now.map((a) => {
+          const r = byKey.get(a.key);
+          if (!r || a.state !== 'adding') return a;
+          return r.id ? { ...a, state: 'ready', materialId: r.id, materialReady: r.ready, error: null }
+            : { ...a, state: 'failed', error: r.error };
+        }));
+        // Preserve completed imports even if the admission that started them has since been cancelled.
+        if (current !== preparing) return;
+        list = draftState().getDraft(key).attachments;
+      }
+      if (!targetCurrent() || draftState().getDraft(key).attachments !== list || attachmentSendBlocker(list)) return;
+      const latestGone = new Set(services.library.getState().gone);
+      if (list.some((a) => a.materialId && latestGone.has(a.materialId))) {
+        setAttachments((items) => items.map((a) => a.materialId && latestGone.has(a.materialId)
+          ? { ...a, state: 'failed', error: 'This material was deleted.' }
+          : a));
+        return;
+      }
+      const ready = list.filter((a) => a.state === 'ready' && a.materialId);
+      const input: KbMessageInput = { text, mentions: value.mentions, quotes: value.quotes, attachments: ready.map((a) => a.materialId!),
+        ...(selection ? { selection: { ...selection, intent: quick ?? 'ask' } } : {}),
+        ...(textOnly ? { text_only: true } : {}) };
+
+      if (activation.current === admittedFrom) replaySend();
+      const result = await chats.getState().send(input, context, {
+        draftChatId: chatId,
+        initialAgent: choice,
+        expectedTarget: mayNeedVisual && choice ? choice : undefined,
+        onDraftChatActivated: (createdId) => {
+          draftState().move(key, createdId);
+          owner = createdId;
+        },
+      });
+      if (!result.ok) {
+        draftState().setError(owner, result.error);
+        return;
+      }
+      submittedNodes = [];
+      setFallbacksByDraft((prev) => clearDraftFallback(clearDraftFallback(prev, key), owner));
+      if (input.selection && activation.current === admittedFrom
+        && selectionStore?.getState().selection === selection) clearSelection();
+      const sentKeys = new Set(ready.map((item) => item.key));
+      draftState().update(owner, (items) => items.filter((item) => !sentKeys.has(item.key)));
+      // New materials are held out of the wiki until the successful send.
+      for (const a of ready) {
+        if (a.source !== 'existing' && !a.alreadyInLibrary && a.inWiki) {
+          ingestWhenReady(client, a.materialId!, a.materialReady, (detail) => {
+            draftState().setError(owner, `“${a.name}” is saved to Materials but couldn’t go to the wiki yet: ${detail} You can add it from Materials later.`);
+          });
+        }
+      }
+    } catch (error) {
+      draftState().setError(owner, errorText(error));
+    } finally {
+      unsubscribe();
+      try {
+        restore();
+      } finally {
+        draftState().setSending(owner, false);
       }
     }
-    clearEditor(root);
-    setAttachments([]);
-    lastPaste.current = null;
-    refresh();
   };
 
   /** Put a pasted-text card back into the field as plain text. */
-  const pasteAsText = (key: string) => {
+  const pasteAsText = (itemKey: string) => {
     const root = editorRef.current;
-    const card = attachments.find((a) => a.key === key);
-    if (!root || card?.text === undefined) return;
+    if (!root || !canChangeDraft()) return;
+    const card = draftState().getDraft(key).attachments.find((a) => a.key === itemKey);
+    if (card?.text === undefined || card.state === 'adding') return;
     lastPaste.current = null;
-    setAttachments((list) => list.filter((a) => a.key !== key));
+    setAttachments((list) => list.filter((a) => a.key !== itemKey));
     root.focus({ preventScroll: true });
     insertText(root, card.text);
     refresh();
@@ -349,11 +649,13 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     if (selection && event.key === 'Escape') { event.preventDefault(); clearSelection(); return; }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      void submit();
+      if (!event.repeat) void submit();
     }
   };
 
   const onPaste = (event: ClipboardEvent<HTMLDivElement>) => {
+    if (!canChangeDraft()) { event.preventDefault(); return; }
+    if (handleImagePaste?.(event)) { lastPaste.current = null; return; }
     // Only plain text comes in: no foreign markup in the field.
     event.preventDefault();
     const text = event.clipboardData.getData('text/plain');
@@ -381,10 +683,12 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         const clip = await capture!.stop();
         const res = await bridge.dictate(clip.wav, speech?.languages[0]);
         if (!res.ok) throw new Error(res.detail);
-        if (editorRef.current && res.data.text.trim()) {
+        if (draftKey.current === key && editorRef.current && res.data.text.trim()) {
           editorRef.current.focus();
           insertText(editorRef.current, res.data.text.trim());
           refresh();
+        } else if (res.data.text.trim()) {
+          drafts.set(key, [...(drafts.get(key) ?? []), document.createTextNode(` ${res.data.text.trim()}`)]);
         }
       } catch (e) {
         setError(`Dictation: ${errorText(e)}`);
@@ -419,11 +723,26 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   };
 
   const mentionDrop = useMentionDrop();
+  const canEdit = paneActive && !sending;
   const placeholderShown = empty && dictation.phase === 'idle';
   const hint = selection ? 'Ask about the selection…' : placeholder;
   // A query of several words stays a mention only while something matches; otherwise it is just text.
   const popupOpen = mention !== null && (!mention.query.includes(' ') || mentions.loading || mentions.options.length > 0);
   const canSend = !empty || attachments.some((a) => a.state === 'ready' || a.text !== undefined);
+  const focusEditor = useCallback(() => editorRef.current?.focus({ preventScroll: true }), []);
+  const toggleWiki = (itemKey: string) => {
+    if (canChangeDraft()) {
+      setAttachments((list) => list.map((a) => (a.key === itemKey ? { ...a, inWiki: !a.inWiki } : a)));
+    }
+  };
+  const removeAttachment = (itemKey: string) => {
+    if (!canChangeDraft()) return;
+    if (lastPaste.current === itemKey) lastPaste.current = null;
+    setAttachments((list) => list.filter((a) => a.key !== itemKey && a.replaceKey !== itemKey));
+  };
+  const resolveVideo = (itemKey: string, proceed: boolean) => {
+    if (canChangeDraft() && draftState().resolveVideo(key, itemKey, proceed)) focusEditor();
+  };
 
   return (
     <>
@@ -431,29 +750,42 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         <QuickQuestions disabledReason={quickReason} onAsk={(q) => void askQuick(q)} onPrefill={prefillQuick} />
       )}
       {study && chatId && <StudyContextChip chatId={chatId} part={study} />}
-      <div className="kb-composer" data-testid="composer" {...mentionDrop.handlers}>
-        {mentionDrop.overlay}
+      {paneActive && activeFallback?.seam.unsupported && (
+        <VisualFallbackCard
+          seam={activeFallback.seam}
+          busy={sending}
+          chooseModelRef={chooseModelRef}
+          onChooseModel={() => setPickerOpenSeq((n) => n + 1)}
+          onContinueTextOnly={() => { void submit(undefined, { textOnly: true }); }}
+        />
+      )}
+      <div className="kb-composer" data-testid="composer" {...(canEdit ? mentionDrop.handlers : {})}>
+        {canEdit && mentionDrop.overlay}
         {selection && (
           <SelectionPanel selection={selection} onClear={clearSelection} onQuick={(ask) => void submit(ask)}
-            disabledReason={!agentReady ? unavailable : blocked ? 'The agent is still answering' : sending ? 'Sending…' : null} />
+            disabledReason={blocker ?? (!agentReady ? unavailable : blocked ? 'The agent is still answering' : sending ? 'Sending…' : null)} />
         )}
         {popupOpen && (
           <MentionPopup id={listId} options={mentions.options} active={active} loading={mentions.loading} error={mentions.error}
             onPick={pickMention} onHover={setActive} />
         )}
-        <AttachmentChips items={attachments}
-          onToggleWiki={(key) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, inWiki: !a.inWiki } : a)))}
-          onRemove={(key) => { if (lastPaste.current === key) lastPaste.current = null; setAttachments((list) => list.filter((a) => a.key !== key)); }}
-          renderName={(a) => (a.text !== undefined ? <PastedCard attachment={a} text={a.text} onPasteAsText={() => pasteAsText(a.key)} /> : null)} />
+        <AttachmentDraftStrip key={key} items={paneActive ? attachments : []} readOnly={sending} focusEditor={focusEditor}
+          onReplace={bridge.nativeIntake ? (itemKey) => void chooseFiles(itemKey) : undefined}
+          onToggleWiki={toggleWiki}
+          onRemove={removeAttachment}
+          onResolveVideo={resolveVideo}
+          renderName={(a) => (a.text !== undefined ? <PastedCard attachment={a} text={a.text} onPasteAsText={() => pasteAsText(a.key)}
+            onToggleWiki={() => toggleWiki(a.key)} readOnly={sending} /> : null)} />
         <div className="kb-editor-wrap">
           {placeholderShown && <span className="kb-editor__placeholder" aria-hidden="true">{hint}</span>}
           <div
             ref={editorRef}
             className="kb-editor"
-            contentEditable
+            contentEditable={canEdit}
             suppressContentEditableWarning
             role="textbox"
             aria-multiline="true"
+            aria-readonly={!canEdit || undefined}
             aria-label="Message"
             aria-placeholder={hint}
             aria-controls={popupOpen ? listId : undefined}
@@ -476,26 +808,18 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
           </div>
         )}
         <div className="kb-composer__bar">
-          <AttachButton onAdd={addAttachments} disabled={false} />
+          <AttachButton key={key} onAdd={addAttachments} disabled={!paneActive || sending}
+            onChooseFiles={bridge.nativeIntake || bridge.chooseMaterialFiles ? () => void chooseFiles() : undefined} />
           <ChatSearchButton chatId={chatId} />
           <span className="kb-composer__spacer" />
           {dictation.phase === 'recording' && (
             <span className="kb-dictating" role="status"><span className="kb-dictating__dot" aria-hidden="true" />Listening</span>
           )}
-          <AgentPicker choice={choice} existingChat={chatId !== null}
-            onChoose={async (next) => {
-              setError(null);
-              const res = await chats.getState().setAgent(chatId, next);
-              if (!res.ok) setError(res.error);
-              else services.agents.getState().noteLastChoice(next.engine, next.model, next.effort);
-            }} />
+          <AgentPicker choice={choice} existingChat={chatId !== null} openRequest={pickerOpenSeq}
+            onChoose={chooseAgent} />
           {choice && model && (
             <EffortPicker efforts={model.efforts} value={choice.effort ?? model.default_effort}
-              onChange={async (effort) => {
-                const res = await chats.getState().setAgent(chatId, { ...choice, effort });
-                if (!res.ok) setError(res.error);
-                else services.agents.getState().noteLastChoice(choice.engine, choice.model, effort);
-              }} />
+              onChange={(effort) => chooseAgent({ ...choice, effort })} />
           )}
           {bridge.dictate ? (
             <IconButton icon="mic" label={dictation.phase === 'recording' ? 'Stop dictation' : dictation.phase === 'transcribing' ? 'Recognising…' : 'Dictate'}
@@ -516,7 +840,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
             </Tooltip>
           ) : (
             <Tooltip text={blocked ? 'The agent is still answering' : 'Send (Enter)'} placement="top">
-              <button type="button" className="kb-send" aria-label="Send" aria-disabled={!canSend || sending || blocked || undefined}
+              <button type="button" className="kb-send" aria-label="Send" aria-disabled={!paneActive || !canSend || sending || blocked || !!blocker || undefined}
                 onClick={() => void submit()} data-busy={sending || undefined}>
                 <Icon name="send" size={14} play={sendPlay} />
               </button>

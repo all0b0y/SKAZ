@@ -100,6 +100,13 @@ class KbTextPart(BaseModel):
     text: str
 
 
+class KbTextOnlyPart(BaseModel):
+    """V4 disclosure marker when the user explicitly sent with text only."""
+
+    type: Literal["text_only"]
+    label: str = "Text only · Image not analysed"
+
+
 class KbCitePart(BaseModel):
     type: Literal["cite"]
     citation: KbCitation
@@ -230,7 +237,8 @@ class KbMemoryPart(BaseModel):
     undone: bool
 
 
-class KbMessagePart(RootModel[Annotated[KbKnowledgePart | KbTextPart | KbCitePart | KbPagePart
+class KbMessagePart(RootModel[Annotated[
+    KbKnowledgePart | KbTextPart | KbTextOnlyPart | KbCitePart | KbPagePart
                                         | KbConnectionPart | KbToolPart
                                         | KbPermissionPart | KbQuestionPart | KbStudyPart
                                         | KbWebSearchPart | KbMemoryPart
@@ -258,6 +266,7 @@ class KbMessageInput(BaseModel):
     attachments: list[str]
     #: P2: the items picked in an earlier answer this question is about (the chip «📍 …»).
     selection: KbSelection | None = None
+    text_only: bool = False
 
 
 class KbMessage(BaseModel):
@@ -361,6 +370,12 @@ class KbOpenContext(_Request):
     open_study_id: str | None = Field(default=None, max_length=200)
 
 
+class KbSendTarget(_Request):
+    engine: KbEngineId
+    model: str | None = Field(default=None, max_length=200)
+    effort: str | None = Field(default=None, max_length=50)
+
+
 class KbSend(_Request):
     text: str = Field(min_length=1, max_length=MAX_TEXT)
     mentions: list[KbRef] = Field(default_factory=list, max_length=MAX_ITEMS)
@@ -370,6 +385,8 @@ class KbSend(_Request):
     context: KbOpenContext = Field(default_factory=KbOpenContext)
     #: P2: the items picked in an earlier answer of this chat that the question is about.
     selection: KbSelection | None = None
+    text_only: bool = False
+    expected_target: KbSendTarget | None = None
 
 
 class KbMessageEdit(_Request):
@@ -380,6 +397,49 @@ class KbMessageEdit(_Request):
     quotes: list[KbQuote] = Field(default_factory=list, max_length=MAX_ITEMS)
     attachments: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list,
                                                                                   max_length=MAX_ITEMS)
+    text_only: bool = False
+
+
+class KbVisualPreflightRequest(_Request):
+    chat_id: str | None = Field(default=None, max_length=200)
+    engine: KbEngineId | None = None
+    model: str | None = Field(default=None, max_length=200)
+    text: str = Field(default="", max_length=MAX_TEXT)
+    mentions: list[KbRef] = Field(default_factory=list, max_length=MAX_ITEMS)
+    quotes: list[KbQuote] = Field(default_factory=list, max_length=MAX_ITEMS)
+    attachments: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list,
+                                                                                  max_length=MAX_ITEMS)
+    context: KbOpenContext = Field(default_factory=KbOpenContext)
+
+
+class KbCompatibleModel(BaseModel):
+    engine: KbEngineId
+    model_id: str
+    label: str
+    provider: str
+
+
+class KbVisualLocator(BaseModel):
+    material_id: str
+    source_kind: str
+    page: int | None
+    timestamp_ms: int | None
+    label: str
+
+
+class KbVisualPreflightResponse(BaseModel):
+    requires_visual: bool
+    supported: bool
+    engine: KbEngineId
+    model_id: str | None
+    state: Literal["supported", "unsupported", "unverified"]
+    reason_code: str | None
+    title: str | None
+    detail: str | None
+    text_only_available: bool
+    draft_preserved: bool
+    locator: KbVisualLocator | None
+    compatible_models: list[KbCompatibleModel]
 
 
 class KbSendResult(BaseModel):

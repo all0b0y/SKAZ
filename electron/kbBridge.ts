@@ -3,6 +3,13 @@
 // injected), so the policy is unit-tested; ipc.ts wires the real dialog/fs/fetch.
 
 import type { DictationResult, JsonResponse, MaterialFileChoice, TextFileSave } from '../frontend/src/api/bridge';
+import type {
+  ClipboardImageValidation,
+  MaterialIntakeBatch,
+  NativeIntakeImagePreview,
+  NativeIntakeImportRequest,
+} from './nativeIntake041/contracts';
+import { nativeIntakeHandlers, type BoundedFileFingerprint, type MaybePromise } from './nativeIntake041/trustedIntake';
 
 /** One dictation clip: PCM16 mono WAV, at most 8 MB and 120 seconds (the backend limit). */
 export const MAX_DICTATION_BYTES = 8 * 1024 * 1024;
@@ -10,11 +17,6 @@ export const MAX_DICTATION_SECONDS = 120;
 /** A saved text (chat export) — the user already sees it; this only bounds its size. */
 export const MAX_SAVE_TEXT_CHARS = 5 * 1024 * 1024;
 const MAX_FILE_NAME = 120;
-/**
- * Files one dialog may hand over. The wiki queue takes any number of materials (H2), so this is only
- * a bound on one IPC answer — far above what anyone picks at once (it was 50, silently cutting more).
- */
-const MAX_CHOSEN_FILES = 2000;
 
 /**
  * Checks the clip before it leaves main: a canonical RIFF/WAVE header, PCM16 mono, within the size
@@ -69,27 +71,69 @@ export interface KbBridgeDeps {
   showSaveDialog: (options: { title: string; defaultPath: string; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled: boolean; filePath?: string }>;
   showOpenDialog: (options: { title: string; defaultPath: string; properties: string[]; filters: Array<{ name: string; extensions: string[] }> }) => Promise<{ canceled: boolean; filePaths: string[] }>;
   writeTextFile: (path: string, text: string) => void;
-  fileSize: (path: string) => number | null;
+  fileSize: (path: string) => MaybePromise<number | null>;
+  realPath: (path: string) => MaybePromise<string | null>;
+  readHeader: (path: string, maxBytes: number) => MaybePromise<Uint8Array | null>;
+  readBoundedFile?: (path: string, maxBytes: number) => MaybePromise<Uint8Array | null>;
+  hashBoundedFile?: (path: string, maxBytes: number) => MaybePromise<BoundedFileFingerprint | null>;
   documentsDir: string;
   downloadsDir: string;
+  skazDataDir?: string;
   materialExtensions: readonly string[];
+  newId?: () => string;
 }
 
-async function readDetail(res: Response): Promise<string> {
+async function readFailure(res: Response): Promise<{ detail: string; code?: string }> {
   try {
-    const body = (await res.json()) as { detail?: unknown };
-    return typeof body?.detail === 'string' ? body.detail : `HTTP ${res.status}`;
+    const body = (await res.json()) as { detail?: unknown; error_code?: unknown; code?: unknown };
+    const detail = typeof body?.detail === 'string' ? body.detail : `HTTP ${res.status}`;
+    const code = typeof body?.error_code === 'string' ? body.error_code
+      : typeof body?.code === 'string' ? body.code : undefined;
+    return code === undefined ? { detail } : { detail, code };
   } catch {
-    return `HTTP ${res.status}`;
+    return { detail: `HTTP ${res.status}` };
   }
 }
 
-const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
-
-/** The three handlers, each already behind the trusted-sender check in ipc.ts. */
+/** Main-process bridge handlers, each already behind the trusted-sender check in ipc.ts. */
 export function kbBridgeHandlers(deps: KbBridgeDeps) {
   let saving = false;
-  let choosing = false;
+  const intake = nativeIntakeHandlers({
+    showOpenDialog: deps.showOpenDialog,
+    realPath: deps.realPath,
+    statFile: async (path) => {
+      const size = await deps.fileSize(path);
+      return size === null ? null : { isFile: true, size };
+    },
+    readHeader: deps.readHeader,
+    readBoundedFile: deps.readBoundedFile,
+    hashBoundedFile: deps.hashBoundedFile,
+    downloadsDir: deps.downloadsDir,
+    skazDataDir: deps.skazDataDir,
+    materialExtensions: deps.materialExtensions,
+    newId: deps.newId,
+  });
+
+  async function postJson(
+    handle: { port: number; token: string },
+    path: string,
+    body: unknown,
+  ): Promise<JsonResponse<unknown>> {
+    try {
+      const res = await deps.fetch(`http://127.0.0.1:${handle.port}${path}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${handle.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!res.ok) return { ok: false, status: res.status, ...(await readFailure(res)) };
+      const text = await res.text();
+      return { ok: true, status: res.status, data: text.length > 0 ? (JSON.parse(text) as unknown) : null };
+    } catch (err) {
+      return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   return {
     async dictate(wav: unknown, language: unknown): Promise<JsonResponse<DictationResult>> {
       const error = validateDictation(wav, language);
@@ -105,7 +149,7 @@ export function kbBridgeHandlers(deps: KbBridgeDeps) {
           body: Buffer.from(wav as ArrayBuffer),
           signal: AbortSignal.timeout(120_000),
         });
-        if (!res.ok) return { ok: false, status: res.status, detail: await readDetail(res) };
+        if (!res.ok) return { ok: false, status: res.status, ...(await readFailure(res)) };
         const data = (await res.json()) as DictationResult;
         return { ok: true, status: res.status, data };
       } catch (err) {
@@ -134,30 +178,148 @@ export function kbBridgeHandlers(deps: KbBridgeDeps) {
     },
 
     async chooseMaterialFiles(): Promise<MaterialFileChoice[]> {
-      if (choosing) return [];
-      choosing = true;
-      try {
-        const result = await deps.showOpenDialog({
-          title: 'Choose materials', defaultPath: deps.downloadsDir,
-          properties: ['openFile', 'multiSelections'],
-          filters: [{ name: 'Documents, audio and video', extensions: [...deps.materialExtensions] }],
-        });
-        if (result.canceled) return [];
-        const allowed = new Set(deps.materialExtensions.map((e) => e.toLowerCase()));
-        const out: MaterialFileChoice[] = [];
-        for (const path of result.filePaths.slice(0, MAX_CHOSEN_FILES)) {
-          const ext = /\.([^.\\/]+)$/.exec(path)?.[1]?.toLowerCase();
-          if (!ext || !allowed.has(ext)) continue;
-          const size = deps.fileSize(path);
-          if (size === null) continue;
-          out.push({ path, name: baseName(path), size });
-        }
-        return out;
-      } catch {
-        return [];
-      } finally {
-        choosing = false;
+      const batch = await intake.chooseMaterialFiles();
+      return batch.accepted.map((item) => ({ path: item.path, name: item.name, size: item.size }));
+    },
+
+    async chooseMaterialBatch(): Promise<MaterialIntakeBatch> {
+      return intake.chooseMaterialFiles();
+    },
+
+    droppedMaterialFiles(rawPaths: unknown): Promise<MaterialIntakeBatch> {
+      return intake.admitDroppedPaths(rawPaths);
+    },
+
+    validateClipboardImage(payload: unknown): ClipboardImageValidation {
+      return intake.validateClipboardImage(payload);
+    },
+
+    async importSelection(rawRequest: unknown): Promise<JsonResponse<unknown>> {
+      if (!rawRequest || typeof rawRequest !== 'object') {
+        return { ok: false, status: 400, detail: 'Missing import selection request.' };
       }
+      const req = rawRequest as Partial<NativeIntakeImportRequest>;
+      if (typeof req.selectionId !== 'string' || !req.selectionId) {
+        return { ok: false, status: 400, detail: 'Invalid selectionId.' };
+      }
+      if (typeof req.folderId !== 'string' || !req.folderId || req.folderId.length > 64) {
+        return { ok: false, status: 400, detail: 'Invalid folderId.' };
+      }
+      const handle = deps.handle();
+      if (!handle) return { ok: false, status: 0, detail: 'backend not ready' };
+
+      const disk = intake.store.get(req.selectionId);
+      if (disk) {
+        if (disk.route === 'speech') {
+          return postJson(handle, '/kb/imports', {
+            path: disk.path,
+            folder_id: req.folderId,
+            title: typeof req.title === 'string' ? req.title : null,
+            language: typeof req.language === 'string' ? req.language : null,
+            translate: req.translate === true,
+            to_wiki: typeof req.toWiki === 'boolean' ? req.toWiki : null,
+          });
+        }
+        const verified = await intake.verifySelectionVersion(req.selectionId);
+        if (!verified.ok) {
+          return {
+            ok: false,
+            status: verified.status,
+            detail: verified.detail,
+            ...(verified.code ? { code: verified.code } : {}),
+          };
+        }
+        const checked = verified.selection;
+        return postJson(handle, '/kb/materials/file', {
+          path: checked.path,
+          folder_id: req.folderId,
+          title: typeof req.title === 'string' ? req.title : null,
+          to_wiki: checked.route === 'image' ? false : (typeof req.toWiki === 'boolean' ? req.toWiki : null),
+          selection_source: checked.source,
+          expected_size: checked.size,
+          ...(checked.sha256 ? { expected_sha256: checked.sha256 } : {}),
+        });
+      }
+
+      const clip = intake.getClipboardSelection(req.selectionId);
+      if (clip) {
+        try {
+          const url = new URL(`http://127.0.0.1:${handle.port}/kb/materials/clipboard-image`);
+          url.searchParams.set('folder_id', req.folderId);
+          url.searchParams.set('file_name', clip.selection.name);
+          if (typeof req.title === 'string' && req.title.trim()) {
+            url.searchParams.set('title', req.title);
+          }
+          const res = await deps.fetch(url.toString(), {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${handle.token}`,
+              'Content-Type': clip.selection.mimeType,
+            },
+            body: Buffer.from(clip.bytes),
+            signal: AbortSignal.timeout(120_000),
+          });
+          if (!res.ok) return { ok: false, status: res.status, ...(await readFailure(res)) };
+          const text = await res.text();
+          return { ok: true, status: res.status, data: text.length > 0 ? (JSON.parse(text) as unknown) : null };
+        } catch (err) {
+          return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
+        }
+      }
+
+      return { ok: false, status: 403, detail: 'This file selection is not authorized.' };
+    },
+
+    async imagePreview(selectionId: unknown): Promise<JsonResponse<NativeIntakeImagePreview>> {
+      if (typeof selectionId !== 'string' || !selectionId) {
+        return { ok: false, status: 400, detail: 'Invalid selectionId.' };
+      }
+      const disk = intake.store.get(selectionId);
+      if (disk && disk.category === 'image') {
+        const handle = deps.handle();
+        if (!handle) return { ok: false, status: 0, detail: 'backend not ready' };
+        const verified = await intake.verifySelectionVersion(selectionId);
+        if (!verified.ok) {
+          return {
+            ok: false,
+            status: verified.status,
+            detail: verified.detail,
+            ...(verified.code ? { code: verified.code } : {}),
+          };
+        }
+        const checked = verified.selection;
+        try {
+          const res = await deps.fetch(`http://127.0.0.1:${handle.port}/kb/materials/image-preview`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${handle.token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              path: checked.path,
+              expected_size: checked.size,
+              ...(checked.sha256 ? { expected_sha256: checked.sha256 } : {}),
+            }),
+            signal: AbortSignal.timeout(120_000),
+          });
+          if (!res.ok) return { ok: false, status: res.status, ...(await readFailure(res)) };
+          const bytes = new Uint8Array(await res.arrayBuffer());
+          return { ok: true, status: 200, data: { mimeType: 'image/png', bytes } };
+        } catch (err) {
+          return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
+        }
+      }
+
+      const clip = intake.getClipboardSelection(selectionId);
+      if (clip && clip.selection.nativePreviewable) {
+        return {
+          ok: true,
+          status: 200,
+          data: {
+            mimeType: clip.selection.mimeType as NativeIntakeImagePreview['mimeType'],
+            bytes: new Uint8Array(clip.bytes),
+          },
+        };
+      }
+
+      return { ok: false, status: 403, detail: 'Image preview is only available for authorized image selections.' };
     },
   };
 }

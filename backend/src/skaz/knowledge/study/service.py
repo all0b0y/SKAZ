@@ -25,6 +25,8 @@ from typing import Any, Concatenate, Literal, ParamSpec, TypeVar
 
 from ...native_io import disk_call
 from ..chats.resolve import MaterialReader
+from ..chats.store import WIKI_STUDY_CHAT_ID, ChatRepository
+from ..chats.text import plain_text
 from ..errors import KnowledgeError, NameRejected, NotFound
 from ..ids import new_id
 from ..ids import utc_now as _now
@@ -47,6 +49,7 @@ from .checks import (
     Dropped,
     QuestionIn,
     Refused,
+    allows_agent_knowledge,
     check_all,
     check_card,
     check_question,
@@ -58,6 +61,7 @@ from .format import (
     DraftCard,
     DraftQuestion,
     Question,
+    StudyBasis,
     deck_parts,
     read_cards,
     read_questions,
@@ -136,6 +140,12 @@ def _cite_json(cite: Cite) -> dict[str, Any]:
 
 def _cite_of(data: Mapping[str, Any]) -> Cite:
     return Cite(str(data["material_id"]), int(data["seg"]), data.get("quote"))
+
+
+def _item_basis(item: Mapping[str, Any]) -> StudyBasis:
+    if item.get("basis") in ("source", "agent"):
+        return "agent" if item["basis"] == "agent" else "source"
+    return "source" if item.get("cites") else "agent"
 
 
 def _order(seed: str, items: Sequence[str]) -> list[str]:
@@ -283,10 +293,52 @@ class StudyService:
 
     # -- the agent makes a deck or a test (S3, S5, A-3) --------------------------------------------
 
-    def make_deck(self, ref: RunRef, title: str, cards: Sequence[CardIn]) -> Made:
+    def turn_user_request(self, ref: RunRef) -> str | None:
+        """The user's own request text for the current chat turn ``ref`` answers, or ``None`` when ``ref``
+        has no corresponding live user request in this turn (never inferred from assistant text or earlier
+        turns)."""
+        if not ref.run_id or not ref.chat_id or not ref.message_id or ref.chat_id == WIKI_STUDY_CHAT_ID:
+            return None
+        messages = ChatRepository(self.kb.db).messages(ref.chat_id)
+        if not messages:
+            return None
+        by_id = {m.id: m for m in messages}
+        answer = by_id.get(ref.message_id)
+        if answer is None or answer.role != "assistant" or answer.state != "streaming" or not answer.reply_to:
+            return None
+        if any(m.seq > answer.seq and m.role == "assistant" for m in messages):
+            return None
+        question = by_id.get(answer.reply_to)
+        if question is None or question.role != "user" or question.seq >= answer.seq:
+            return None
+        replied = {m.reply_to for m in messages if m.reply_to}
+        texts = [question.input.text if question.input is not None else plain_text(question.parts)]
+        for m in messages:
+            if m.seq > answer.seq and m.role == "user" and m.id not in replied:
+                texts.append(m.input.text if m.input is not None else plain_text(m.parts))
+        combined = "\n".join(t.strip() for t in texts if t and t.strip())
+        return combined or None
+
+    def allows_agent_knowledge(self, ref: RunRef) -> bool:
+        """Whether the actual user's request in the current chat turn explicitly asks for agent-knowledge
+        study items without negating that permission."""
+        return allows_agent_knowledge(self.turn_user_request(ref))
+
+    def _agent_allowed(self, ref: RunRef, allow_agent: bool | None) -> bool:
+        return self.allows_agent_knowledge(ref) and (allow_agent is None or bool(allow_agent))
+
+    def make_deck(
+        self,
+        ref: RunRef,
+        title: str,
+        cards: Sequence[CardIn],
+        *,
+        allow_agent: bool | None = None,
+    ) -> Made:
         clean = clean_study_title(title)
         reader = self._reader()
-        kept, dropped = check_all(cards, lambda card: check_card(reader, card))
+        permitted = self._agent_allowed(ref, allow_agent)
+        kept, dropped = check_all(cards, lambda card: check_card(reader, card, allow_agent=permitted))
         if not kept:
             raise StudyError(NOTHING_LEFT + " " + "; ".join(f"card {d.index}: {d.reason}" for d in dropped))
         checked: list[CheckedCard] = kept
@@ -295,6 +347,7 @@ class StudyService:
                 "id": new_id("c"),
                 "question": c.question,
                 "answer": c.answer,
+                "basis": c.basis,
                 "cites": [_cite_json(cite) for cite in c.cites],
                 "links": list(c.links),
                 "explanation": c.explanation,
@@ -314,10 +367,18 @@ class StudyService:
         log.info("Study deck %s shown in chat (%d cards, %d dropped)", block.id, len(items), len(dropped))
         return Made(block, tuple(dropped))
 
-    def make_test(self, ref: RunRef, title: str, questions: Sequence[QuestionIn]) -> Made:
+    def make_test(
+        self,
+        ref: RunRef,
+        title: str,
+        questions: Sequence[QuestionIn],
+        *,
+        allow_agent: bool | None = None,
+    ) -> Made:
         clean = clean_study_title(title)
         reader = self._reader()
-        kept, dropped = check_all(questions, lambda q: check_question(reader, q))
+        permitted = self._agent_allowed(ref, allow_agent)
+        kept, dropped = check_all(questions, lambda q: check_question(reader, q, allow_agent=permitted))
         if not kept:
             raise StudyError(
                 NOTHING_LEFT.replace("card", "question")
@@ -334,9 +395,15 @@ class StudyService:
                     {"id": f"k{n}", "text": text, "cites": [cite_json(cite) for cite in cites]}
                     for n, (text, cites) in enumerate(q.ideas, start=1)
                 ]
-            options = [{"id": f"r{n}", "text": text, "origin": "source"} for n, text in enumerate(q.answers)]
-            options += [{"id": f"w{n}", "text": text, "origin": "agent"} for n, text in enumerate(q.wrong)]
-            by_id = {option["id"]: option for option in options}
+            options: list[dict[str, Any]] = [
+                {"id": f"r{n}", "text": text, "origin": q.basis, "right": True}
+                for n, text in enumerate(q.answers)
+            ]
+            options += [
+                {"id": f"w{n}", "text": text, "origin": "agent", "right": False}
+                for n, text in enumerate(q.wrong)
+            ]
+            by_id = {str(option["id"]): option for option in options}
             ordered = (
                 [by_id[key] for key in _order(item_id, list(by_id))] if q.type in ("choice", "multi") else []
             )
@@ -345,6 +412,7 @@ class StudyService:
                     "id": item_id,
                     "type": q.type,
                     "question": q.question,
+                    "basis": q.basis,
                     "answers": list(q.answers),
                     "wrong": list(q.wrong),
                     "accept": list(q.accept),
@@ -498,6 +566,7 @@ class StudyService:
                         item["answer"],
                         tuple(_cite_of(c) for c in item.get("cites", [])),
                         item.get("explanation"),
+                        basis=_item_basis(item),
                     ),
                     None,
                 )
@@ -526,6 +595,7 @@ class StudyService:
                     tuple(item.get("wrong", [])),
                     tuple(item.get("accept", [])),
                     item.get("explanation"),
+                    basis=_item_basis(item),
                 )
                 for item in block.payload.get("questions", [])
             ]
@@ -534,7 +604,7 @@ class StudyService:
         except (NotFound, OSError, ValueError, UnicodeDecodeError):
             return []
 
-    def options(self, block: StudyBlock, question: Question) -> list[dict[str, str]]:
+    def options(self, block: StudyBlock, question: Question) -> list[dict[str, Any]]:
         if question.type not in ("choice", "multi"):
             return []
         stored = next(
@@ -546,12 +616,27 @@ class StudyService:
             None,
         )
         if stored:
-            return [dict(option) for option in stored]
-        options = [
-            {"id": f"r{n}", "text": text, "origin": "source"} for n, text in enumerate(question.answers)
+            return [
+                {
+                    **dict(option),
+                    "origin": "agent"
+                    if question.basis == "agent" or option.get("origin") == "agent"
+                    else "source",
+                    "right": bool(option["right"])
+                    if "right" in option
+                    else (str(option.get("id", "")).startswith("r") or option.get("origin") == "source"),
+                }
+                for option in stored
+            ]
+        options: list[dict[str, Any]] = [
+            {"id": f"r{n}", "text": text, "origin": question.basis, "right": True}
+            for n, text in enumerate(question.answers)
         ]
-        options += [{"id": f"w{n}", "text": text, "origin": "agent"} for n, text in enumerate(question.wrong)]
-        by_id = {option["id"]: option for option in options}
+        options += [
+            {"id": f"w{n}", "text": text, "origin": "agent", "right": False}
+            for n, text in enumerate(question.wrong)
+        ]
+        by_id = {str(option["id"]): option for option in options}
         return [by_id[key] for key in _order(question.id, list(by_id))]
 
     def states(self, block: StudyBlock, card_ids: Sequence[str]) -> dict[str, CardState]:
@@ -591,6 +676,7 @@ class StudyService:
                     "page_id": page_id,
                     "question": card.question,
                     "answer": card.answer,
+                    "basis": card.basis,
                     "cites": card.cites,
                     "explanation": card.explanation,
                     "group": group_of(state),
@@ -937,12 +1023,12 @@ class StudyService:
         question = self._question(block, item_id)
         if question.type in ("choice", "multi"):
             picked = list(dict.fromkeys(choices or []))
-            options = {option["id"]: option for option in self.options(block, question)}
+            options = {str(option["id"]): option for option in self.options(block, question)}
             if not picked or any(choice not in options for choice in picked):
                 raise StudyError("Choose one of the options.")
             if question.type == "choice" and len(picked) != 1:
                 raise StudyError("Choose one option.")
-            right = {key for key, option in options.items() if option["origin"] == "source"}
+            right = {key for key, option in options.items() if option.get("right")}
             correct = set(picked) == right
             return self._put_answer(
                 block, item_id, {"choices": picked, "checked": True, "score": 1.0 if correct else 0.0}
@@ -1024,7 +1110,7 @@ class StudyService:
         reader = self._reader()
         sources = sources_of(reader, question, ideas)
         if ideas is None:
-            built = built_ideas(raw, reader, sources)
+            built = built_ideas(raw, reader, sources, basis=question.basis)
             if not built:
                 raise StudyError(NO_IDEAS)
             stored = self.items.put_ideas_once(question.id, built, now=_now(), block_id=block.id,
@@ -1345,6 +1431,7 @@ class StudyService:
                                 cites,
                                 tuple(item.get("links", [])),
                                 item.get("explanation"),
+                                basis=_item_basis(item),
                             ),
                         )
                     )
@@ -1367,6 +1454,7 @@ class StudyService:
                                 tuple(item.get("wrong", [])),
                                 tuple(item.get("accept", [])),
                                 item.get("explanation"),
+                                basis=_item_basis(item),
                             ),
                         )
                     )
@@ -1411,6 +1499,7 @@ class StudyService:
                     "page_id": page_id,
                     "question": card.question,
                     "answer": card.answer,
+                    "basis": card.basis,
                     "cites": card.cites,
                     "explanation": card.explanation,
                     "group": group_of(state),
@@ -1448,7 +1537,11 @@ class StudyService:
         if record.kind == "test":
             questions = read_questions(self._document(page_id))
             lines = [f"Test “{record.title}” (id {page_id}), {len(questions)} questions:"]
-            lines += [f"[{q.id} · {q.type}] {q.question} → {' / '.join(q.answers)}" for q in questions]
+            lines += [
+                f"[{q.id} · {q.type}{' · agent knowledge' if q.basis == 'agent' else ''}] "
+                f"{q.question} → {' / '.join(q.answers)}"
+                for q in questions
+            ]
             return "\n".join(lines)
         if record.kind != "deck":
             raise StudyError("This page is neither a deck nor a test.")
@@ -1461,7 +1554,10 @@ class StudyService:
         for row in view["cards"]:
             due = f", due {row['due']}" if row["due"] else ""
             hidden = ", hidden from reviews" if row["suspended"] else ""
-            lines.append(f"[{row['id']} · {row['group']}{due}{hidden}] {row['question']} :: {row['answer']}")
+            basis = " · agent knowledge" if row.get("basis") == "agent" else ""
+            lines.append(
+                f"[{row['id']} · {row['group']}{basis}{due}{hidden}] {row['question']} :: {row['answer']}"
+            )
         return "\n".join(lines)
 
     def start_from_deck(
@@ -1490,6 +1586,8 @@ class StudyService:
             index = min(block.position, len(cards) - 1)
             card, _page = cards[index]
             side = "answer side" if block.side == "answer" else "question side (the answer is not shown yet)"
+            if card.basis == "agent":
+                side += "; not based on the user's materials"
             if card.id in self.unclear_of([card.id]):
                 side += "; the user marked it Unclear"
             body = (
@@ -1508,6 +1606,8 @@ class StudyService:
         question = next((q for q in questions if q.id == order[index]), questions[0])
         answered = bool(attempt and (attempt.answers.get("items") or {}).get(question.id, {}).get("checked"))
         state = "answered" if answered else "not answered yet — don't give the answer away unless asked"
+        if question.basis == "agent":
+            state += "; not based on the user's materials"
         if question.id in self.unclear_of([question.id]):
             state += "; the user marked it Unclear"
         return (

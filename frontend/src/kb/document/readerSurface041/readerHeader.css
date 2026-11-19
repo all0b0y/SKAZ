@@ -1,0 +1,39 @@
+.kb-head.kb-reader-header {
+  height: auto;
+  min-height: var(--kb-head-h);
+  flex-wrap: wrap;
+  gap: var(--kb-sp-2) var(--kb-sp-4);
+  padding: var(--kb-sp-4) var(--kb-sp-10);
+  background-color: var(--kb-pane);
+}
+
+.kb-reader-header__type {
+  display: flex;
+  flex: 1 1 var(--kb-sp-24);
+  align-items: center;
+  gap: var(--kb-sp-4);
+  min-width: 0;
+  color: var(--kb-text);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+
+.kb-reader-header__type > .kb-icon { flex: none; }
+
+.kb-reader-header__label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.kb-reader-header__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--kb-sp-2);
+  min-width: 0;
+  max-width: 100%;
+  margin-inline-start: auto;
+}

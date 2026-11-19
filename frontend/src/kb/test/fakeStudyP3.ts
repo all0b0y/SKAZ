@@ -25,7 +25,7 @@ export function defaultReview(question: KbStudyQuestion): KbStudyReview {
       { id: 'k1', text: 'Entropy counts the arrangements W.', citations: cite, status: 'covered', yours: null, why: null,
         why_basis: null, why_citations: [], by_user: false, recheck: null, rechecking: false },
       { id: 'k2', text: 'Joining two systems multiplies their arrangements.', citations: cite, status: 'partial', yours: 'joined systems',
-        why: 'The counts multiply, so something has to turn a product into a sum.', why_basis: 'source', why_citations: cite,
+        why: 'The counts multiply, so something has to turn a product into a sum.', why_basis: cite.length ? 'source' : 'agent', why_citations: cite,
         by_user: false, recheck: null, rechecking: false },
       { id: 'k3', text: 'A logarithm turns the product into a sum, so entropies add up.', citations: cite, status: 'missing', yours: null,
         why: 'That is the reason for the logarithm itself.', why_basis: 'agent', why_citations: [], by_user: false, recheck: null, rechecking: false },

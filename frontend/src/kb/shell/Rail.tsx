@@ -208,7 +208,7 @@ export function Rail() {
   const markY = useRailMarkY(navRef, activeId);
   // 0.3.1 P4: a chat other than the one in front of you waits for an answer — a dot, nothing pops up.
   const waiting = useChats((s) => {
-    const shown = center === 'chat' ? s.currentId : null;
+    const shown = center === 'chat' && !s.allTabsClosed ? s.currentId : null;
     return s.list.some((c) => c.id !== shown && isWaitingForUser(c));
   });
 

@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
+from ...visual_transport041.runtime import VisualUnsupportedError
 from ..agents.registry import EngineUnavailable
 from ..agents.web import site_of
 from ..answer_blocks.part import BlockPart
@@ -38,6 +39,7 @@ from ..chats.model import (
     SelectedItem,
     Selection,
     StudyPart,
+    TextOnlyPart,
     TextPart,
     ToolPart,
     WebSearchPart,
@@ -68,6 +70,7 @@ from .schemas_chats import (
     KbChatPatch,
     KbChatSummary,
     KbCitePart,
+    KbCompatibleModel,
     KbConnectionFolder,
     KbConnectionPart,
     KbDiscussFinding,
@@ -92,9 +95,13 @@ from .schemas_chats import (
     KbSelection,
     KbSend,
     KbSendResult,
+    KbTextOnlyPart,
     KbTextPart,
     KbToolPart,
     KbToolTarget,
+    KbVisualLocator,
+    KbVisualPreflightRequest,
+    KbVisualPreflightResponse,
 )
 from .schemas_web import KbHiddenSite, KbRulesInForce, KbWebLink, KbWebSearchPart
 from .schemas_wiki_fix import KbWikiFixPart, wiki_fix_part
@@ -106,6 +113,8 @@ MAX_LIST = 500
 
 
 def error_response(error: KnowledgeError) -> JSONResponse:
+    if isinstance(error, VisualUnsupportedError):
+        return JSONResponse(status_code=error.status_code, content=error.payload())
     content: dict[str, Any] = {"detail": error.message}
     if isinstance(error, ChatConflict):
         content.update(code=error.code, **error.extra)
@@ -206,6 +215,8 @@ class Presenter:
             return KbMessagePart(wiki_fix_part(part, self.page_ref, exists))
         if isinstance(part, TextPart):
             return KbMessagePart(KbTextPart(type="text", text=part.text))
+        if isinstance(part, TextOnlyPart):
+            return KbMessagePart(KbTextOnlyPart(type="text_only", label=part.label))
         if isinstance(part, CitePart):
             return KbMessagePart(KbCitePart(type="cite",
                                             citation=self.citation(part.material_id, part.seg, part.quote)))
@@ -260,6 +271,7 @@ class Presenter:
                                 message_id=quote.message_id, text=quote.text) for quote in given.quotes],
                 attachments=list(given.attachments),
                 selection=_selection_out(given.selection),
+                text_only=given.text_only,
             ) if given is not None else None,
         )
 
@@ -373,6 +385,7 @@ def to_input(body: KbSend | KbMessageEdit) -> MessageInput:
         attachments=tuple(body.attachments),
         context=OpenContext(context.open_page_id, context.open_material_id, context.open_study_id),
         selection=_selection_in(body),
+        text_only=body.text_only,
     )
 
 
@@ -406,6 +419,68 @@ async def create_chat(chats: ChatsDep, body: KbChatCreate | None = None) -> KbCh
 async def remember_last_choice(chats: ChatsDep, body: KbChatLastChoice) -> None:
     """The agent, model and reasoning picked in the New chat field: the next new chat starts from them."""
     await chats.remember_choice(body.engine, body.model, body.effort)
+
+
+@router.post("/visual-preflight")
+async def visual_preflight(body: KbVisualPreflightRequest, chats: ChatsDep) -> KbVisualPreflightResponse:
+    """Preflight visual source capability, permissions and text-only fallback before send."""
+    given = MessageInput(
+        text=body.text,
+        mentions=tuple(Ref(ref.type, ref.id, ref.title) for ref in body.mentions),
+        quotes=tuple(Quote(q.source, q.id, q.text, q.block_id, q.seg, q.message_id) for q in body.quotes),
+        attachments=tuple(body.attachments),
+        context=OpenContext(
+            body.context.open_page_id,
+            body.context.open_material_id,
+            body.context.open_study_id,
+        ),
+    )
+    outcome = await chats.visual_preflight(
+        chat_id=body.chat_id,
+        engine=body.engine,
+        model=body.model,
+        given=given,
+    )
+    unsupported = outcome.unsupported
+    locator = outcome.locator
+    return KbVisualPreflightResponse(
+        requires_visual=outcome.requires_visual,
+        supported=outcome.supported,
+        engine=outcome.decision.engine,
+        model_id=outcome.decision.model_id,
+        state=outcome.decision.state,
+        reason_code=(
+            unsupported.reason_code if unsupported is not None else outcome.decision.reason_code
+        ),
+        title=unsupported.title if unsupported is not None else None,
+        detail=(
+            unsupported.detail
+            if unsupported is not None
+            else outcome.decision.reason
+        ),
+        text_only_available=outcome.text_only_available,
+        draft_preserved=unsupported.draft_preserved if unsupported is not None else True,
+        locator=(
+            KbVisualLocator(
+                material_id=locator.material_id,
+                source_kind=locator.source_kind,
+                page=locator.page,
+                timestamp_ms=locator.timestamp_ms,
+                label=locator.label,
+            )
+            if locator is not None
+            else None
+        ),
+        compatible_models=[
+            KbCompatibleModel(
+                engine=hint.engine,
+                model_id=hint.model_id,
+                label=hint.label,
+                provider=hint.provider,
+            )
+            for hint in outcome.compatible_models
+        ],
+    )
 
 
 @router.get("/events")
@@ -445,7 +520,10 @@ async def read_answers(chat_id: str, chats: ChatsDep) -> None:
 @router.post("/{chat_id}/messages", status_code=202)
 async def send_message(chat_id: str, body: KbSend, chats: ChatsDep) -> KbSendResult:
     """Starts the answer; follow it with ``GET /kb/chats/{id}/events``."""
-    return await kb_call(_send_result, chats.kb, await chats.send(chat_id, to_input(body)))
+    target = body.expected_target
+    expected = (target.engine, target.model, target.effort) if target is not None else None
+    user, answer = await chats.send(chat_id, to_input(body), expected_target=expected)
+    return await kb_call(_send_result, chats.kb, (user, answer))
 
 
 @router.get("/{chat_id}/events")

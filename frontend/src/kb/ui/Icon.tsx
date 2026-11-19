@@ -25,7 +25,7 @@ import { StopIcon } from '@animateicons/react/huge/stop-icon';
 import {
   ArrowUp, Check, SquarePen,
   AtSign, AudioWaveform, BookOpenText, Bot, ChevronLeft, ChevronRight, CircleAlert,
-  CircleDot, Command, Download, ExternalLink, FileMusic, FileText, FileVideoCamera, Folder, FolderPlus,
+  CircleDot, Command, Download, ExternalLink, FileImage, FileMusic, FileText, FileVideoCamera, Folder, FolderPlus,
   Inbox, Info, Languages, Link, Minimize2, Maximize2, Monitor, Moon,
   PanelLeftClose, PanelLeftOpen, PanelRight, Paperclip, Pin, Play, Plus, ShieldCheck,
   Sun, Trash2, Pause, LayoutList, LayoutGrid, TriangleAlert, Type, Upload, Waypoints, Palette, HardDrive, Sparkles,
@@ -58,6 +58,7 @@ const ICONS = {
   waveform: AudioWaveform,
   link: Link,
   pdf: FileText,
+  image: FileImage,
   video: FileVideoCamera,
   audio: FileMusic,
   folder: Folder,

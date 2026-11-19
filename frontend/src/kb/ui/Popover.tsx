@@ -308,10 +308,11 @@ export interface MenuProps {
   label: string;
   items: ReadonlyArray<MenuItem>;
   placement?: Placement;
+  className?: string;
 }
 
 /** Action menu (role="menu"): arrows move, Enter/Space choose, Escape closes and returns focus. */
-export function Menu({ open, onClose, anchorRef, label, items, placement = 'bottom-end' }: MenuProps) {
+export function Menu({ open, onClose, anchorRef, label, items, placement = 'bottom-end', className }: MenuProps) {
   const id = useId();
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -331,7 +332,7 @@ export function Menu({ open, onClose, anchorRef, label, items, placement = 'bott
 
   return (
     <Popover open={open} onClose={onClose} anchorRef={anchorRef} label={label} role="menu" placement={placement}
-      className="kb-menu" onKeyDown={move}>
+      className={className ? `kb-menu ${className}` : 'kb-menu'} onKeyDown={move}>
       <div ref={listRef} className="kb-menu__list">
         {items.map((item) => (
           <button

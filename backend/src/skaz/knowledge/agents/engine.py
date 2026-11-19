@@ -28,9 +28,12 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from .web import WebSearchGate
+
+if TYPE_CHECKING:
+    from ...visual_transport041.authorization import AuthorizedVisualPayload
 
 EngineId = Literal["codex", "claude_code", "hermes", "opencode"]
 FailureKind = Literal["limit", "auth", "incompatible", "network", "cancelled", "other"]
@@ -66,6 +69,10 @@ class ModelOption:
     #: Reasoning effort levels the model accepts; empty when the engine has none (Hermes).
     efforts: tuple[str, ...] = ()
     default_effort: str | None = None
+    #: Declared input modalities (e.g. ``("text", "image")``) when reported by the adapter.
+    input_modalities: tuple[str, ...] = field(default=(), compare=False)
+    #: Verified image capability from adapter metadata (``None`` = undeclared/unverified).
+    supports_image: bool | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -147,6 +154,8 @@ class AgentTurn:
     history_summary: str | None = None
     #: N6: chat turns of an engine with live sessions; ``None`` = a stateless run (today's behaviour).
     session: SessionPlan | None = None
+    #: V4: server-authorized visual payloads bound to this turn's engine and model.
+    visuals: tuple[AuthorizedVisualPayload, ...] = ()
 
 
 @dataclass(frozen=True)

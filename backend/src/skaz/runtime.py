@@ -138,7 +138,8 @@ class Runtime:
         self.kb_chats = ChatService(self.kb, agents=lambda: self.kb_agents.registry, tools=self.kb_tools,
                                     text_layer=lambda: self.kb_ingest.text_layer,
                                     permissions=self.kb_permissions, questions=self.kb_questions,
-                                    study=self.kb_study, web=self.kb_web)
+                                    study=self.kb_study, web=self.kb_web,
+                                    sources=lambda: self.kb_sources)
         #: N6 «Я»: ``skaz_me_edit`` / ``skaz_me_skill``, chat answers only (they act for this chat service).
         attach_me_tools(self.kb_chats)
         #: N6: an agent being installed / repaired / updated keeps its queued session deletions (no attempt).

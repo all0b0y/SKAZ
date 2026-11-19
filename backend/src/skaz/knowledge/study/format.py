@@ -30,6 +30,7 @@ from ..markdown.page import Block, Cite, Heading, PageDocument, Part
 
 QuestionType = Literal["choice", "multi", "short", "open"]
 QUESTION_TYPES: tuple[QuestionType, ...] = ("choice", "multi", "short", "open")
+StudyBasis = Literal["source", "agent"]
 SEPARATOR = "::"
 
 LABELS: dict[str, dict[str, str]] = {
@@ -96,6 +97,8 @@ class Card:
     explanation: str | None = None
     #: The block was changed outside SKAZ (Obsidian): it stays, shown as the user's text.
     edited: bool = False
+    #: ``source``: backed by checked quotes from materials; ``agent``: from the agent's own knowledge.
+    basis: StudyBasis = "source"
 
 
 @dataclass(frozen=True)
@@ -109,6 +112,12 @@ class Question:
     wrong: tuple[str, ...] = ()
     accept: tuple[str, ...] = ()
     explanation: str | None = None
+    #: ``source``: backed by checked quotes from materials; ``agent``: from the agent's own knowledge.
+    basis: StudyBasis = "source"
+
+
+def _basis_of(block: Block) -> StudyBasis:
+    return "agent" if block.attr("role") == "agent" or not block.cites else "source"
 
 
 def _explanations(blocks: Sequence[Block]) -> dict[tuple[str, str], str]:
@@ -148,6 +157,7 @@ def read_cards(document: PageDocument) -> list[Card]:
                 block.cites,
                 _unprefix(explanation, "explanation") if explanation else None,
                 edited=block.owner != "agent",
+                basis=_basis_of(block),
             )
         )
     return cards
@@ -191,6 +201,7 @@ def read_questions(document: PageDocument) -> list[Question]:
                 wrong,
                 decode_list(block.attr("accept")),
                 _unprefix(explanation, "explanation") if explanation else None,
+                basis=_basis_of(block),
             )
         )
     return out
@@ -207,6 +218,7 @@ class DraftCard:
     #: Human-readable links to the cited fragments (``[[…|Title · 08:12]]``), one per cite.
     links: tuple[str, ...] = ()
     explanation: str | None = None
+    basis: StudyBasis = "source"
 
 
 @dataclass
@@ -220,6 +232,7 @@ class DraftQuestion:
     accept: tuple[str, ...] = ()
     explanation: str | None = None
     extra: dict[str, str] = field(default_factory=dict)
+    basis: StudyBasis = "source"
 
 
 def card_body(draft: DraftCard) -> str:
@@ -241,7 +254,8 @@ def deck_parts(
     """``(block id, card)`` pairs → the page body: one heading, each card with its explanation after it."""
     parts: list[Part] = [Heading(2, label("cards", language))]
     for block_id, draft in cards:
-        parts.append(Block.create(block_id, "from_source", card_body(draft), cites=draft.cites))
+        attrs: tuple[tuple[str, str], ...] = (("role", "agent"),) if draft.basis == "agent" else ()
+        parts.append(Block.create(block_id, "from_source", card_body(draft), cites=draft.cites, attrs=attrs))
         if draft.explanation:
             parts.append(
                 Block.create(
@@ -260,6 +274,8 @@ def test_parts(
     parts: list[Part] = [Heading(2, label("questions", language))]
     for block_id, draft in questions:
         attrs: list[tuple[str, str]] = [("q", draft.type)]
+        if draft.basis == "agent":
+            attrs.append(("role", "agent"))
         if draft.accept:
             attrs.append(("accept", encode_list(draft.accept)))
         parts.append(

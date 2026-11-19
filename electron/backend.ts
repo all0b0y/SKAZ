@@ -119,6 +119,11 @@ export class BackendManager {
     return this.log;
   }
 
+  /** Exposed so IPC native intake can refuse files inside SKAZ's own data directory. */
+  getDataDir(): string {
+    return this.dataDir;
+  }
+
   getStatus(): BackendStatus {
     return this.status;
   }

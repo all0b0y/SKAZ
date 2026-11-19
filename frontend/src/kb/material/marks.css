@@ -33,7 +33,6 @@
 
 /* ---- N1 marks on a material ---------------------------------------------------------------------- */
 .kb-freshwrap { display: flex; flex-direction: column; gap: var(--kb-sp-8); margin: var(--kb-sp-8) 0; }
-.kb-freshwrap__bar { display: flex; align-items: center; justify-content: flex-end; gap: var(--kb-sp-12); font-size: var(--t-sm); color: var(--kb-muted); }
 .kb-fresh { display: flex; flex-direction: column; gap: var(--kb-sp-12); }
 .kb-fresh__block { border-inline-start: 2px solid var(--kb-line); padding-inline-start: var(--kb-sp-16); display: flex; flex-direction: column; gap: var(--kb-sp-6); }
 .kb-fresh__reason { margin: 0; font-weight: 600; color: var(--kb-text); }

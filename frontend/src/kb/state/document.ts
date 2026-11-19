@@ -39,6 +39,15 @@ export type RightView =
 /** What the centre column shows: the open chat, or a full-width list (decisions v16, 25). */
 export type CenterView = 'chat' | 'allChats' | 'materials';
 
+interface ReaderHistoryEntry {
+  view: RightView;
+  expanded: boolean;
+}
+
+function isReader(view: RightView): boolean {
+  return view.kind === 'doc' || view.kind === 'wikifile' || view.kind === 'live';
+}
+
 export interface NavState {
   right: RightView | null;
   /** The right panel takes the centre instead of the chat (⤢). */
@@ -52,7 +61,7 @@ export interface NavState {
    * What the right panel showed before, newest last (QA C20): "Open at quote" on a page, a link,
    * a graph node — Back (⌘[) returns to the page you were reading. ✕ forgets it.
    */
-  docHistory: RightView[];
+  docHistory: ReaderHistoryEntry[];
 }
 
 export interface NavActions {
@@ -95,9 +104,9 @@ function samePlace(a: RightView, b: RightView): boolean {
 }
 
 /** The history after leaving `from` for `to`: the live view and a study block are not places to come back to. */
-function pushed(history: RightView[], from: RightView | null, to: RightView): RightView[] {
-  if (!from || from.kind === 'live' || from.kind === 'study' || samePlace(from, to)) return history;
-  return [...history, from].slice(-HISTORY);
+function pushed({ docHistory, right, docExpanded }: NavState, to: RightView): ReaderHistoryEntry[] {
+  if (!right || right.kind === 'live' || right.kind === 'study' || samePlace(right, to)) return docHistory;
+  return [...docHistory, { view: right, expanded: docExpanded }].slice(-HISTORY);
 }
 
 function materialOf(right: RightView | null): string | null {
@@ -117,12 +126,12 @@ type SetNav = (partial: Partial<NavState> | ((s: NavState) => Partial<NavState>)
 
 /** The navigation part of the UI store (spread into `createUiStore`). */
 export function createNavSlice(set: SetNav): NavState & NavActions {
-  const show = (right: RightView | null, history?: RightView[]) => (s: NavState): Partial<NavState> => ({
+  const show = (right: RightView) => (s: NavState): Partial<NavState> => ({
     right,
     docMaterialId: materialOf(right),
-    // A different kind of panel starts in the side position; the same kind keeps ⤢.
-    docExpanded: right !== null && s.right?.kind === right.kind ? s.docExpanded : false,
-    docHistory: history ?? (right ? pushed(s.docHistory, s.right, right) : []),
+    // Every reader open starts beside the chat. Other panels keep their own expansion behavior.
+    docExpanded: !isReader(right) && s.right?.kind === right.kind && s.docExpanded,
+    docHistory: pushed(s, right),
   });
   return {
     right: null,
@@ -140,8 +149,14 @@ export function createNavSlice(set: SetNav): NavState & NavActions {
     goBack: () => set((s) => {
       const back = s.docHistory.at(-1);
       if (!back) return {};
-      const right: RightView = back.kind === 'doc' ? { ...back, nonce: ++nonce } : back;
-      return show(right, s.docHistory.slice(0, -1))(s);
+      const { view, expanded } = back;
+      const right = view.kind === 'doc' ? { ...view, nonce: ++nonce } : view;
+      return {
+        right,
+        docMaterialId: materialOf(right),
+        docExpanded: isReader(right) ? expanded : s.right?.kind === right.kind && s.docExpanded,
+        docHistory: s.docHistory.slice(0, -1),
+      };
     }),
     openLive: (materialId) => set(show({ kind: 'live', materialId })),
     openWikiFile: (name) => set(show({ kind: 'wikifile', name })),

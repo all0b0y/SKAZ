@@ -152,6 +152,8 @@ def scoped_unclear_items(study: StudyService, folders: Sequence[str] | None, pag
             continue
         if isinstance(item, Question):
             entry.update({"kind": "test question", "type": item.type, "question": item.question})
+            if item.basis == "agent":
+                entry["basis"] = "agent"
             given = _newest_entry(study, row, item)
             if not (given and given.get("checked")):
                 # Not answered (or not checked) yet: only what the user sees before answering — the
@@ -172,6 +174,8 @@ def scoped_unclear_items(study: StudyService, folders: Sequence[str] | None, pag
             entry["answered"] = True
         else:
             entry.update({"kind": "flashcard", "question": item.question, "right_answer": [item.answer]})
+            if item.basis == "agent":
+                entry["basis"] = "agent"
             rating = study.store.last_rating(item.id)
             entry["last_answer"] = f"graded {_GRADE.get(rating, '?')}" if rating else None
         entry["source"] = _cites(item)

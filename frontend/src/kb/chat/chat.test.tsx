@@ -316,6 +316,58 @@ describe('Chats in the side panel', () => {
     await waitFor(() => expect(within(side()).queryByRole('button', { name: /Why is there a logarithm/ })).not.toBeInTheDocument());
   });
 
+  it('shows shaping and its cancel action, then opens the page and names the wiki model on retry', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    const warning = 'Chat model reached its limit. Shaped with Wiki LLM: Claude Code (wiki-model).';
+    world.saveWarnings = { 'c1-a1': warning };
+    const { services } = renderKb({ world });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    const answer = await within(centre).findByRole('article', { name: 'Answer' });
+    let cancel = () => {};
+    const original = services.chats.getState().saveMessage;
+    services.chats.setState({
+      saveMessage: () => new Promise((resolve) => {
+        cancel = () => resolve({ ok: false, error: 'Wiki shaping was cancelled.' });
+      }),
+      stop: async () => { cancel(); return { ok: true, value: undefined }; },
+    });
+    await user.click(within(answer).getByRole('button', { name: 'Save to wiki' }));
+    expect(within(answer).getByRole('button', { name: 'Shaping for wiki…' })).toHaveAttribute('aria-busy', 'true');
+    await user.click(within(answer).getByRole('button', { name: 'Cancel wiki shaping' }));
+    expect(await within(centre).findByRole('status')).toHaveTextContent('Wiki shaping was cancelled.');
+    expect(openTarget(services.ui.getState())).toBeNull();
+    services.chats.setState({ saveMessage: original });
+    await user.click(within(answer).getByRole('button', { name: 'Save to wiki' }));
+    await waitFor(() => expect(within(centre).getByRole('status')).toHaveTextContent(warning));
+    expect(openTarget(services.ui.getState())?.type).toBe('page');
+  });
+
+  it('saving in a previous chat leaves the selected chat and reader in place', async () => {
+    const user = userEvent.setup();
+    const { services } = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    const answer = await within(centre).findByRole('article', { name: 'Answer' });
+    const save = services.chats.getState().saveMessage;
+    let release = () => {};
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    let finish = () => {};
+    const finished = new Promise<void>((resolve) => { finish = resolve; });
+    services.chats.setState({ saveMessage: async (...args) => {
+      await wait;
+      const result = await save(...args);
+      finish();
+      return result;
+    } });
+    await user.click(within(answer).getByRole('button', { name: 'Save to wiki' }));
+    await user.click(within(side()).getByRole('button', { name: /Seminar questions/ }));
+    await act(async () => { release(); await finished; });
+    expect(services.chats.getState().currentId).toBe('c7');
+    expect(openTarget(services.ui.getState())).toBeNull();
+  });
+
   it('a taken analysis name: the reason is shown and nothing opens (no date appended by the backend)', async () => {
     const user = userEvent.setup();
     const world = chatWorld();

@@ -10,7 +10,9 @@ import './marks.css';
  * N1 on a material (v4 states 20–23): when a source has a newer version, was retracted, is contradicted by
  * a newer source or its original link is gone, one quiet block says so — with the reason, where the fact
  * comes from, and only the actions that make sense. A timeout or a refusal is a check result, never a mark.
- * "Check links" is manual (decision 3f): SKAZ never visits a source site by itself.
+ * "Check links" is manual (decision 3f): SKAZ never visits a source site by itself. Its entry point sits in
+ * the material's actions row beside Write notes (11/A); this block draws only real content — marks, a
+ * result, a running check — never an empty floor.
  */
 
 const POLL_MS = 1000;
@@ -120,20 +122,34 @@ function MarkBlock({ mark, onDelete, onChanged }: {
   );
 }
 
-type Run = { phase: 'idle' } | { phase: 'running'; id: string } | { phase: 'stopped' } | { phase: 'failed'; message: string };
+export type Run = { phase: 'idle' } | { phase: 'running'; id: string } | { phase: 'stopped' } | { phase: 'failed'; message: string };
 
-/** The marks of one material, the last link check, and the manual "Check links". */
-export function FreshnessNotice({ materialId, originUrl, onDelete, onReplaced }: {
-  materialId: string;
-  /** Only a material with an original link can be link-checked. */
-  originUrl: string | null;
-  onDelete: () => void;
-  /** A "Replace with vN" started a re-ingest: the material view reads the material again. */
-  onReplaced: () => void;
-}) {
-  const { maintenance, freshness } = useMarksClients();
+/** Everything the material draws from the N1 freshness state: the blocks below the head and the
+ *  manual "Check links" entry point that sits in the actions row beside Write notes (11/A). */
+export interface FreshnessState {
+  /** False until the marks were asked for once: no freshness control may appear before that. */
+  asked: boolean;
+  marks: KbFreshnessMark[];
+  /** The check this session saw, else the stored one; drives the "couldn't check" card. */
+  last: KbLinkObservation | null;
+  /** The last check could not even be performed: the card owns the retry, the row entry point hides. */
+  couldNot: boolean;
+  /** A manual check runs now: the row button is busy, the block shows the progress line. */
+  checking: boolean;
+  observation: KbLinkObservation | null;
+  run: Run;
+  note: string | null;
+  /** Start the manual link check for this material. */
+  check: () => Promise<void>;
+  /** A mark action answered (`Replace with vN`, `Keep, marked`): the mark is updated in place. */
+  changed: (mark: KbFreshnessMark, ingestJobId: string | null) => void;
+}
+
+/** The marks of one material, the last link check and the manual "Check links" state. */
+export function useFreshness(materialId: string | null, onReplaced: () => void): FreshnessState {
+  const { maintenance, freshness: freshnessClient } = useMarksClients();
   const [data, setData] = useState<KbFreshnessMarks | null>(null);
-  // Nothing is drawn until the marks were asked for once, so a button never jumps when the answer arrives.
+  // Nothing is drawn until the marks were asked for once, so a control never jumps when the answer arrives.
   const [asked, setAsked] = useState(false);
   const [run, setRun] = useState<Run>({ phase: 'idle' });
   const [note, setNote] = useState<string | null>(null);
@@ -143,7 +159,9 @@ export function FreshnessNotice({ materialId, originUrl, onDelete, onReplaced }:
 
   const load = useCallback(() => {
     // Marks are an extra: when they cannot be read the material simply shows none.
-    maintenance.marks(materialId).then((d) => { if (live.current) { setData(d); setAsked(true); } }, () => { if (live.current) setAsked(true); });
+    if (!materialId) return;
+    maintenance.marks(materialId).then((d) => { if (live.current) { setData(d); setAsked(true); } },
+      () => { if (live.current) setAsked(true); });
   }, [maintenance, materialId]);
   useEffect(() => { setData(null); setAsked(false); setRun({ phase: 'idle' }); setNote(null); setObservation(null); load(); }, [load]);
 
@@ -158,50 +176,56 @@ export function FreshnessNotice({ materialId, originUrl, onDelete, onReplaced }:
   useEffect(() => {
     if (!runId) return undefined;
     const timer = setInterval(() => {
-      freshness.link_check(runId).then((check) => { if (live.current) settle(check); }, (e: unknown) => {
+      freshnessClient.link_check(runId).then((check) => { if (live.current) settle(check); }, (e: unknown) => {
         if (live.current) setRun({ phase: 'failed', message: errorText(e) });
       });
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [freshness, runId, settle]);
+  }, [freshnessClient, runId, settle]);
 
-  const checkLinks = async () => {
+  const check = useCallback(async () => {
+    if (!materialId) return;
     setNote(null);
     setObservation(null);
     try {
-      const check = await freshness.check_links({ material_ids: [materialId] });
+      const linkCheck = await freshnessClient.check_links({ material_ids: [materialId] });
       if (!live.current) return;
-      if (check.state === 'running' || check.state === 'queued') setRun({ phase: 'running', id: check.id });
-      else settle(check);
+      if (linkCheck.state === 'running' || linkCheck.state === 'queued') setRun({ phase: 'running', id: linkCheck.id });
+      else settle(linkCheck);
     } catch (e) {
       if (live.current) setRun({ phase: 'failed', message: errorText(e) });
     }
-  };
+  }, [freshnessClient, materialId, settle]);
 
-  const changed = (mark: KbFreshnessMark, ingestJobId: string | null) => {
+  const changed = useCallback((mark: KbFreshnessMark, ingestJobId: string | null) => {
     setData((d) => (d ? { ...d, marks: d.marks.map((m) => (m.id === mark.id ? mark : m)) } : d));
     if (ingestJobId) { setNote(`Replacing with ${mark.version ?? 'the new version'} — the wiki follows when it is done.`); onReplaced(); }
-  };
+  }, [onReplaced]);
 
   const marks = data?.marks ?? [];
   const last = observation ?? data?.last_link_check ?? null;
   const goneMark = marks.some((m) => m.kind === 'link_gone');
   const couldNot = !goneMark && last?.outcome === 'could_not_check';
-  const checking = run.phase === 'running';
+  return { asked, marks, last, couldNot, checking: run.phase === 'running', observation, run, note, check, changed };
+}
 
+/** The freshness blocks of one material: its marks, the last check's result and a running check —
+ *  drawn only when there is something to say (11/A: never an empty floor between the actions and
+ *  the transcript). The manual entry point lives in the material's actions row; a "couldn't check"
+ *  result keeps its retry inside its card. */
+export function FreshnessNotice({ freshness, onDelete }: { freshness: FreshnessState; onDelete: () => void }) {
+  const { asked, marks, last, couldNot, checking, observation, run, note, check, changed } = freshness;
+  const goneMark = marks.some((m) => m.kind === 'link_gone');
+  const hasContent = checking || marks.length > 0 || (couldNot && last !== null) || note !== null
+    || run.phase === 'stopped' || run.phase === 'failed'
+    || observation?.outcome === 'ok' || observation?.outcome === 'suspected_gone';
+  if (!asked || !hasContent) return null;
   const checkButton = (
-    <Button size="sm" variant="outline" busy={checking} disabled={checking} onClick={() => void checkLinks()}>Check links</Button>
+    <Button size="sm" variant="outline" busy={checking} disabled={checking} onClick={() => void check()}>Check links</Button>
   );
-  if (!asked || (marks.length === 0 && !originUrl && !couldNot)) return null;
-
   return (
     <div className="kb-freshwrap" data-testid="freshness">
-      {originUrl && !couldNot && (
-        <div className="kb-freshwrap__bar">
-          {checking && <span className="kb-fresh__evidence" role="status">Checking the link…</span>}
-          <button type="button" className="kb-rep__link" disabled={checking} onClick={() => void checkLinks()}>Check links</button>
-        </div>
-      )}
+      {checking && <p className="kb-fresh__evidence" role="status">Checking the link…</p>}
       {marks.map((m) => <MarkBlock key={m.id} mark={m} onDelete={onDelete} onChanged={changed} />)}
       {couldNot && last && (
         <div className="kb-fresh" data-mark-kind="could_not_check">
@@ -209,7 +233,6 @@ export function FreshnessNotice({ materialId, originUrl, onDelete, onReplaced }:
             <p className="kb-fresh__reason">Link check: couldn’t check</p>
             <p className="kb-fresh__evidence">{COULD_NOT[last.reason ?? 'other']} Your source has not been marked as outdated.</p>
             <div className="kb-fresh__actions">{checkButton}</div>
-            {checking && <p className="kb-fresh__evidence" role="status">Checking the link…</p>}
           </div>
         </div>
       )}

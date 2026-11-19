@@ -1,9 +1,9 @@
 import { useCallback } from 'react';
 import { AnswerMarkdown, type InAppLink } from '../ui/AnswerMarkdown';
-import { Banner, Button, EmptyState, Icon, Spinner } from '../ui';
+import { Banner, Button, EmptyState, Spinner } from '../ui';
 import { useServices, useUi } from '../state/context';
 import type { WikiFileName } from '../state/document';
-import { PanelFrameButtons } from '../document/parts';
+import { ReaderPanelHeader } from '../document/readerSurface041/ReaderPanelHeader';
 import { blockMarkdown, inAppTarget } from '../document/text';
 import { useLoad } from '../document/useLoad';
 
@@ -32,11 +32,7 @@ export function WikiFileView({ name }: { name: WikiFileName }) {
   const text = file ? file.text.replace(/^# [^\n]*\n+/, '') : '';
   return (
     <>
-      <header className="kb-head kb-head--doc">
-        <span className="kb-doc__type"><Icon name="text" size={14} /><span>Wiki {TITLE[name].toLowerCase()}</span></span>
-        <span className="kb-head__spacer" />
-        <PanelFrameButtons />
-      </header>
+      <ReaderPanelHeader typeLabel={`Wiki ${TITLE[name].toLowerCase()}`} typeIcon="text" />
       <div className="kb-doc__body">
         {state.load === 'loading' && !file && <div className="kb-doc__wait"><Spinner label={`Opening the ${TITLE[name].toLowerCase()}`} /></div>}
         {state.load === 'error' && !file && (

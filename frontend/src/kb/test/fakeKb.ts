@@ -14,7 +14,7 @@ import type {
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard, KbStudyReview,
+  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard, KbStudyQuestion, KbStudyReview,
   KbWebSearchPart,
 } from '../../api/kb/types.gen';
 import { agentUpdateRoutes } from './fakeAgentUpdates';
@@ -22,6 +22,7 @@ import {
   isWaitingPart, partsOf, type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionEndpoints,
   type KbPermissionPart, type KbQuestionPart,
 } from '../api/permissions';
+import { isAgentBasis, isRightOption } from '../study/api';
 import { meRoutes, type FakeMe } from './fakeMe';
 import { defaultReview, p3StudyRoutes, scoreOf } from './fakeStudyP3';
 import { studyShelfRoutes, type FakeShelfRow } from './fakeStudyShelf';
@@ -605,11 +606,35 @@ const PERMISSION_ROUTES: { [R in keyof KbPermissionEndpoints]: PEntry<R> } = {
 
 type FakeStudy = { chat: KbChat; message: KbMessage; part: KbStudyPart };
 
+function normalizeCard(c: KbStudyCard): KbStudyCard {
+  const basis = isAgentBasis(c) ? 'agent' : 'source';
+  c.basis = basis;
+  if (basis === 'agent') c.citations = [];
+  return c;
+}
+
+function normalizeQuestion(q: KbStudyQuestion): KbStudyQuestion {
+  const basis = isAgentBasis(q) ? 'agent' : 'source';
+  q.basis = basis;
+  if (basis === 'agent') q.citations = [];
+  for (const o of q.options) {
+    o.right = isRightOption(q, o);
+    o.origin = basis === 'agent' || o.origin === 'agent' ? 'agent' : 'source';
+  }
+  return q;
+}
+
+function normalizeStudyPart(part: KbStudyPart): KbStudyPart {
+  part.cards.forEach(normalizeCard);
+  part.questions.forEach(normalizeQuestion);
+  return part;
+}
+
 function findStudy(w: FakeWorld, id: string): FakeStudy {
   for (const chat of w.chats) {
     for (const message of chat.messages) {
       const part = partsOf(message).find((p) => p.type === 'study' && p.id === id);
-      if (part) return { chat, message, part: part as KbStudyPart };
+      if (part) return { chat, message, part: normalizeStudyPart(part as KbStudyPart) };
     }
   }
   return fail(404, 'This deck or test is no longer in the chat.');
@@ -617,6 +642,7 @@ function findStudy(w: FakeWorld, id: string): FakeStudy {
 
 /** A block changed: `part_update` with the whole block, the answer back. */
 function studyChanged(w: FakeWorld, found: FakeStudy): KbStudyPart {
+  normalizeStudyPart(found.part);
   found.part.total = found.part.kind === 'deck' ? found.part.cards.length : found.part.questions.length;
   const counts = { new: 0, learning: 0, known: 0, hard: 0 };
   for (const c of found.part.cards) counts[c.group] += 1;
@@ -647,11 +673,68 @@ function markCards(cards: KbStudyCard[], ids: string[], mark: string): void {
 
 function deckView(w: FakeWorld, pageId: string): KbDeckView {
   const deck = w.decks?.[pageId] ?? fail(404, 'This page is not a deck.');
+  deck.cards.forEach(normalizeCard);
   const counts = { new: 0, learning: 0, known: 0, hard: 0 };
   for (const c of deck.cards) counts[c.group] += 1;
   deck.groups = counts;
   deck.unclear = deck.cards.filter((c) => c.unclear).length;
   return structuredClone(deck);
+}
+
+function studySavedBlocks(part: KbStudyPart): KbBlock[] {
+  if (part.kind === 'deck') {
+    return part.cards.flatMap((c) => [
+      block(c.id, 'from_source', 'Cards', `${c.question}::${c.answer}`, structuredClone(c.citations)),
+      ...(c.explanation ? [block(`${c.id}-ex`, 'explanation', 'Cards', `Agent explanation: ${c.explanation}`)] : []),
+    ]);
+  }
+  return part.questions.flatMap((q) => {
+    const text = q.type === 'choice' || q.type === 'multi'
+      ? [q.question, ...q.answers.map((a) => `- [x] ${a}`)].join('\n')
+      : `${q.question}::${q.answers[0] ?? ''}`;
+    const wrong = q.options.filter((o) => !isRightOption(q, o)).map((o) => o.text);
+    return [
+      block(q.id, 'from_source', 'Questions', text, structuredClone(q.citations)),
+      ...(wrong.length ? [block(`${q.id}-w`, 'explanation', 'Questions', ['Made up by the agent:', ...wrong.map((x) => `- [ ] ${x}`)].join('\n'))] : []),
+      ...(q.explanation ? [block(`${q.id}-ex`, 'explanation', 'Questions', `Agent explanation: ${q.explanation}`)] : []),
+    ];
+  });
+}
+
+function savedTestQuestions(w: FakeWorld, testPage: KbPage): KbStudyQuestion[] {
+  const savedBlock = w.chats.flatMap((c) => c.messages.flatMap((m) => partsOf(m)))
+    .find((p): p is KbStudyPart => p.type === 'study' && (p as KbStudyPart).kind === 'test' && (p as KbStudyPart).save.page_id === testPage.id);
+  if (savedBlock) {
+    return structuredClone(savedBlock.questions).map((q) => normalizeQuestion({ ...q, response: null }));
+  }
+  return testPage.blocks.filter((b) => b.kind === 'from_source').map((b) => {
+    const basis = b.citations.length > 0 ? 'source' as const : 'agent' as const;
+    const wrongBlock = testPage.blocks.find((x) => x.id === `${b.id}-w`);
+    const wrong = wrongBlock
+      ? wrongBlock.text.split('\n').filter((l) => l.startsWith('- [ ] ')).map((l) => l.slice(6).trim())
+      : [];
+    const exBlock = testPage.blocks.find((x) => x.id === `${b.id}-ex`);
+    const explanation = exBlock ? exBlock.text.replace(/^Agent explanation:\s*/, '') : null;
+    if (b.text.includes('\n- [x] ')) {
+      const lines = b.text.split('\n');
+      const question = lines[0]!;
+      const answers = lines.slice(1).filter((l) => l.startsWith('- [x] ')).map((l) => l.slice(6).trim());
+      const options = [
+        ...wrong.slice(0, 1).map((text, n) => ({ id: `w${n}`, text, origin: 'agent' as const, right: false })),
+        ...answers.map((text, n) => ({ id: `r${n}`, text, origin: basis, right: true })),
+        ...wrong.slice(1).map((text, n) => ({ id: `w${n + 1}`, text, origin: 'agent' as const, right: false })),
+      ];
+      return normalizeQuestion({
+        id: b.id, type: answers.length > 1 ? 'multi' : 'choice', question, basis, options, answers,
+        citations: structuredClone(b.citations), explanation, response: null,
+      });
+    }
+    const [question = '', answer = ''] = b.text.split('::');
+    return normalizeQuestion({
+      id: b.id, type: 'short', question, basis, options: [], answers: [answer],
+      citations: structuredClone(b.citations), explanation, response: null,
+    });
+  });
 }
 
 const normalized = (t: string) => t.trim().toLowerCase().replace(/[.!?]+$/, '');
@@ -706,10 +789,11 @@ const STUDY_ROUTES: FakeRoutes = {
   'POST /kb/study/decks/{page_id}/study': [200, (w, { path, body }) => {
     // Bug 1 (2026-10-26), as the backend: the block belongs to SKAZ's own wiki-study thread (never
     // listed), not to the open chat; opened again, an unfinished one goes on where it stopped.
-    const deck = deckView(w, path.page_id);
-    const mode = body.mode ?? 'due';
-    const live = deck.cards.filter((c) => !c.suspended && (!body.card_ids || body.card_ids.includes(c.id)));
-    const cards = mode === 'hard' ? live.filter((c) => c.group === 'hard') : mode === 'new' ? live.filter((c) => c.group === 'new') : live;
+    const testPage = !w.decks?.[path.page_id]
+      ? w.pages.find((p) => p.id === path.page_id && p.kind === 'test')
+      : undefined;
+    const deck = testPage ? null : deckView(w, path.page_id);
+    const mode = testPage ? 'all' : (body.mode ?? 'due');
     let chat = w.chats.find((c) => c.id === WIKI_STUDY_CHAT);
     if (!chat) {
       chat = {
@@ -724,18 +808,33 @@ const STUDY_ROUTES: FakeRoutes = {
       if ((other as KbStudyPart).place !== 'chat') (other as KbStudyPart).place = 'chat';
     }
     const again = chat.messages.flatMap((m) => partsOf(m)).map((p) => p as unknown as KbStudyPart)
-      .find((p) => p.type === 'study' && p.save.page_id === path.page_id && p.mode === mode && !body.card_ids && p.position < p.total);
+      .find((p) => p.type === 'study' && p.save.page_id === path.page_id && p.origin === 'show'
+        && (testPage ? p.kind === 'test' : p.mode === mode && !body.card_ids && p.position < p.total));
     if (again) {
       again.place = 'panel';
-      return { chat_id: chat.id, study: structuredClone(again) };
+      return { chat_id: chat.id, study: structuredClone(normalizeStudyPart(again)) };
     }
     const id = `st-${++w.seq}`;
     const messageId = `${chat.id}-s${w.seq}`;
-    const part: KbStudyPart = {
-      type: 'study', id, kind: 'deck', title: deck.title, engine: chat.engine, origin: 'show', mode, place: 'panel', position: 0, side: 'question',
-      total: cards.length, cards: structuredClone(cards), questions: [], groups: deck.groups, held_back: 0,
-      save: { status: 'saved', path: `Study/Decks/${deck.title}.md`, page_id: path.page_id }, result: null, chat_id: chat.id, message_id: messageId,
-    };
+    let part: KbStudyPart;
+    if (testPage) {
+      const questions = savedTestQuestions(w, testPage);
+      part = normalizeStudyPart({
+        type: 'study', id, kind: 'test', title: testPage.title, engine: chat.engine, origin: 'show', mode: 'all', place: 'panel',
+        position: 0, side: 'question', total: questions.length, cards: [], questions,
+        groups: { new: 0, learning: 0, known: 0, hard: 0 }, held_back: 0,
+        save: { status: 'saved', path: `Study/Tests/${testPage.title}.md`, page_id: path.page_id },
+        result: null, chat_id: chat.id, message_id: messageId, unclear: questions.filter((q) => q.unclear).length,
+      });
+    } else {
+      const live = deck!.cards.filter((c) => !c.suspended && (!body.card_ids || body.card_ids.includes(c.id)));
+      const cards = mode === 'hard' ? live.filter((c) => c.group === 'hard') : mode === 'new' ? live.filter((c) => c.group === 'new') : live;
+      part = normalizeStudyPart({
+        type: 'study', id, kind: 'deck', title: deck!.title, engine: chat.engine, origin: 'show', mode, place: 'panel', position: 0, side: 'question',
+        total: cards.length, cards: structuredClone(cards), questions: [], groups: deck!.groups, held_back: 0,
+        save: { status: 'saved', path: `Study/Decks/${deck!.title}.md`, page_id: path.page_id }, result: null, chat_id: chat.id, message_id: messageId,
+      });
+    }
     const message = chatMessage(messageId, (chat.messages.at(-1)?.seq ?? 0) + 1, 'system', clock(w), [part as unknown as KbMessage['parts'][number]]);
     chat.messages.push(message);
     pushEvent(w, chat.id, { type: 'message', message_id: message.id, message: structuredClone(message) });
@@ -789,10 +888,12 @@ const STUDY_ROUTES: FakeRoutes = {
   'POST /kb/study/{block_id}/answer': [200, (w, { path, body }) => {
     const found = findStudy(w, path.block_id);
     const q = found.part.questions.find((x) => x.id === body.item_id) ?? fail(404, 'This question is not in the test.');
+    normalizeQuestion(q);
     if (q.type === 'choice' || q.type === 'multi') {
-      const picked = body.choices ?? [];
-      if (!picked.length) fail(409, 'Choose one of the options.');
-      const right = q.options.filter((o) => o.origin === 'source').map((o) => o.id).sort();
+      const picked = [...new Set(body.choices ?? [])];
+      if (!picked.length || picked.some((id) => !q.options.some((o) => o.id === id))) fail(409, 'Choose one of the options.');
+      if (q.type === 'choice' && picked.length !== 1) fail(409, 'Choose one option.');
+      const right = q.options.filter((o) => isRightOption(q, o)).map((o) => o.id).sort();
       const ok = JSON.stringify([...picked].sort()) === JSON.stringify(right);
       q.response = { choices: picked, text: null, checked: true, score: ok ? 1 : 0, verdict: null, missing: null, comment: null, checking: false, error: null };
     } else {
@@ -858,15 +959,23 @@ const STUDY_ROUTES: FakeRoutes = {
     if (part.origin !== 'agent') fail(409, 'This block shows saved pages already.');
     if (part.save.status === 'saved') fail(409, 'Already saved to the wiki.');
     if (body.decision === 'deny') { part.save.status = 'denied'; return studyChanged(w, found); }
+    normalizeStudyPart(part);
     const pageId = `p-${part.kind}-${++w.seq}`;
+    for (const c of part.cards) c.page_id = pageId;
+    const blocks = studySavedBlocks(part);
+    const sources = [...new Set(blocks.flatMap((b) => b.citations.map((c) => c.material_id)))];
+    const folders = [...new Set(sources.map((id) => w.materials.find((m) => m.id === id)?.folder_id).filter((id): id is string => Boolean(id)))];
+    const folderNames = folders.map((id) => folderName(w, id));
     w.pages.push({
-      id: pageId, kind: part.kind, title: part.title, original: null, aliases: [], folders: [], sources: [], language: 'en', blocks: [],
-      related: [], mentioned_in: [], folder_names: [], updated_at: clock(w), is_analysis_source_forbidden: false,
+      id: pageId, kind: part.kind, title: part.title, original: null, aliases: [], folders, sources, language: 'en', blocks,
+      related: [], mentioned_in: [], folder_names: folderNames, updated_at: clock(w), is_analysis_source_forbidden: false,
     });
     part.save = { status: 'saved', path: part.save.path, page_id: pageId };
-    for (const c of part.cards) c.page_id = pageId;
     if (part.kind === 'deck') {
-      (w.decks ??= {})[pageId] = { page_id: pageId, title: part.title, cards: structuredClone(part.cards), groups: part.groups, due: 0 };
+      (w.decks ??= {})[pageId] = {
+        page_id: pageId, title: part.title, cards: structuredClone(part.cards), groups: part.groups, due: 0,
+        unclear: part.cards.filter((c) => c.unclear).length,
+      };
     }
     return studyChanged(w, found);
   }],

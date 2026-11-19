@@ -1,6 +1,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { KbQuote, KbRef } from '../../api/kb/types.gen';
 import type { Selection } from '../chat/select/model';
+import { createAttachmentDraftStore, type AttachmentDraftStore } from '../composer/attachmentDrafts041/draft';
 
 /**
  * Hand-off into the message field from anywhere in the window: the selection toolbar ("Ask",
@@ -22,13 +23,8 @@ export interface ComposerBusState {
   push: (items: ComposerItem[], options?: { focus?: boolean }) => void;
   take: () => ComposerItem[];
   /** Unsent drafts by chat (`new` = New chat): a draft is never lost or mixed into another question. */
-  drafts: Map<string, ComposerDraft>;
-}
-
-/** What a chat's field held when the user left it: its nodes and attachments, given back on return. */
-export interface ComposerDraft {
-  nodes: Node[];
-  attachments: readonly object[];
+  drafts: Map<string, Node[]>;
+  attachmentDrafts: AttachmentDraftStore;
 }
 
 export type ComposerBus = StoreApi<ComposerBusState>;
@@ -38,6 +34,7 @@ export function createComposerBus(): ComposerBus {
     queue: [],
     focusTick: 0,
     drafts: new Map(),
+    attachmentDrafts: createAttachmentDraftStore(),
     push: (items, options = {}) => set((s) => ({
       queue: [...s.queue, ...items],
       focusTick: options.focus === false ? s.focusTick : s.focusTick + 1,

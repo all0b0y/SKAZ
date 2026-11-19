@@ -23,9 +23,17 @@ from .guard import Finding, clean_invisible, detect_instruction
 from .html import extract_article
 from .markdown_blocks import block_of_offset, markdown_blocks
 from .pdf import extract_pdf
+from .visual import (
+    MAX_IMAGE_BYTES,
+    PreparedVisual,
+    VisualSourceLocator,
+    inspect_image_bytes,
+)
 
 TEXT_EXTENSIONS = frozenset({".txt", ".md", ".markdown"})
 PDF_EXTENSIONS = frozenset({".pdf"})
+DOCX_EXTENSIONS = frozenset({".docx"})
+IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".heic"})
 #: A PDF with at least this many pages is filed as a book.
 BOOK_PAGES = 100
 _TEXT_FINDING_KINDS = frozenset({"unicode_tags", "hidden_html", "html_comment", "hidden_pdf_text"})
@@ -42,6 +50,8 @@ class Original:
     name: str
     data: bytes | None = None
     path: Path | None = None
+    expected_size: int | None = None
+    expected_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -196,4 +206,34 @@ def prepare_html(html: str, *, origin: Origin, fallback: str, original: Original
         original=original,
         failure=failure,
         extra={"site_name": extraction.site_name} if extraction.site_name else {},
+    )
+
+
+def prepare_image_bytes(
+    data: bytes,
+    file_name: str,
+    *,
+    material_id: str | None = None,
+    max_bytes: int = MAX_IMAGE_BYTES,
+) -> PreparedVisual:
+    """Validate and wrap raw image bytes with a versioned locator (touches no library or network)."""
+    import hashlib
+
+    header = inspect_image_bytes(data, max_bytes=max_bytes)
+    digest = hashlib.sha256(data).hexdigest()
+    locator = VisualSourceLocator(
+        version=1,
+        kind="image",
+        material_id=material_id,
+        source_sha256=digest,
+        file_name=Path(file_name).name,
+    )
+    return PreparedVisual(
+        locator=locator,
+        data=data,
+        media_type=header.media_type,
+        width=header.width,
+        height=header.height,
+        sha256=digest,
+        retention_permitted=False,
     )

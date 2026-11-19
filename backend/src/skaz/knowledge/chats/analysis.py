@@ -547,28 +547,37 @@ class AnalysisWriter:
         kind: BlockKind = "connection" if len(cites) >= 2 else "explanation"
         return Block.create(new_id("c"), kind, body, cites=tuple(cites) if kind == "connection" else ())
 
+    def chunks(self, parts: Sequence[Part]) -> list[Chunk | ConnectionPart]:
+        return paragraphs(parts, self._time)
+
     def blocks(self, sections: Sequence[Section]) -> list[PagePiece]:
         out: list[PagePiece] = []
         for section in sections:
-            body: list[PagePiece] = []
-            for item in paragraphs(section.parts, self._time):
-                built = (self._connection_block(item) if isinstance(item, ConnectionPart)
-                         else self._chunk_block(item))
-                if built is not None:
-                    body.append(built)
-            if not any(isinstance(piece, Block) for piece in body):
-                continue
-            question = clean_title(section.question)
-            if question:
-                _refuse_instructions(question)
-                out.append(Heading(2, question))
-            out.extend(body)
+            out.extend(self.section_blocks(section.question, self.chunks(section.parts)))
         return out
+
+    def section_blocks(self, question_text: str, items: Sequence[Chunk | ConnectionPart]) -> list[PagePiece]:
+        body: list[PagePiece] = []
+        for item in items:
+            built = (self._connection_block(item) if isinstance(item, ConnectionPart)
+                     else self._chunk_block(item))
+            if built is not None:
+                body.append(built)
+        if not any(isinstance(piece, Block) for piece in body):
+            return []
+        question = clean_title(question_text)
+        if question:
+            _refuse_instructions(question)
+            body.insert(0, Heading(2, question))
+        return body
 
     # -- the page ----------------------------------------------------------------------
 
     def save(self, titles: Sequence[str], sections: Sequence[Section], chat_id: str) -> PageRecord:
-        parts = self.blocks(sections)
+        return self.save_blocks(titles, self.blocks(sections), chat_id)
+
+    def save_blocks(self, titles: Sequence[str], parts: Sequence[PagePiece], chat_id: str,
+                    *, page_id: str | None = None) -> PageRecord:
         if not any(isinstance(part, Block) for part in parts):
             raise AnalysisRefused(ONLY_UNCITED_DIAGRAMS if self.left_out_diagrams else NOTHING_TO_SAVE)
         sources = tuple(self.cited)
@@ -577,7 +586,7 @@ class AnalysisWriter:
             material = self.kb.material_repo.get(material_id)
             if material is not None:
                 folders.setdefault(material.folder_id, None)
-        base = PageMeta(skaz_id=new_id("pg"), kind="analysis", title="", language=self.language,
+        base = PageMeta(skaz_id=page_id or new_id("pg"), kind="analysis", title="", language=self.language,
                         folders=tuple(folders), sources=sources, extra={"skaz_chat": chat_id})
         candidates = _title_candidates(titles)
         taken: list[str] = []

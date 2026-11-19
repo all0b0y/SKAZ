@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .schemas import KbMaterialSummary
 
@@ -39,7 +39,7 @@ class KbAddText(_Request):
 
 
 class KbAddFile(_Request):
-    #: The absolute path the Electron file dialog returned (PDF, .md, .txt).
+    #: The absolute path the Electron file dialog or drop returned (PDF, DOCX, .md, .txt, images).
     path: str = Field(min_length=1, max_length=4096)
     folder_id: str = Field(min_length=1, max_length=64)
     #: ``null`` = the document's own title, else the file name.
@@ -47,6 +47,32 @@ class KbAddFile(_Request):
     #: Decision 15: add this material to the wiki once it is ready (``true``), keep it out
     #: (``false``), or let Settings → Wiki decide (``null``).
     to_wiki: bool | None = None
+    selection_source: Literal["picker", "drop", "clipboard"] | None = None
+    expected_size: int | None = Field(default=None, ge=1)
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$"
+    )
+
+
+class KbImagePreviewRequest(_Request):
+    """Trusted main-only image preview request (for an admitted disk path or stored material)."""
+
+    path: str | None = Field(default=None, min_length=1, max_length=4096)
+    material_id: str | None = Field(default=None, min_length=1, max_length=120)
+    expected_size: int | None = Field(default=None, ge=1)
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> KbImagePreviewRequest:
+        if (self.path is None) == (self.material_id is None):
+            raise ValueError("Provide exactly one of path or material_id.")
+        if self.material_id is not None and (
+            self.expected_size is not None or self.expected_sha256 is not None
+        ):
+            raise ValueError("expected_size and expected_sha256 apply only to path previews.")
+        return self
 
 
 KbAddLinkMode = Literal["text", "video", "both"]

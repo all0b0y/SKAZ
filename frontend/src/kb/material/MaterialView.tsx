@@ -4,7 +4,9 @@ import type { KbCorrection, KbCorrectionChange, KbJob, KbMaterial } from '../../
 import { errorText, KbApiError } from '../api/client';
 import { Banner, Button, Icon, IconButton, Menu, Segmented, Spinner } from '../ui';
 import { KIND_ICON, KIND_LABEL, formatTime } from '../library/materialMeta';
-import { PanelFrameButtons, useAskAbout } from '../document/parts';
+import { formatBytes } from '../materials/addItems';
+import { useAskAbout } from '../document/parts';
+import { ReaderPanelHeader } from '../document/readerSurface041/ReaderPanelHeader';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
 import { useRecording, useServices, useUi } from '../state/context';
@@ -21,9 +23,10 @@ import { OverlapLine } from './OverlapLine';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
 import { useLiveMaterial } from '../recording/useLiveMaterial';
 import { useRecognitionRecheck } from './RecognitionRecheck';
-import { FreshnessNotice } from './FreshnessNotice';
+import { FreshnessNotice, useFreshness } from './FreshnessNotice';
 import { ReadMarks } from './ReadMarks';
 import { RepeatToggle, useMaterialRepeats, useRepeatView } from './RepeatMarks';
+import { documentTitleMark, HeadingMark, headingLineClass } from '../document/headingAccents041/headingAccents';
 
 const MATERIAL_GONE = 'This material is no longer in the library — it was deleted.';
 
@@ -49,7 +52,7 @@ function durationOf(material: KbMaterial): number | null {
 
 const count = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 
-/** How big the material is: duration of speech, pages of a PDF, words of a text. */
+/** How big the material is: duration of speech, pages of a PDF, dimensions/size of an image, words of a text. */
 function sizeOf(material: KbMaterial): string | null {
   if (SPEECH.has(material.kind)) {
     const d = durationOf(material);
@@ -59,8 +62,31 @@ function sizeOf(material: KbMaterial): string | null {
     const pages = new Set(material.fragments.map((f) => f.page).filter((p) => p !== null));
     if (pages.size) return count(pages.size, 'page', 'pages');
   }
+  if (material.kind === 'image') {
+    if (material.origin?.width && material.origin?.height) return `${material.origin.width} × ${material.origin.height}`;
+    return material.origin?.size_bytes ? formatBytes(material.origin.size_bytes) : null;
+  }
   const words = material.fragments.reduce((n, f) => n + (f.text.match(/\S+/g)?.length ?? 0), 0);
   return words ? count(words, 'word', 'words') : null;
+}
+
+function ImageDetails({ material }: { material: KbMaterial }) {
+  const o = material.origin;
+  const specs = [
+    o?.format ? o.format.toUpperCase() : o?.mime_type,
+    o?.width && o?.height ? `${o.width} × ${o.height}` : null,
+    o?.size_bytes ? formatBytes(o.size_bytes) : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <div className="kb-excl" role="note" aria-label="Image details">
+      <div className="kb-excl__toggle">
+        <Icon name="image" size={14} />
+        <span>{o?.file_name ?? material.title}</span>
+      </div>
+      {specs && <p className="kb-muted">{specs}</p>}
+      <p className="kb-muted">Stored locally as an image without OCR or text extraction.</p>
+    </div>
+  );
 }
 
 /** One muted line under the title: type · date · size (and the translation, when there is one). */
@@ -141,6 +167,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
   const make = useMakeStudy();
   const expanded = useUi((s) => s.docExpanded);
   const closeDoc = useUi((s) => s.closeDoc);
+  const openDocument = useUi((s) => s.openDocument);
   const { state, reload, set } = useMaterialData(target.id);
   const data = state.value;
   const material = data?.material ?? null;
@@ -159,6 +186,8 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
   // N3: passages the wiki already has. Text materials only; speech is shown as spoken.
   const repeatsData = useMaterialRepeats(target.id);
   const repeatMarks = useRepeatView(material && SPEECH.has(material.kind) ? null : repeatsData, material?.fragments ?? NO_FRAGMENTS, target.id);
+  // N1 freshness: the blocks below the head and the manual entry point in the actions row (11/A).
+  const freshness = useFreshness(material ? material.id : null, reload);
 
   useEffect(() => {
     void client.call('POST /kb/materials/{material_id}/opened', { path: { material_id: target.id } })
@@ -195,43 +224,55 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
     { value: 'translation' as const, label: 'Translation' },
     { value: 'both' as const, label: expanded ? 'Side by side' : 'Both', name: 'Both' },
   ];
+  // 11/A: the notes action and the manual link check share one compact actions row; the freshness
+  // block below appears only when it has something to say (marks, a result, a running check).
+  const originUrl = material?.origin?.url ?? null;
+  const jobsRunning = data?.jobs.some((j) => j.state === 'queued' || j.state === 'running') ?? false;
+  const notesReady = material !== null && material.status === 'ready' && material.wiki?.state === 'in_wiki'
+    && !material.wiki.note_page_id && !jobsRunning;
+  // The entry point waits for the marks answer so it cannot appear and vanish when a "couldn't
+  // check" result arrives (that result owns its own retry inside the freshness block).
+  const checkable = originUrl !== null && freshness.asked && !freshness.couldNot;
+  const notesPageId = material?.wiki?.state === 'in_wiki' ? material.wiki.note_page_id : null;
 
   return (
     <>
-      <header className="kb-head kb-head--doc">
-        <span className="kb-doc__type">
-          {material && <Icon name={KIND_ICON[material.kind]} size={14} />}
-          <span>{material ? KIND_LABEL[material.kind] : 'Material'}</span>
-        </span>
-        <span className="kb-head__spacer" />
-        <PanelFrameButtons
-          more={(
-            <>
-              <IconButton ref={moreRef} icon="more" label="Material actions" aria-haspopup="menu" aria-expanded={menuOpen}
-                disabled={!material} onClick={() => setMenuOpen((v) => !v)} />
-              <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Material actions" items={[
-                { id: 'move', label: 'Move to folder', icon: 'folder', onSelect: () => setDialog('move') },
-                { id: 'topic', label: 'Topic ▸', icon: 'compass', onSelect: () => setDialog('topic') },
-                { id: 'rename', label: 'Rename', icon: 'pencil', onSelect: () => setDialog('rename') },
-                ...(material ? [
-                  { id: 'cards', label: 'Make cards from this', icon: 'deck' as const, onSelect: () => make('cards', [{ type: 'material', id: material.id, title: material.title }]) },
-                  { id: 'test', label: 'Make a test from this', icon: 'test' as const, onSelect: () => make('test', [{ type: 'material', id: material.id, title: material.title }]) },
-                ] : []),
-                ...(recheck.item ? [recheck.item] : []),
-                {
-                  id: 'delete', label: 'Delete…', icon: 'trash', danger: true,
-                  disabled: material?.status === 'recording', note: material?.status === 'recording' ? 'Recording' : undefined,
-                  onSelect: () => setDialog('delete'),
-                },
-              ]} />
-            </>
-          )}
-        >
-          <IconButton icon="chats" label="Ask about material" disabled={!material || isWithoutSpeech(material)}
-            onClick={() => material && askAbout({ type: 'material', id: material.id, title: material.title })} />
-          <IconButton icon="folder" label="Move to folder" disabled={!material} onClick={() => setDialog('move')} />
-        </PanelFrameButtons>
-      </header>
+      <ReaderPanelHeader
+        typeLabel={material ? KIND_LABEL[material.kind] : 'Material'}
+        typeIcon={material ? KIND_ICON[material.kind] : undefined}
+        actions={(
+          <>
+            {notesPageId && (
+              <Button size="sm" variant="quiet" aria-label="Open the notes"
+                onClick={() => openDocument({ type: 'page', id: notesPageId })}>Notes</Button>
+            )}
+            <IconButton icon="chats" label="Ask about material" disabled={!material || isWithoutSpeech(material)}
+              onClick={() => material && askAbout({ type: 'material', id: material.id, title: material.title })} />
+            <IconButton icon="folder" label="Move to folder" disabled={!material} onClick={() => setDialog('move')} />
+          </>
+        )}
+        more={(
+          <>
+            <IconButton ref={moreRef} icon="more" label="Material actions" aria-haspopup="menu" aria-expanded={menuOpen}
+              disabled={!material} onClick={() => setMenuOpen((v) => !v)} />
+            <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Material actions" className="kb-reader-menu" items={[
+              { id: 'move', label: 'Move to folder', icon: 'folder', onSelect: () => setDialog('move') },
+              { id: 'topic', label: 'Topic ▸', icon: 'compass', onSelect: () => setDialog('topic') },
+              { id: 'rename', label: 'Rename', icon: 'pencil', onSelect: () => setDialog('rename') },
+              ...(material ? [
+                { id: 'cards', label: 'Make cards from this', icon: 'deck' as const, onSelect: () => make('cards', [{ type: 'material', id: material.id, title: material.title }]) },
+                { id: 'test', label: 'Make a test from this', icon: 'test' as const, onSelect: () => make('test', [{ type: 'material', id: material.id, title: material.title }]) },
+              ] : []),
+              ...(recheck.item ? [recheck.item] : []),
+              {
+                id: 'delete', label: 'Delete…', icon: 'trash', danger: true,
+                disabled: material?.status === 'recording', note: material?.status === 'recording' ? 'Recording' : undefined,
+                onSelect: () => setDialog('delete'),
+              },
+            ]} />
+          </>
+        )}
+      />
       <div className="kb-doc__body" ref={bodyRef}>
         {state.load === 'loading' && !data && <div className="kb-doc__wait"><Spinner label="Opening the material" /></div>}
         {state.load === 'error' && !data && (
@@ -243,24 +284,33 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
         {material && data && (
           <article className={`kb-doc__article kb-mat${expanded ? ' is-wide' : ''}`} data-material-kind={material.kind}>
             <div className="kb-mat__head">
-              <h2 className="kb-doc__title">{material.title}</h2>
+              {/* G1: the open material's decorative `@` — ink, never text: the accessible name,
+                  copies and exports keep the title's own words. */}
+              <h2 className={`kb-doc__title ${headingLineClass}`}>
+                <HeadingMark kind={documentTitleMark('material')} size="title" />
+                <span>{material.title}</span>
+              </h2>
               <p className="kb-doc__meta">{metaLine(material)}</p>
               <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} onJobChanged={reload} />
-              {material.status === 'ready' && material.wiki?.state === 'in_wiki' && !material.wiki.note_page_id
-                && !data.jobs.some((j) => j.state === 'queued' || j.state === 'running') && (
+              {(notesReady || checkable) && (
                 <div className="kb-mat__actions">
-                  <Button size="sm" variant="quiet" icon="pencil" disabled={adding} onClick={() => void addToWiki(true)}>
-                    Write notes
-                  </Button>
-                  {material.wiki.error && <p className="kb-inline-error" role="alert">{material.wiki.error}</p>}
+                  {notesReady && (
+                    <Button size="sm" variant="quiet" icon="pencil" disabled={adding} onClick={() => void addToWiki(true)}>
+                      Write notes
+                    </Button>
+                  )}
+                  {checkable && (
+                    <Button size="sm" variant="quiet" busy={freshness.checking} disabled={freshness.checking}
+                      onClick={() => void freshness.check()}>Check links</Button>
+                  )}
+                  {notesReady && material.wiki.error && <p className="kb-inline-error" role="alert">{material.wiki.error}</p>}
                 </div>
               )}
               <OverlapLine overlap={material.overlap} />
               {repeatMarks.foldable && <RepeatToggle hide={repeatMarks.hide} onChange={repeatMarks.setHide} />}
               <ExcludedFragments materialId={material.id} count={material.excluded_count} guard={guard} onRestored={reload} />
             </div>
-            <FreshnessNotice materialId={material.id} originUrl={material.origin?.url ?? null}
-              onDelete={() => setDialog('delete')} onReplaced={reload} />
+            <FreshnessNotice freshness={freshness} onDelete={() => setDialog('delete')} />
             {continuable && (
               <div className="kb-mat__actions">
                 <Button size="sm" variant="outline" icon="mic" onClick={() => void recording.getState().continueRecording(material.id)}>
@@ -280,6 +330,10 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             )}
             {isWithoutSpeech(material) ? (
               <NoSpeech material={material} onDelete={() => setDialog('delete')} />
+            ) : material.kind === 'image' && material.fragments.length === 0 ? (
+              material.status === 'failed' ? null
+                : material.status === 'ready' ? <ImageDetails material={material} />
+                : <p className="kb-muted">This image is being prepared.</p>
             ) : material.fragments.length === 0 ? (
               material.status === 'failed' ? null
                 : <p className="kb-muted">{material.status === 'ready' ? 'This material has no text.' : 'The text appears here as soon as it is ready.'}</p>

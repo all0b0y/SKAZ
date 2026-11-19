@@ -6,8 +6,8 @@ import { useAgents, useLibrary, useServices, useSettings, useUi } from '../state
 import { agentOf } from '../state/agents';
 import type { EngineId } from '../api/names';
 import {
-  addedNote, fileItem, isSpeech, itemMeta, itemTitle, pasteItem, speechBlock, submitItem, wikiDefault, type AddItem,
-  type LinkItem,
+  addedNote, fileItem, isLocalVideo, isSpeech, itemMeta, itemTitle, LOCAL_VIDEO_AUDIO_ONLY_NOTICE, pasteItem,
+  speechBlock, submitItem, wikiDefault, type AddItem, type LinkItem,
 } from './addItems';
 import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 
@@ -60,8 +60,11 @@ export function AddMaterialModal() {
     const preset = ui.getState().addMaterialPreset;
     if (preset) {
       setFolderId(preset.folderId);
-      if (preset.files.length) setItems(preset.files.map((f) => fileItem(f.path, f.name, f.size)));
-      if (preset.unreadable) setDropError('Some files couldn’t be read from the drop. Choose them on the computer instead.');
+      if (preset.files.length) {
+        setItems(preset.files.map((f) => fileItem(f.path, f.name, f.size, { selectionId: f.selectionId, sha256: f.sha256 })));
+      }
+      if (preset.rejected?.length) setDropError(preset.rejected.join(' '));
+      else if (preset.unreadable) setDropError('Some files couldn’t be read from the drop. Choose them on the computer instead.');
     } else {
       client.call('GET /kb/recordings/defaults').then((d) => setFolderId(d.folder_id), () => setFolderId(folders.find((f) => f.system)?.id ?? ''));
     }
@@ -85,6 +88,7 @@ export function AddMaterialModal() {
   const noAgent = agents !== null && !agentReady;
   const wikiOn = toWiki ?? (agentReady && wikiDefault(items, auto));
   const speech = items.some(isSpeech);
+  const localVideo = items.some(isLocalVideo);
   const blocked = speech ? speechBlock(speechSettings, keys) : null;
   const openPlace = () => { if (!blocked) return; setOpen(false); openSettings(blocked.section); };
   const firstSpeech = items.find(isSpeech)?.id;
@@ -102,11 +106,54 @@ export function AddMaterialModal() {
     setPaste('');
     if (item.type === 'link' && item.classifying) classify(item);
   };
-  const addFiles = (list: Array<{ path: string; name: string; size: number | null }>) => {
-    setItems((cur) => [...cur, ...list.filter((f) => !cur.some((i) => i.type === 'file' && i.path === f.path)).map((f) => fileItem(f.path, f.name, f.size))]);
+  const addFiles = (list: Array<{ path: string; name: string; size: number | null; selectionId?: string; sha256?: string }>) => {
+    if (list.length === 0) return;
+    const replacedIds = items
+      .filter((i) => i.type === 'file' && list.some((f) => f.selectionId && f.path === i.path))
+      .map((i) => i.id);
+    setItems((cur) => {
+      const next = [...cur];
+      for (const f of list) {
+        const existingIndex = next.findIndex((i) => i.type === 'file' && i.path === f.path);
+        if (existingIndex >= 0) {
+          if (f.selectionId) {
+            next[existingIndex] = fileItem(f.path, f.name, f.size, { selectionId: f.selectionId, sha256: f.sha256 });
+          }
+          continue;
+        }
+        next.push(fileItem(f.path, f.name, f.size, { selectionId: f.selectionId, sha256: f.sha256 }));
+      }
+      return next;
+    });
+    if (replacedIds.length > 0) {
+      setErrors((cur) => {
+        const next = { ...cur };
+        for (const id of replacedIds) delete next[id];
+        return next;
+      });
+      setAlready((cur) => {
+        const next = { ...cur };
+        for (const id of replacedIds) delete next[id];
+        return next;
+      });
+    }
   };
   const choose = async () => {
     setDropError(null);
+    if (bridge.nativeIntake) {
+      const batch = await bridge.nativeIntake.chooseMaterialFiles();
+      addFiles(batch.accepted.map((a) => ({
+        path: a.path,
+        name: a.name,
+        size: a.size,
+        selectionId: a.selectionId,
+        sha256: a.sha256,
+      })));
+      if (batch.rejected.length > 0) {
+        setDropError(batch.rejected.map((r) => `${r.name}: ${r.reason}`).join(' '));
+      }
+      return;
+    }
     if (bridge.chooseMaterialFiles) { addFiles(await bridge.chooseMaterialFiles()); return; }
     if (bridge.chooseAudioFile) {
       const one = await bridge.chooseAudioFile();
@@ -122,6 +169,24 @@ export function AddMaterialModal() {
     const files = Array.from(e.dataTransfer.files);
     const text = e.dataTransfer.getData('text/plain');
     if (!files.length && text) { setPaste(text); return; }
+    if (bridge.nativeIntake) {
+      void bridge.nativeIntake.droppedMaterialFiles(files).then((batch) => {
+        addFiles(batch.accepted.map((a) => ({
+          path: a.path,
+          name: a.name,
+          size: a.size,
+          selectionId: a.selectionId,
+          sha256: a.sha256,
+        })));
+        const unreadable = files.length - batch.accepted.length - batch.rejected.length;
+        if (batch.rejected.length > 0) {
+          setDropError(batch.rejected.map((r) => `${r.name}: ${r.reason}`).join(' '));
+        } else if (unreadable > 0) {
+          setDropError('Some files couldn’t be read from the drop. Choose them on the computer instead.');
+        }
+      });
+      return;
+    }
     if (!bridge.droppedMediaFile) { setDropError('Dropping files works in the SKAZ window.'); return; }
     const picked = files.map((f) => ({ choice: bridge.droppedMediaFile!(f), size: f.size }))
       .filter((x): x is { choice: NonNullable<typeof x.choice>; size: number } => x.choice !== null)
@@ -165,7 +230,13 @@ export function AddMaterialModal() {
     let added = 0;
     for (const item of sendable) {
       try {
-        const made = await submitItem(client, item, { folderId: target, language: language || null, translate, toWiki: wikiOn });
+        const made = await submitItem(client, item, {
+          folderId: target,
+          language: language || null,
+          translate,
+          toWiki: wikiOn,
+          importSelection: bridge.nativeIntake?.importSelection,
+        });
         const note = addedNote(made);
         if (made.some((m) => !m.existing)) added += 1;
         if (note) {
@@ -204,7 +275,7 @@ export function AddMaterialModal() {
         >
           <Icon name="upload" size={22} />
           <b>Drop files here</b>
-          <span className="kb-muted">PDF, Markdown, text, audio, video · or <button type="button" className="kb-linkbtn" onClick={() => void choose()}>choose on the computer</button></span>
+          <span className="kb-muted">PDF, DOCX, Markdown, text, images, audio, video · or <button type="button" className="kb-linkbtn" onClick={() => void choose()}>choose on the computer</button></span>
         </div>
         {dropError && <p className="kb-inline-error" role="alert">{dropError}</p>}
         <div className="kb-paste">
@@ -219,7 +290,7 @@ export function AddMaterialModal() {
           <ul className="kb-aq" aria-label="To add">
             {items.map((item) => (
               <li key={item.id} className="kb-aqi">
-                <Icon name={item.type === 'text' ? 'text' : item.type === 'link' ? (item.info?.kind === 'video' ? 'video' : 'web') : item.kind === 'speech' ? (item.video ? 'video' : 'audio') : 'pdf'} size={15} />
+                <Icon name={item.type === 'text' ? 'text' : item.type === 'link' ? (item.info?.kind === 'video' ? 'video' : 'web') : item.kind === 'speech' ? (item.video ? 'video' : 'audio') : item.kind === 'image' ? 'image' : 'pdf'} size={15} />
                 <span className="kb-aqi__main">
                   <span className="kb-aqi__title">{itemTitle(item)}</span>
                   {errors[item.id] ? (
@@ -316,6 +387,11 @@ export function AddMaterialModal() {
                 <Switch label="Translate" checked={translate} onChange={setTranslate} />
                 <span>{target ? `Translate into ${languageName(target)}` : 'Translate'}</span>
               </div>
+            )}
+            {localVideo && (
+              <p className="kb-arow__hint kb-muted" data-testid="local-video-audio-only">
+                {LOCAL_VIDEO_AUDIO_ONLY_NOTICE}
+              </p>
             )}
           </div>
         )}

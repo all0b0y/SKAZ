@@ -32,6 +32,9 @@ export interface KbAddFile {
   folder_id: string;
   title?: string | null;
   to_wiki?: boolean | null;
+  selection_source?: "picker" | "drop" | "clipboard" | null;
+  expected_size?: number | null;
+  expected_sha256?: string | null;
 }
 
 export interface KbAddLink {
@@ -80,6 +83,8 @@ export interface KbAgent {
   visible: boolean;
   providers: KbAgentProvider[];
   web_search?: KbAgentWebSearch;
+  visual_transport?: boolean | null;
+  visual_transport_reason?: string | null;
 }
 
 export interface KbAgentDefault {
@@ -127,6 +132,8 @@ export interface KbAgentModel {
   visible: boolean;
   default_visible: boolean;
   favorite: boolean;
+  supports_image?: boolean | null;
+  input_modalities?: string[];
 }
 
 export interface KbAgentProvider {
@@ -266,7 +273,7 @@ export interface KbAreaMap {
 export interface KbAreaMaterial {
   material_id: string;
   title: string;
-  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image";
   publication: KbPublicationDate;
   wiki_pages: number;
   concepts?: number;
@@ -561,6 +568,13 @@ export interface KbCompareRow {
   id: string;
   label: string;
   cells: (KbCompareCell | null)[];
+}
+
+export interface KbCompatibleModel {
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
+  model_id: string;
+  label: string;
+  provider: string;
 }
 
 export interface KbConceptCard {
@@ -918,7 +932,7 @@ export interface KbFragment {
 export interface KbFragmentHit {
   material_id: string;
   material_title: string;
-  material_kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  material_kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image";
   seg: number;
   start_ms: number | null;
   page: number | null;
@@ -1134,6 +1148,14 @@ export interface KbHierarchyNode {
   text: string;
   note: string | null;
   depth: number;
+}
+
+/** Trusted main-only image preview request (for an admitted disk path or stored material). */
+export interface KbImagePreviewRequest {
+  path?: string | null;
+  material_id?: string | null;
+  expected_size?: number | null;
+  expected_sha256?: string | null;
 }
 
 export interface KbImportCreate {
@@ -1404,7 +1426,7 @@ export interface KbMarkedStatement {
 export interface KbMaterial {
   id: string;
   title: string;
-  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image";
   status: "recording" | "processing" | "ready" | "failed";
   folder_id: string;
   languages: string[];
@@ -1446,7 +1468,7 @@ export interface KbMaterialGuard {
 export interface KbMaterialHit {
   id: string;
   title: string;
-  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image";
   folder_id: string;
   folder_name: string;
   created_at: string;
@@ -1486,7 +1508,7 @@ export interface KbMaterialRepeats {
 export interface KbMaterialSummary {
   id: string;
   title: string;
-  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image";
   status: "recording" | "processing" | "ready" | "failed";
   folder_id: string;
   languages: string[];
@@ -1627,6 +1649,7 @@ export interface KbMessageEdit {
   mentions?: KbRef[];
   quotes?: KbQuote[];
   attachments?: string[];
+  text_only?: boolean;
 }
 
 export interface KbMessageInput {
@@ -1635,9 +1658,10 @@ export interface KbMessageInput {
   quotes: KbQuote[];
   attachments: string[];
   selection?: KbSelection | null;
+  text_only?: boolean;
 }
 
-export type KbMessagePart = KbKnowledgePart | KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart | KbWikiFixPart;
+export type KbMessagePart = KbKnowledgePart | KbTextPart | KbTextOnlyPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart | KbWikiFixPart;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
@@ -1701,6 +1725,12 @@ export interface KbOrigin {
   url: string | null;
   file_name: string | null;
   fetched_at?: string | null;
+  mime_type?: string | null;
+  format?: string | null;
+  size_bytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  sha256?: string | null;
 }
 
 /** A concept page that already said some of the material (each repeat links to its page). */
@@ -2248,11 +2278,19 @@ export interface KbSend {
   attachments?: string[];
   context?: KbOpenContext;
   selection?: KbSelection | null;
+  text_only?: boolean;
+  expected_target?: KbSendTarget | null;
 }
 
 export interface KbSendResult {
   user: KbMessage;
   assistant: KbMessage;
+}
+
+export interface KbSendTarget {
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
+  model?: string | null;
+  effort?: string | null;
 }
 
 export interface KbSettingsHealth {
@@ -2387,6 +2425,7 @@ export interface KbStudyCard {
   page_id: string | null;
   question: string;
   answer: string;
+  basis?: "source" | "agent";
   citations: KbCitation[];
   explanation: string | null;
   group: "new" | "learning" | "known" | "hard";
@@ -2483,6 +2522,7 @@ export interface KbStudyOption {
   id: string;
   text: string;
   origin: "source" | "agent";
+  right?: boolean;
 }
 
 /** A deck or test block in a chat (S5, W2): lives in one place — the chat, beside it, or its window. */
@@ -2528,6 +2568,7 @@ export interface KbStudyQuestion {
   id: string;
   type: "choice" | "multi" | "short" | "open";
   question: string;
+  basis?: "source" | "agent";
   options: KbStudyOption[];
   answers: string[];
   citations: KbCitation[];
@@ -2646,6 +2687,12 @@ export interface KbSubjectRef {
   seg: number | null;
 }
 
+/** V4 disclosure marker when the user explicitly sent with text only. */
+export interface KbTextOnlyPart {
+  type: "text_only";
+  label?: string;
+}
+
 export interface KbTextPart {
   type: "text";
   text: string;
@@ -2725,6 +2772,40 @@ export interface KbVerdictBlock {
   kind: "verdict";
   title: string | null;
   verdict: KbVerdict;
+}
+
+export interface KbVisualLocator {
+  material_id: string;
+  source_kind: string;
+  page: number | null;
+  timestamp_ms: number | null;
+  label: string;
+}
+
+export interface KbVisualPreflightRequest {
+  chat_id?: string | null;
+  engine?: "codex" | "claude_code" | "hermes" | "opencode" | null;
+  model?: string | null;
+  text?: string;
+  mentions?: KbRef[];
+  quotes?: KbQuote[];
+  attachments?: string[];
+  context?: KbOpenContext;
+}
+
+export interface KbVisualPreflightResponse {
+  requires_visual: boolean;
+  supported: boolean;
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
+  model_id: string | null;
+  state: "supported" | "unsupported" | "unverified";
+  reason_code: string | null;
+  title: string | null;
+  detail: string | null;
+  text_only_available: boolean;
+  draft_preserved: boolean;
+  locator: KbVisualLocator | null;
+  compatible_models: KbCompatibleModel[];
 }
 
 export interface KbWebLink {
@@ -3111,6 +3192,13 @@ export interface KbEndpoints {
     body: KbChatLastChoice;
     response: void;
     status: 204;
+  };
+  "POST /kb/chats/visual-preflight": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbVisualPreflightRequest;
+    response: KbVisualPreflightResponse;
+    status: 200;
   };
   "GET /kb/chats/{chat_id}": {
     path: { chat_id: string };
@@ -3793,7 +3881,7 @@ export interface KbEndpoints {
   };
   "GET /kb/materials": {
     path: Record<string, never>;
-    query: { folder_id?: string | null; kind?: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | null };
+    query: { folder_id?: string | null; kind?: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text" | "docx" | "image" | null };
     body: never;
     response: KbMaterialSummary[];
     status: 200;
@@ -3819,12 +3907,26 @@ export interface KbEndpoints {
     response: KbDatedMaterials;
     status: 200;
   };
+  "POST /kb/materials/clipboard-image": {
+    path: Record<string, never>;
+    query: { folder_id?: string; file_name?: string; title?: string | null };
+    body: never;
+    response: KbMaterialAdded;
+    status: 201;
+  };
   "POST /kb/materials/file": {
     path: Record<string, never>;
     query: Record<string, never>;
     body: KbAddFile;
     response: KbMaterialAdded;
     status: 201;
+  };
+  "POST /kb/materials/image-preview": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbImagePreviewRequest;
+    response: void;
+    status: 200;
   };
   "POST /kb/materials/link": {
     path: Record<string, never>;

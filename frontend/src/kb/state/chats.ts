@@ -5,6 +5,7 @@ import type { KbChatSearchRules } from '../api/searchRules';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult, Load } from './library';
 import { longPoll } from './poll';
+import { adjacentSelection, type CloseResult, type ReadingAnchor } from '../shell/chatTabs041';
 import {
   answerQuestion, decidePermission, isWaitingPart, partsOf, undoPermission,
   type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionDecision, type KbPermissionPart,
@@ -28,8 +29,18 @@ export interface ChatsData {
   listLoad: Load;
   listError: string | null;
   listCursor: number;
-  /** Chat in the centre; null = a new, not yet created chat. */
+  /** Chat in the centre; null = a new, not yet created chat (or all tabs closed). */
   currentId: string | null;
+  /** Ordered open chat tab IDs (unique). */
+  openTabIds: string[];
+  /** Most recently closed tab chat ID available for reopening. */
+  lastClosedTabId: string | null;
+  /** LIFO stack of closed tab chat IDs (oldest -> newest). */
+  closedTabHistory: string[];
+  /** True after closing the last open tab until a tab is opened/reopened or New chat starts. */
+  allTabsClosed: boolean;
+  /** Per-chat reading anchors keyed by chat ID; preserved across tab close/reopen. */
+  readingAnchors: Record<string, ReadingAnchor>;
   chats: Record<string, OpenChat>;
   /** Agent/model/effort picked for the new chat before its first message. */
   draftAgent: AgentChoice | null;
@@ -44,11 +55,24 @@ export interface ChatsActions {
   /** Keep the list live (answering / new answer indicators). Returns stop. */
   startListPoll: () => () => void;
   open: (id: string | null) => void;
+  selectTab: (chatId: string) => boolean;
+  closeTab: (chatId: string) => CloseResult;
+  reopenLastTab: () => string | null;
+  setReadingAnchor: (chatId: string, anchor: ReadingAnchor) => void;
+  getReadingAnchor: (chatId: string) => ReadingAnchor | undefined;
+  clearReadingAnchor: (chatId: string) => void;
+  registerBeforeSwitch: (listener: ((outgoingId: string | null) => void) | null) => () => void;
   load: (id: string) => Promise<void>;
   /** Follow one chat's events (streamed text, states, title). Returns stop. */
   follow: (id: string) => () => void;
   /** Create the chat if needed (or always, with `newChat`), then send. Resolves with the chat id. */
-  send: (input: KbMessageInput, context: KbOpenContext, options?: { newChat?: boolean }) => Promise<ActionResult<string>>;
+  send: (input: KbMessageInput, context: KbOpenContext, options?: {
+    newChat?: boolean;
+    draftChatId?: string | null;
+    onDraftChatActivated?: (chatId: string) => void;
+    initialAgent?: AgentChoice | null;
+    expectedTarget?: AgentChoice;
+  }) => Promise<ActionResult<string>>;
   stop: (chatId: string, messageId: string) => Promise<ActionResult>;
   regenerate: (chatId: string, messageId: string) => Promise<ActionResult>;
   /** Your question changed in place: the messages after it go and it is answered again (409 while answering). */
@@ -236,7 +260,8 @@ export function applyEvents(chat: KbChat, events: KbChatEvent[]): KbChat {
 }
 
 export function createChatsStore(client: KbClient): ChatsStore {
-  return createStore<ChatsData & ChatsActions>()((set, get) => {
+  return createStore<ChatsData & ChatsActions>()((set, get, store) => {
+    let beforeSwitch: ((outgoingId: string | null) => void) | null = null;
     const putChat = (chat: KbChat) => {
       set((s) => ({
         chats: { ...s.chats, [chat.id]: { chat, load: 'ready', error: null } },
@@ -300,6 +325,11 @@ export function createChatsStore(client: KbClient): ChatsStore {
       listError: null,
       listCursor: 0,
       currentId: null,
+      openTabIds: [],
+      lastClosedTabId: null,
+      closedTabHistory: [],
+      allTabsClosed: false,
+      readingAnchors: {},
       chats: {},
       draftAgent: null,
       draftSearchRules: null,
@@ -320,11 +350,31 @@ export function createChatsStore(client: KbClient): ChatsStore {
         if (res.chats.length) {
           set((s) => {
             const byId = new Map(s.list.map((c) => [c.id, c]));
-            for (const c of res.chats) byId.set(c.id, c);
             const chats = { ...s.chats };
             for (const c of res.chats) {
               const open = chats[c.id];
-              if (open?.chat) chats[c.id] = { ...open, chat: { ...open.chat, title: c.title, pinned: c.pinned, unread: c.unread } };
+              const hasLocal = !!open?.chat?.messages.some((m) => isLocal(m.id));
+              if (hasLocal && c.state === 'idle') {
+                const prev = byId.get(c.id);
+                byId.set(c.id, { ...c, state: prev?.state ?? 'answering' });
+              } else {
+                byId.set(c.id, c);
+              }
+              if (open?.chat) {
+                const inactive = c.id !== s.currentId;
+                chats[c.id] = {
+                  ...open,
+                  chat: {
+                    ...open.chat,
+                    title: c.title,
+                    pinned: c.pinned,
+                    unread: c.unread,
+                    ...(inactive && !hasLocal
+                      ? { state: c.state, waiting_for_user: (c as KbChatSummaryP).waiting_for_user }
+                      : {}),
+                  },
+                };
+              }
             }
             return { list: [...byId.values()].sort(byUpdated), chats };
           });
@@ -334,8 +384,95 @@ export function createChatsStore(client: KbClient): ChatsStore {
       }, get().listCursor),
 
       open: (id) => {
-        set({ currentId: id });
-        if (id && !get().chats[id]) void get().load(id);
+        const prevId = get().currentId;
+        if (prevId && prevId !== id) beforeSwitch?.(prevId);
+        if (!id) {
+          set({ currentId: null, allTabsClosed: false });
+          return;
+        }
+        set((s) => {
+          const nextOpenIds = s.openTabIds.includes(id) ? s.openTabIds : [...s.openTabIds, id];
+          const nextHistory = s.closedTabHistory.filter((x) => x !== id);
+          return {
+            currentId: id,
+            openTabIds: nextOpenIds,
+            closedTabHistory: nextHistory,
+            lastClosedTabId: nextHistory.at(-1) ?? null,
+            allTabsClosed: false,
+          };
+        });
+        if (!get().chats[id]) void get().load(id);
+      },
+
+      selectTab: (chatId) => {
+        const s = get();
+        if (!s.openTabIds.includes(chatId)) return false;
+        if (s.currentId && s.currentId !== chatId) beforeSwitch?.(s.currentId);
+        if (s.currentId !== chatId || s.allTabsClosed) {
+          set({ currentId: chatId, allTabsClosed: false });
+        }
+        if (!get().chats[chatId]) void get().load(chatId);
+        return true;
+      },
+
+      closeTab: (chatId) => {
+        const s = get();
+        const adj = adjacentSelection(s.openTabIds, chatId);
+        if (adj.index < 0) {
+          return { closed: false, wasActive: false, nextActiveId: s.currentId, focusId: null };
+        }
+        const wasActive = s.currentId === chatId;
+        if (wasActive) beforeSwitch?.(chatId);
+        const nextOpenIds = s.openTabIds.filter((x) => x !== chatId);
+        const nextActiveId = wasActive ? adj.nextActiveId : s.currentId;
+        const nextHistory = [...s.closedTabHistory.filter((x) => x !== chatId), chatId];
+        const nextAllClosed = wasActive ? nextOpenIds.length === 0 : s.allTabsClosed;
+        set({
+          openTabIds: nextOpenIds,
+          currentId: nextActiveId,
+          closedTabHistory: nextHistory,
+          lastClosedTabId: chatId,
+          allTabsClosed: nextAllClosed,
+        });
+        if (wasActive && nextActiveId && !get().chats[nextActiveId]) void get().load(nextActiveId);
+        return {
+          closed: true,
+          wasActive,
+          nextActiveId,
+          focusId: adj.focusId,
+        };
+      },
+
+      reopenLastTab: () => {
+        const id = get().lastClosedTabId;
+        if (!id) return null;
+        get().open(id);
+        return id;
+      },
+
+      setReadingAnchor: (chatId, anchor) => {
+        if (!chatId) return;
+        set((s) => ({
+          readingAnchors: { ...s.readingAnchors, [chatId]: anchor },
+        }));
+      },
+
+      getReadingAnchor: (chatId) => get().readingAnchors[chatId],
+
+      clearReadingAnchor: (chatId) => {
+        set((s) => {
+          if (!(chatId in s.readingAnchors)) return s;
+          const next = { ...s.readingAnchors };
+          delete next[chatId];
+          return { readingAnchors: next };
+        });
+      },
+
+      registerBeforeSwitch: (listener) => {
+        beforeSwitch = listener;
+        return () => {
+          if (beforeSwitch === listener) beforeSwitch = null;
+        };
       },
 
       load: async (id) => {
@@ -367,10 +504,16 @@ export function createChatsStore(client: KbClient): ChatsStore {
       }, 0),
 
       send: async (input, context, options = {}) => {
-        let id = options.newChat ? null : get().currentId;
+        let id = options.draftChatId !== undefined ? options.draftChatId : options.newChat ? null : get().currentId;
         if (!id) {
-          const draft = get().draftAgent;
+          const draft = options.expectedTarget ?? get().draftAgent ?? (options.newChat ? null : options.initialAgent ?? null);
           const rules = options.newChat ? null : get().draftSearchRules;
+          const scoped = options.draftChatId === null;
+          let activate = !scoped || (get().currentId === null && !get().allTabsClosed);
+          // A new draft can finish in the background if the user leaves while its chat is being created.
+          const unsubscribe = scoped ? store.subscribe((next) => {
+            if (next.currentId !== null || next.allTabsClosed) activate = false;
+          }) : undefined;
           try {
             const chat = await client.call('POST /kb/chats', {
               body: { ...(draft ? { engine: draft.engine, model: draft.model, effort: draft.effort } : {}),
@@ -379,11 +522,30 @@ export function createChatsStore(client: KbClient): ChatsStore {
             });
             putChat(chat);
             id = chat.id;
+            const prevId = get().currentId;
+            if (activate && prevId && prevId !== id) beforeSwitch?.(prevId);
+            if (activate) options.onDraftChatActivated?.(id);
             // A chat asked from ⌘K leaves New chat's own agent choice alone.
-            set({ currentId: id, draftAgent: options.newChat ? get().draftAgent : null,
-              draftSearchRules: options.newChat || get().draftSearchRules !== rules ? get().draftSearchRules : null });
+            set((s) => {
+              if (!activate) {
+                return s.allTabsClosed || s.openTabIds.includes(id!) ? s : { openTabIds: [...s.openTabIds, id!] };
+              }
+              const nextOpenIds = s.openTabIds.includes(id!) ? s.openTabIds : [...s.openTabIds, id!];
+              const nextHistory = s.closedTabHistory.filter((x) => x !== id);
+              return {
+                currentId: id,
+                openTabIds: nextOpenIds,
+                closedTabHistory: nextHistory,
+                lastClosedTabId: nextHistory.at(-1) ?? null,
+                allTabsClosed: false,
+                draftAgent: options.newChat ? s.draftAgent : null,
+                draftSearchRules: options.newChat || s.draftSearchRules !== rules ? s.draftSearchRules : null,
+              };
+            });
           } catch (error) {
             return { ok: false, error: errorText(error) };
+          } finally {
+            unsubscribe?.();
           }
         }
         const chatId = id;
@@ -408,7 +570,9 @@ export function createChatsStore(client: KbClient): ChatsStore {
           const res = await client.call('POST /kb/chats/{chat_id}/messages', {
             path: { chat_id: chatId },
             body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments, context,
-              ...(input.selection ? { selection: input.selection } : {}) },
+              ...(input.selection ? { selection: input.selection } : {}),
+              ...(input.text_only ? { text_only: true } : {}),
+              ...(options.expectedTarget ? { expected_target: options.expectedTarget } : {}) },
           });
           settled = true;
           // Q-A2: a message of your own closes a waiting question (its part_update confirms it).
@@ -432,7 +596,8 @@ export function createChatsStore(client: KbClient): ChatsStore {
       edit: (chatId, messageId, input) => act(async () => {
         const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/edit', {
           path: { chat_id: chatId, message_id: messageId },
-          body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments },
+          body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments,
+            ...(input.text_only ? { text_only: true } : {}) },
         });
         const open = get().chats[chatId];
         if (open?.chat) {
@@ -475,11 +640,28 @@ export function createChatsStore(client: KbClient): ChatsStore {
       }),
       remove: (chatId) => act(async () => {
         await client.call('DELETE /kb/chats/{chat_id}', { path: { chat_id: chatId } });
+        const adj = adjacentSelection(get().openTabIds, chatId);
+        const wasActive = get().currentId === chatId;
+        const nextCurrentId = wasActive ? adj.nextActiveId : get().currentId;
         set((s) => {
           const chats = { ...s.chats };
           delete chats[chatId];
-          return { list: s.list.filter((c) => c.id !== chatId), chats, currentId: s.currentId === chatId ? null : s.currentId };
+          const nextOpenIds = s.openTabIds.filter((x) => x !== chatId);
+          const nextHistory = s.closedTabHistory.filter((x) => x !== chatId);
+          const nextAnchors = { ...s.readingAnchors };
+          delete nextAnchors[chatId];
+          return {
+            list: s.list.filter((c) => c.id !== chatId),
+            chats,
+            currentId: nextCurrentId,
+            openTabIds: nextOpenIds,
+            closedTabHistory: nextHistory,
+            lastClosedTabId: nextHistory.at(-1) ?? null,
+            allTabsClosed: nextOpenIds.length === 0 ? false : s.allTabsClosed,
+            readingAnchors: nextAnchors,
+          };
         });
+        if (wasActive && nextCurrentId && !get().chats[nextCurrentId]) void get().load(nextCurrentId);
       }),
       markRead: async (chatId) => {
         if (!get().list.find((c) => c.id === chatId)?.unread) return;

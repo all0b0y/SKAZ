@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { KbMessage, KbMessagePart } from '../../api/kb/types.gen';
+import { auditCss } from '../board/audit';
 import { CallChip, FOLD_UNMOUNT_MS, ThoughtLine, callStates, formatSeconds } from './ThoughtLine';
 
 // Stage 6 B3 (decision 30): ThoughtLine + CallChip. While the agent works: the thinking line with a
@@ -303,5 +304,246 @@ describe('CallChip size (FIX2 S-L2)', () => {
     const rule = /\n\.kb-call \{([^}]*)\}/.exec(css)?.[1] ?? '';
     expect(rule).toMatch(/(^|\n)\s*height: 26px;/);
     expect(rule).not.toMatch(/--kb-control-h/);
+  });
+});
+
+const makeTools = (count: number, status: 'running' | 'done' = 'done'): KbMessagePart[] =>
+  Array.from({ length: count }, (_, i) => tool('skaz_search', `Call #${i + 1}`, {
+    status,
+    ...(status === 'done' ? { duration_ms: (i + 1) * 100 } : {}),
+  }));
+
+describe('Earlier tool-calls collapse (A3 / item 07)', () => {
+  it('shows all chips through 5 without an earlier-calls trigger', () => {
+    const m = msg(makeTools(5), 'streaming');
+    const { container } = render(<ThoughtLine message={m} head={head(m)} />);
+    const calls = within(screen.getByRole('list', { name: 'Tool calls' })).getAllByRole('listitem');
+    expect(calls).toHaveLength(5);
+    expect(calls.map((c) => c.querySelector('.kb-call__label')?.textContent)).toEqual([
+      'Call #1', 'Call #2', 'Call #3', 'Call #4', 'Call #5',
+    ]);
+    expect(container.querySelector('.kb-thought__earlier-trigger')).toBeNull();
+    expect(container.querySelector('.kb-thought__earlier-fold')).toBeNull();
+  });
+
+  it('from the 6th arrival onward, collapses earlier calls behind an arrowless trigger and keeps 5 latest visible', () => {
+    const m5 = msg(makeTools(5), 'streaming');
+    const { container, rerender } = render(<ThoughtLine message={m5} head={head(m5)} />);
+    expect(container.querySelector('.kb-thought__earlier-trigger')).toBeNull();
+
+    // 6th call arrives: 1 earlier call behind trigger, calls #2..#6 visible.
+    const m6 = msg(makeTools(6), 'streaming');
+    rerender(<ThoughtLine message={m6} head={head(m6)} />);
+    const trigger = screen.getByRole('button', { name: /1 earlier/i });
+    expect(trigger).toHaveTextContent('1 earlier call');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger.querySelectorAll('svg')).toHaveLength(0);
+
+    const visibleLabels = within(screen.getByRole('list', { name: 'Tool calls' }))
+      .getAllByRole('listitem')
+      .map((c) => c.querySelector('.kb-call__label')?.textContent);
+    expect(visibleLabels).toEqual(['Call #2', 'Call #3', 'Call #4', 'Call #5', 'Call #6']);
+
+    const folder = container.querySelector('.kb-thought__earlier-fold')!;
+    expect(folder).toHaveAttribute('data-open', 'false');
+    expect(folder).toHaveAttribute('aria-hidden', 'true');
+    expect(folder).toHaveAttribute('inert');
+    expect(trigger).toHaveAttribute('aria-controls', folder.id);
+    expect(folder.querySelectorAll('.kb-call')).toHaveLength(1);
+    expect(folder.querySelector('.kb-call__label')).toHaveTextContent('Call #1');
+
+    // 7th call arrives: trigger increments to "2 earlier calls" with sliding window #3..#7.
+    const m7 = msg(makeTools(7), 'streaming');
+    rerender(<ThoughtLine message={m7} head={head(m7)} />);
+    expect(trigger).toHaveTextContent('2 earlier calls');
+    expect(within(screen.getByRole('list', { name: 'Tool calls' })).getAllByRole('listitem')
+      .map((c) => c.querySelector('.kb-call__label')?.textContent)).toEqual([
+      'Call #3', 'Call #4', 'Call #5', 'Call #6', 'Call #7',
+    ]);
+    expect(Array.from(folder.querySelectorAll('.kb-call__label')).map((e) => e.textContent)).toEqual([
+      'Call #1', 'Call #2',
+    ]);
+  });
+
+  it('handles 18 calls (13 earlier calls + 5 latest) when unfolded after completion', async () => {
+    const user = userEvent.setup();
+    const m = msg([...makeTools(18), text('Answer')], 'done');
+    const { container } = render(<ThoughtLine message={m} head={null} />);
+
+    // Initially folded behind "18 tool calls".
+    const sumToggle = screen.getByRole('button', { name: /18 tool calls/ });
+    expect(container.querySelector('.kb-thought__earlier-trigger')).toBeNull();
+
+    await user.click(sumToggle);
+    const trigger = screen.getByRole('button', { name: /13 earlier/i });
+    expect(trigger).toHaveTextContent('13 earlier calls');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger.querySelectorAll('svg')).toHaveLength(0);
+
+    expect(within(screen.getByRole('list', { name: 'Tool calls' })).getAllByRole('listitem')
+      .map((c) => c.querySelector('.kb-call__label')?.textContent)).toEqual([
+      'Call #14', 'Call #15', 'Call #16', 'Call #17', 'Call #18',
+    ]);
+    const folder = container.querySelector('.kb-thought__earlier-fold')!;
+    expect(folder).toHaveAttribute('data-open', 'false');
+    expect(folder.querySelectorAll('.kb-call')).toHaveLength(13);
+  });
+
+  it('only hovering the trigger opens; moving into the revealed group keeps it open; leaving closes it', async () => {
+    const user = userEvent.setup();
+    const m = msg(makeTools(18), 'streaming');
+    const { container } = render(<ThoughtLine message={m} head={head(m)} />);
+    const trigger = screen.getByRole('button', { name: /13 earlier/i });
+    const folder = container.querySelector('.kb-thought__earlier-fold')!;
+    const latestChip = within(screen.getByRole('list', { name: 'Tool calls' })).getAllByRole('listitem')[0]!;
+
+    // Hovering a latest chip or the family container does NOT open the earlier calls.
+    await user.hover(latestChip);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(folder).toHaveAttribute('data-open', 'false');
+    await user.unhover(latestChip);
+
+    // Hovering the trigger opens it and exposes the 13 earlier calls.
+    await user.hover(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(folder).toHaveAttribute('data-open', 'true');
+    expect(folder).not.toHaveAttribute('aria-hidden');
+    expect(folder).not.toHaveAttribute('inert');
+    const earlierList = screen.getByRole('list', { name: 'Earlier tool calls' });
+    const firstEarlierChip = within(earlierList).getAllByRole('listitem')[0]!;
+
+    // Moving pointer into the revealed group keeps it open.
+    await user.hover(firstEarlierChip);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(folder).toHaveAttribute('data-open', 'true');
+
+    // Leaving the group closes it.
+    await user.unhover(firstEarlierChip);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(folder).toHaveAttribute('data-open', 'false');
+    expect(folder).toHaveAttribute('aria-hidden', 'true');
+    expect(folder).toHaveAttribute('inert');
+
+    // Clicking the trigger with a pointer and then leaving still closes it (pointer focus does not pin it).
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await user.unhover(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('resets open earlier group and unmounts all chips when the finished answer folds away', async () => {
+    const user = userEvent.setup();
+    const parts = makeTools(7);
+    const { container, rerender } = render(<ThoughtLine message={msg(parts, 'streaming')} head={null} />);
+    await user.hover(screen.getByRole('button', { name: /2 earlier/i }));
+    expect(container.querySelector('.kb-thought__earlier-fold')).toHaveAttribute('data-open', 'true');
+
+    rerender(<ThoughtLine message={msg([...parts, text('Done')], 'done')} head={null} />);
+    const outerFold = container.querySelector('.kb-thought__fold')!;
+    expect(outerFold).toHaveAttribute('data-open', 'false');
+    expect(outerFold).toHaveAttribute('inert');
+    fireEvent.transitionEnd(outerFold);
+    expect(container.querySelectorAll('.kb-call')).toHaveLength(0);
+    expect(container.querySelector('.kb-thought__earlier-trigger')).toBeNull();
+
+    // Unfolding the finished summary mounts the trigger in its collapsed state again.
+    await user.click(screen.getByRole('button', { name: /7 tool calls/ }));
+    expect(screen.getByRole('button', { name: /2 earlier/i })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('keyboard focus on the trigger opens; Escape dismisses without bubbling; blur closes and refocus reopens', async () => {
+    const user = userEvent.setup();
+    const outerKeyDown = vi.fn();
+    const m = msg(makeTools(8), 'streaming');
+    const { container } = render(
+      <div onKeyDown={outerKeyDown}>
+        <ThoughtLine message={m} head={head(m)} />
+        <button type="button">After</button>
+      </div>,
+    );
+    const trigger = screen.getByRole('button', { name: /3 earlier/i });
+    const folder = container.querySelector('.kb-thought__earlier-fold')!;
+
+    // Tab onto trigger -> opens.
+    await user.tab();
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(folder).toHaveAttribute('data-open', 'true');
+
+    // Escape closes and stops propagation.
+    await user.keyboard('{Escape}');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(folder).toHaveAttribute('data-open', 'false');
+    expect(folder).toHaveAttribute('inert');
+    expect(outerKeyDown).not.toHaveBeenCalled();
+
+    // Tab away -> Escape on outside button bubbles normally; Tab back -> reopens.
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'After' })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(folder).toHaveAttribute('data-open', 'true');
+
+    // Blur out closes it.
+    await user.tab();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(folder).toHaveAttribute('data-open', 'false');
+  });
+
+  it('stationary trigger: visible row precedes earlier folder in DOM, geometry is stable, and trigger does not shift on hover/open', async () => {
+    const user = userEvent.setup();
+    const m = msg(makeTools(10), 'streaming');
+    const { container } = render(<ThoughtLine message={m} head={head(m)} />);
+    const family = container.querySelector('.kb-thought__family')!;
+    const visible = family.querySelector('.kb-thought__visible')!;
+    const folder = family.querySelector('.kb-thought__earlier-fold')!;
+    const trigger = screen.getByRole('button', { name: /5 earlier/i });
+
+    // Visible row (trigger + latest 5) is placed before the earlier-calls fold so expanding downward cannot move the trigger.
+    expect(visible.compareDocumentPosition(folder) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const before = trigger.getBoundingClientRect();
+    await user.hover(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    const after = trigger.getBoundingClientRect();
+    expect(after).toEqual(before);
+
+    // Sibling CSS does not transform, scale or resize the trigger on hover/open, and obeys token lint.
+    const css = readFileSync(resolve(__dirname, './thoughtLine.css'), 'utf8');
+    expect(css).not.toMatch(/\.kb-thought__earlier-trigger[^}]*transform\s*:/);
+    const audit = auditCss({ 'kb/chat/thoughtLine.css': css });
+    expect(audit.colors).toEqual([]);
+    expect(audit.fontSizes.filter((t) => !t.value.endsWith('em'))).toEqual([]);
+    expect(audit.radii).toEqual([]);
+    expect(audit.spacing.filter((s) => s.value !== '1px' && parseFloat(s.value) <= 34)).toEqual([]);
+    expect(audit.shadows).toBe(0);
+  });
+
+  it('respects reduced motion (calm/off and prefers-reduced-motion) while preserving open/close behavior', async () => {
+    const user = userEvent.setup();
+    document.documentElement.dataset.motion = 'calm';
+    const m = msg(makeTools(8), 'streaming');
+    const { container, rerender } = render(<ThoughtLine message={m} head={head(m)} />);
+    expect(container.querySelector('.kb-thought')).toHaveAttribute('data-level', 'calm');
+
+    const trigger = screen.getByRole('button', { name: /3 earlier/i });
+    const folder = container.querySelector('.kb-thought__earlier-fold')!;
+    await user.hover(trigger);
+    expect(folder).toHaveAttribute('data-open', 'true');
+    await user.unhover(trigger);
+    expect(folder).toHaveAttribute('data-open', 'false');
+
+    await act(async () => {
+      document.documentElement.dataset.motion = 'off';
+      rerender(<ThoughtLine message={m} head={head(m)} />);
+    });
+    expect(container.querySelector('.kb-thought')).toHaveAttribute('data-level', 'off');
+    await user.hover(trigger);
+    expect(folder).toHaveAttribute('data-open', 'true');
+
+    const css = readFileSync(resolve(__dirname, './thoughtLine.css'), 'utf8');
+    expect(css).toMatch(/prefers-reduced-motion:\s*reduce/);
+    expect(css).toMatch(/data-level=['"]calm['"]/);
+    expect(css).toMatch(/data-level=['"]off['"]/);
   });
 });

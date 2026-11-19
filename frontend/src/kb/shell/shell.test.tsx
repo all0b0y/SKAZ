@@ -82,11 +82,18 @@ describe('Window shell', () => {
     const user = userEvent.setup();
     renderKb();
     const toggle = await screen.findByRole('button', { name: 'Hide side panel' });
-    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    // 13/A: a Hide/Show command, not an on-state indicator — quiet at rest in both panel states.
+    // The accessible name, the glyph and the tooltip carry the state; there is no resting fill.
+    expect(toggle).not.toHaveAttribute('aria-pressed');
+    expect(toggle).not.toHaveClass('is-active');
+    expect(toggle).toHaveAttribute('aria-controls', 'kb-side');
+    expect(toggle.querySelector('[data-icon]')).toHaveAttribute('data-icon', 'sidebarClose');
     await user.click(toggle);
     expect(screen.queryByRole('region', { name: 'Chats' })).not.toBeInTheDocument();
     expect(storedPrefs().sideOpen).toBe(false);
-    expect(screen.getByRole('button', { name: 'Show side panel' })).toHaveAttribute('aria-pressed', 'false');
+    const reopen = screen.getByRole('button', { name: 'Show side panel' });
+    expect(reopen).not.toHaveAttribute('aria-pressed');
+    expect(reopen.querySelector('[data-icon]')).toHaveAttribute('data-icon', 'sidebarOpen');
     // The composer stays where it is.
     expect(screen.getByTestId('composer')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^Materials/ }));

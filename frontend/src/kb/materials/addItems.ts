@@ -1,21 +1,32 @@
 // What "+ Material" sends, decided without the UI: file type by extension, link vs text, and the
 // route per item (API-B2 §4; package-1 routes for files, text and speech imports).
 
-import { DOCUMENT_EXTENSIONS, SPEECH_EXTENSIONS, VIDEO_EXTENSIONS } from '../../api/bridge';
-import type { KbKeys, KbLinkInfo, KbMaterialSummary, KbSpeechMaterial, KbSpeechSettings } from '../../api/kb/types.gen';
+import { DOCUMENT_EXTENSIONS, IMAGE_EXTENSIONS, SPEECH_EXTENSIONS, VIDEO_EXTENSIONS, type NativeIntakeApi } from '../../api/bridge';
+import type { KbEndpoints, KbKeys, KbLinkInfo, KbMaterialSummary, KbSpeechMaterial, KbSpeechSettings } from '../../api/kb/types.gen';
 import type { SettingsSection } from '../state/ui';
-import type { KbClient } from '../api/client';
+import { KbApiError, type KbClient } from '../api/client';
 
 const SPEECH_EXT = new Set<string>(SPEECH_EXTENSIONS);
 const VIDEO_EXT = new Set<string>(VIDEO_EXTENSIONS);
 const DOCUMENT_EXT = new Set<string>(DOCUMENT_EXTENSIONS);
+const IMAGE_EXT = new Set<string>(IMAGE_EXTENSIONS);
 
-/** `unsupported`: SKAZ can't read it (a dropped `.docx`, `.png`…); the row says so before Add (QA B2, B15). */
-export type FileKind = 'speech' | 'document' | 'unsupported';
+/** `unsupported`: SKAZ can't read it (a dropped `.rtf`, `.html`…); the row says so before Add (QA B2, B15). */
+export type FileKind = 'speech' | 'document' | 'image' | 'unsupported';
 
-export const UNSUPPORTED_FILE = 'SKAZ can’t read this type. It adds PDF, Markdown (.md), text (.txt), audio and video.';
+export const UNSUPPORTED_FILE = 'SKAZ can’t read this type. It adds PDF, DOCX, Markdown (.md), text (.txt), images (JPEG, PNG, WebP, HEIC), audio and video.';
 
-export interface FileItem { id: string; type: 'file'; path: string; name: string; size: number | null; kind: FileKind; video: boolean }
+export interface FileItem {
+  id: string;
+  type: 'file';
+  path: string;
+  name: string;
+  size: number | null;
+  kind: FileKind;
+  video: boolean;
+  selectionId?: string;
+  sha256?: string;
+}
 export interface LinkItem {
   id: string; type: 'link'; url: string; info: KbLinkInfo | null; classifying: boolean; error: string | null;
   /** Article with an embedded video: what to take (text / video / both). */
@@ -34,10 +45,31 @@ export function extensionOf(name: string): string {
   return m ? m[1]!.toLowerCase() : '';
 }
 
-export function fileItem(path: string, name: string, size: number | null): FileItem {
+export function fileItem(
+  path: string,
+  name: string,
+  size: number | null,
+  extra?: { selectionId?: string; sha256?: string },
+): FileItem {
   const ext = extensionOf(name);
-  const kind: FileKind = SPEECH_EXT.has(ext) ? 'speech' : DOCUMENT_EXT.has(ext) ? 'document' : 'unsupported';
-  return { id: nextId(), type: 'file', path, name, size, kind, video: VIDEO_EXT.has(ext) };
+  const kind: FileKind = SPEECH_EXT.has(ext)
+    ? 'speech'
+    : DOCUMENT_EXT.has(ext)
+      ? 'document'
+      : IMAGE_EXT.has(ext)
+        ? 'image'
+        : 'unsupported';
+  return {
+    id: nextId(),
+    type: 'file',
+    path,
+    name,
+    size,
+    kind,
+    video: VIDEO_EXT.has(ext),
+    ...(extra?.selectionId ? { selectionId: extra.selectionId } : {}),
+    ...(extra?.sha256 ? { sha256: extra.sha256 } : {}),
+  };
 }
 
 export const NOT_A_LINK = 'Not a valid link. SKAZ opens web addresses that start with http:// or https:// and have no spaces.';
@@ -61,6 +93,14 @@ export function isSpeech(item: AddItem): boolean {
   if (item.type === 'file') return item.kind === 'speech';
   if (item.type === 'link') return item.info?.kind === 'video';
   return false;
+}
+
+/** Decision 3 (01-LOCAL-VISUAL-PROCESSING): local video files are transcribed for audio only. */
+export const LOCAL_VIDEO_AUDIO_ONLY_NOTICE = 'SKAZ transcribes the audio only. It doesn’t save the video or its frames.';
+
+/** A local video file (audio track is transcribed; video and frames are not saved). */
+export function isLocalVideo(item: AddItem): boolean {
+  return item.type === 'file' && item.kind === 'speech' && item.video;
 }
 
 /** Decision 15: files and links go to the wiki by default, pasted text does not. */
@@ -150,6 +190,8 @@ export interface AddOptions {
   translate: boolean;
   /** Decision 15: the user's "Add to wiki" switch, sent with the request; the backend honours it. */
   toWiki: boolean;
+  /** V1 native intake selection import when available on the Electron bridge. */
+  importSelection?: NativeIntakeApi['importSelection'];
 }
 
 export interface Added {
@@ -200,6 +242,21 @@ export async function submitItem(client: KbClient, item: AddItem, o: AddOptions)
     materialId: view.material_id, ready: view.status === 'ready', ...(view.already_in_library ? { existing: { title: view.title, failed: view.status === 'failed' } } : {}),
   });
   if (item.type === 'file') {
+    if (item.selectionId && o.importSelection) {
+      const res = await o.importSelection({
+        selectionId: item.selectionId,
+        folderId: o.folderId,
+        toWiki: o.toWiki,
+        language: o.language,
+        translate: o.translate,
+      });
+      if (!res.ok) throw new KbApiError(res.status, res.detail || `Request failed (${res.status}).`, res.code);
+      if (item.kind === 'speech') {
+        return [fromSpeech(res.data as KbSpeechMaterial)];
+      }
+      const added = res.data as KbEndpoints['POST /kb/materials/file']['response'];
+      return [fromSummary(added.material, added.already_in_library === true)];
+    }
     if (item.kind === 'speech') {
       const view = await client.call('POST /kb/imports', { body: { path: item.path, folder_id: o.folderId, translate: o.translate, language: o.language, to_wiki: o.toWiki } });
       return [fromSpeech(view)];

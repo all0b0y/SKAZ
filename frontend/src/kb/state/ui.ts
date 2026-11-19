@@ -6,9 +6,11 @@ import type { ToastData } from '../ui/Toast';
 /** Files dropped from Finder on a folder row: "Add material" opens with them and that folder. */
 export interface AddMaterialPreset {
   folderId: string;
-  files: Array<{ path: string; name: string; size: number | null }>;
+  files: Array<{ path: string; name: string; size: number | null; selectionId?: string; sha256?: string }>;
   /** Files the drop couldn't read (no path): said in the window. */
   unreadable: number;
+  /** Native intake rejections surfaced when the modal opens. */
+  rejected?: string[];
 }
 
 export type SettingsSection = 'conn' | 'models' | 'rec' | 'wiki' | 'skills' | 'me' | 'storage' | 'privacy' | 'look' | 'about' | 'search';

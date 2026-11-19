@@ -593,10 +593,14 @@ export function agentControlsWorld(): FakeWorld {
 const LECTURE8 = 'Lecture 8 — entropy';
 const INTERVALS_NEW = { again: '1m', hard: '6m', good: '10m', easy: '3d' };
 
-/** A card in the contract's shape: new, answer from the lecture with its checked quote. */
+/** A card in the contract's shape: new, answer from the lecture with its checked quote (or from agent knowledge). */
 export function studyCard(id: string, question: string, answer: string, extra: Partial<KbStudyCard> = {}): KbStudyCard {
+  const citations = extra.citations ?? (extra.basis === 'agent'
+    ? []
+    : [cite('m1', LECTURE8, 1, { start_ms: 2_600_000 }, 'entropy as S = k·ln W')]);
+  const basis = extra.basis ?? (citations.length > 0 ? 'source' : 'agent');
   return {
-    id, page_id: null, question, answer, citations: [cite('m1', LECTURE8, 1, { start_ms: 2_600_000 }, 'entropy as S = k·ln W')],
+    id, page_id: null, question, answer, basis, citations,
     explanation: null, group: 'new', state: 'new', suspended: false, marked_hard: false, intervals: { ...INTERVALS_NEW },
     graded: null, due: null, ...extra,
   };
@@ -629,10 +633,10 @@ export function testPart(id: string, chatId: string, messageId: string, extra: P
     type: 'study', id, kind: 'test', title: 'Lecture 8 check', engine: 'codex', origin: 'agent', mode: 'all', place: 'chat',
     position: 0, side: 'question', total: 3, cards: [],
     questions: [
-      { id: 'q-1', type: 'choice', question: 'How did Boltzmann write entropy?', answers: ['S = k·ln W'], citations: lecture, explanation: null, response: null,
-        options: [{ id: 'w0', text: 'S = k·W²', origin: 'agent' }, { id: 'r0', text: 'S = k·ln W', origin: 'source' }, { id: 'w1', text: 'S = W / k', origin: 'agent' }] },
-      { id: 'q-2', type: 'short', question: 'What letter stands for the number of microstates?', answers: ['W'], citations: lecture, explanation: null, response: null, options: [] },
-      { id: 'q-3', type: 'open', question: 'Explain why entropy uses a logarithm.', answers: ['So that the entropies of independent systems add up.'],
+      { id: 'q-1', type: 'choice', question: 'How did Boltzmann write entropy?', basis: 'source', answers: ['S = k·ln W'], citations: lecture, explanation: null, response: null,
+        options: [{ id: 'w0', text: 'S = k·W²', origin: 'agent', right: false }, { id: 'r0', text: 'S = k·ln W', origin: 'source', right: true }, { id: 'w1', text: 'S = W / k', origin: 'agent', right: false }] },
+      { id: 'q-2', type: 'short', question: 'What letter stands for the number of microstates?', basis: 'source', answers: ['W'], citations: lecture, explanation: null, response: null, options: [] },
+      { id: 'q-3', type: 'open', question: 'Explain why entropy uses a logarithm.', basis: 'source', answers: ['So that the entropies of independent systems add up.'],
         citations: [cite('m1', LECTURE8, 2, { start_ms: 2_620_000 }, 'the entropies of two independent systems should add up')],
         explanation: 'Think of what happens to the count of arrangements when you join two systems.', response: null, options: [] },
     ],

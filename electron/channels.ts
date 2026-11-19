@@ -23,6 +23,11 @@ export const CHANNELS = {
   dictate: 'kb:dictate',
   saveTextFile: 'app:save-text-file',
   chooseMaterialFiles: 'app:choose-material-files',
+  chooseMaterialBatch: 'app:choose-material-batch',
+  droppedMaterialFiles: 'app:dropped-material-files',
+  validateClipboardImage: 'app:validate-clipboard-image',
+  importMaterialSelection: 'app:import-material-selection',
+  materialImagePreview: 'app:material-image-preview',
   // Library file actions (B20).
   chooseExportFolder: 'app:choose-export-folder',
   showInFinder: 'app:show-in-finder',

@@ -37,6 +37,9 @@ class KbAgentModel(BaseModel):
     #: What the default rule alone would do ("Show defaults").
     default_visible: bool
     favorite: bool
+    #: V4: verified adapter/catalog image modality capability (``null`` = undeclared).
+    supports_image: bool | None = None
+    input_modalities: list[str] = Field(default_factory=list)
 
 
 class KbAgentProvider(BaseModel):
@@ -116,6 +119,9 @@ class KbAgent(BaseModel):
     providers: list[KbAgentProvider]
     #: W-2: the agent's own web search in chats (asked before each query), or why it is off.
     web_search: KbAgentWebSearch = KbAgentWebSearch(available=False, reason=None)
+    #: V4: transport-level image capability probe (``null`` until probed).
+    visual_transport: bool | None = None
+    visual_transport_reason: str | None = None
 
 
 class KbFavoriteModel(BaseModel):

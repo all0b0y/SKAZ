@@ -6,7 +6,7 @@ import { errorText } from '../api/client';
 import { useServices } from '../state/context';
 import { useAskAbout } from '../document/parts';
 import { GroupChip } from './CardStack';
-import { studyApi, type KbDeckView, type StudyMark, type StudyMode } from './api';
+import { NOT_FROM_MATERIALS, isAgentBasis, studyApi, type KbDeckView, type StudyMark, type StudyMode } from './api';
 import { DiscussUnclear, useUnclearCount } from './Unclear';
 
 const GROUPS: Array<{ key: keyof KbDeckView['groups']; label: string }> = [
@@ -106,6 +106,7 @@ export function DeckPage({ page }: { page: KbPage }) {
             <SelectionCheckbox checked={sel.selected.has(card.id)} />
             <span className="kb-deck__q" role="gridcell" tabIndex={-1}>
               {card.question}<small>{card.answer}</small>
+              {isAgentBasis(card) && <span className="kb-st-basis" data-basis="agent">{NOT_FROM_MATERIALS}</span>}
             </span>
             {card.unclear && <span className="kb-deck__unc" title="Marked Unclear"><Icon name="help" size={13} label="Unclear" /></span>}
             <span role="gridcell">
@@ -153,7 +154,14 @@ export function TestPage({ page }: { page: KbPage }) {
       </div>
       {error && <p className="kb-inline-error" role="alert">{error}</p>}
       <ol className="kb-deck__list" aria-label="Questions">
-        {questions.map((b) => <li key={b.id} className="kb-deck__row"><span className="kb-deck__q">{b.text.split('::')[0]!.split('\n')[0]}</span></li>)}
+        {questions.map((b) => (
+          <li key={b.id} className="kb-deck__row">
+            <span className="kb-deck__q">
+              {b.text.split('::')[0]!.split('\n')[0]}
+              {isAgentBasis(b) && <span className="kb-st-basis" data-basis="agent">{NOT_FROM_MATERIALS}</span>}
+            </span>
+          </li>
+        ))}
       </ol>
     </div>
   );

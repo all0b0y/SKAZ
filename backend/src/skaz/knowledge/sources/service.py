@@ -17,15 +17,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import os
 import shutil
+import stat
 import threading
 import weakref
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -35,11 +37,11 @@ from ..errors import KnowledgeError, NotFound
 from ..ids import utc_now
 from ..keyed_locks import KeyedLocks, KeyedThreadLocks
 from ..library.fsio import dump_json, fsync_dir, read_json, write_atomic
-from ..library.layout import SERVICE_DIR
+from ..library.layout import SERVICE_DIR, STAGING_PATH
 from ..library.library import MaterialFiles
 from ..library.names import validate_name
 from ..logsafe import error_note
-from ..markdown.source import Fragment, MaterialStatus, Origin
+from ..markdown.source import Fragment, MaterialKind, MaterialStatus, Origin
 from ..markdown.text import block_hash, format_timestamp
 from ..service import KnowledgeService
 from . import web_page
@@ -56,8 +58,6 @@ from .guard.exclusions import (
 )
 from .html import decode_html
 from .intake import (
-    PDF_EXTENSIONS,
-    TEXT_EXTENSIONS,
     Original,
     Prepared,
     SourceRejected,
@@ -68,13 +68,38 @@ from .intake import (
 )
 from .links import LinkInfo, VideoProbe, classify_link, classify_offline, domain_of
 from .material_info import INTAKE_FILE, wiki_states
-from .paths import given_path, resolved_file
+from .native_intake041 import (
+    FILE_CHANGED_MESSAGE,
+    MAX_PREVIEW_EDGE,
+    ImageFormat,
+    NativeIntakePrepared,
+    SelectionSource,
+    TrustedFileSelection,
+    classify_extension,
+    decode_image,
+    decode_verified_image,
+    prepare_clipboard_image,
+    prepare_docx_selection,
+    prepare_image_selection,
+    read_bounded_bytes,
+    validate_trusted_selection,
+)
+from .paths import given_path
+from .visual import (
+    DEFAULT_FRAME_POLICY,
+    DEFAULT_SEARCH_PDF_PAGES,
+    FramePolicyConfig,
+    FrameRetriever,
+    PdfPageRenderer,
+    PreparedVisual,
+    RetainedFrameRecord,
+    VisualFallbackSeam,
+    VisualSourcePreparer,
+)
 from .web_page import WebPageUnavailable, page_key, prepare_web_page
 
 log = logging.getLogger(__name__)
 
-MAX_PDF_BYTES = 200 * 1024 * 1024
-MAX_TEXT_FILE_BYTES = 64 * 1024 * 1024
 MAX_LINKED_PDF_BYTES = 100 * 1024 * 1024
 EXCLUDED_NOTIFICATION = "excluded_instruction"
 #: One lock for every ``excluded.json`` read-modify-write, shared by all ``SourceService``
@@ -172,9 +197,30 @@ def _copy_into(directory: Path, original: Original) -> None:
     assert original.path is not None
     temp = directory / f".skaz-tmp-{uuid4().hex}"
     try:
-        shutil.copyfile(original.path, temp)
-        with open(temp, "rb+") as handle:
-            os.fsync(handle.fileno())
+        digest = hashlib.sha256()
+        total = 0
+        try:
+            with open(original.path, "rb") as src, open(temp, "wb") as dst:
+                while True:
+                    chunk = src.read(1 << 20)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if original.expected_size is not None and total > original.expected_size:
+                        raise SourceRejected(FILE_CHANGED_MESSAGE)
+                    digest.update(chunk)
+                    dst.write(chunk)
+                dst.flush()
+                os.fsync(dst.fileno())
+        except OSError as error:
+            raise SourceRejected("This file doesn't exist any more or can't be opened.") from error
+        if original.expected_size is not None and total != original.expected_size:
+            raise SourceRejected(FILE_CHANGED_MESSAGE)
+        if (
+            original.expected_sha256 is not None
+            and digest.hexdigest() != original.expected_sha256.lower()
+        ):
+            raise SourceRejected(FILE_CHANGED_MESSAGE)
         os.replace(temp, target)
     finally:
         temp.unlink(missing_ok=True)
@@ -188,10 +234,19 @@ class SourceService:
         *,
         fetcher: SafeFetcher | None = None,
         video_probe: VideoProbe | None = None,
+        page_renderer: PdfPageRenderer | None = None,
+        frame_retriever: FrameRetriever | None = None,
+        frame_policy: FramePolicyConfig = DEFAULT_FRAME_POLICY,
     ) -> None:
         self.kb = kb
         self.fetcher = fetcher or SafeFetcher()
         self.video_probe = video_probe
+        self.visual = VisualSourcePreparer(
+            kb,
+            page_renderer=page_renderer,
+            frame_retriever=frame_retriever,
+            frame_policy=frame_policy,
+        )
         self._listeners: list[Listener] = []
         self._lock = _GUARD_LOCK
         #: Q1 n2 L3: one add at a time per file content / per address (duplicate check, then store).
@@ -226,32 +281,196 @@ class SourceService:
             raise SourceRejected(prepared.failure)
         return self._publish(prepared, folder_id, title, to_wiki)
 
-    def add_file(self, path: str | Path, folder_id: str, title: str | None = None, *,
-                 to_wiki: bool | None = None) -> IntakeResult:
-        """A PDF (or book) or a ``.md``/``.txt`` file the user picked in the file dialog."""
-        file_path = self._checked_file(path)
-        suffix = file_path.suffix.lower()
+    def add_file(
+        self,
+        path: str | Path,
+        folder_id: str,
+        title: str | None = None,
+        *,
+        to_wiki: bool | None = None,
+        selection_source: SelectionSource = "picker",
+        expected_size: int | None = None,
+        expected_sha256: str | None = None,
+    ) -> IntakeResult:
+        """A PDF (or book), DOCX, Markdown/text, or image (JPEG, PNG, WebP, HEIC) picked by the user."""
         self._typed_name(title)  # a typed name that can't be one is refused first, duplicate or not
-        data = file_path.read_bytes()
-        digest = content_hash(data)
+        checked = given_path(path, SourceRejected)
+        classified = classify_extension(checked)
+        if classified.category == "speech":
+            raise SourceRejected(
+                f"SKAZ can't read {classified.extension} files here. "
+                "Add audio and video files with the speech import."
+            )
+        selection = TrustedFileSelection.from_raw(
+            checked,
+            source=selection_source,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
+        validated = validate_trusted_selection(selection, data_dir=self.kb.data_dir)
+        self.kb.require()
         # Q1 n2 L3: the check and the store under one lock per content — two adds at once make one.
-        with self._same_file.hold(digest):
-            duplicate = find_duplicate(self.kb, content=data)
+        with self._same_file.hold(validated.sha256):
+            category = validated.classification.category
+            if category in ("pdf", "text"):
+                data = read_bounded_bytes(
+                    validated.resolved_path,
+                    max_bytes=validated.classification.max_bytes,
+                )
+                if len(data) != validated.size_bytes or hashlib.sha256(data).hexdigest() != validated.sha256:
+                    raise SourceRejected(FILE_CHANGED_MESSAGE)
+                duplicate = find_duplicate(self.kb, content=data)
+                if duplicate is not None:
+                    return self._existing(duplicate)
+                origin = Origin.model_validate(
+                    {
+                        "type": "file",
+                        "file_name": validated.selection.display_name,
+                        "sha256": validated.sha256,
+                    }
+                )
+                if category == "pdf":
+                    prepared = prepare_pdf(
+                        data,
+                        origin=origin,
+                        fallback=sanitize_title(Path(validated.selection.display_name).stem) or "Document",
+                        original=Original(
+                            "original.pdf",
+                            path=validated.resolved_path,
+                            expected_size=validated.size_bytes,
+                            expected_sha256=validated.sha256,
+                        ),
+                    )
+                else:
+                    prepared = prepare_text_file(data, validated.selection.display_name, origin=origin)
+                    if prepared.failure:
+                        raise SourceRejected("This file has no text.")
+                return self._publish(prepared, folder_id, title, to_wiki)
+
+            duplicate = find_duplicate(self.kb, digest=validated.sha256)
             if duplicate is not None:
                 return self._existing(duplicate)
-            origin = Origin.model_validate({"type": "file", "file_name": file_path.name, "sha256": digest})
-            if suffix in PDF_EXTENSIONS:
-                prepared = prepare_pdf(
-                    data,
-                    origin=origin,
-                    fallback=sanitize_title(file_path.stem) or "Document",
-                    original=Original("original.pdf", path=file_path),
-                )
+            if category == "docx":
+                native = prepare_docx_selection(validated)
             else:
-                prepared = prepare_text_file(data, file_path.name, origin=origin)
-                if prepared.failure:
-                    raise SourceRejected("This file has no text.")
-            return self._publish(prepared, folder_id, title, to_wiki)
+                native = prepare_image_selection(validated, generate_preview=False)
+            prepared = self._from_native(native)
+            effective_to_wiki = False if prepared.kind == "image" else to_wiki
+            return self._publish(prepared, folder_id, title, effective_to_wiki)
+
+    def add_clipboard_image(
+        self,
+        data: bytes,
+        folder_id: str,
+        *,
+        mime_type: str,
+        file_name: str = "Screenshot",
+        title: str | None = None,
+    ) -> IntakeResult:
+        """Import bounded clipboard image bytes into the library without OCR or auto-wiki ingest."""
+        self._typed_name(title)
+        self.kb.require()
+        native = prepare_clipboard_image(
+            data,
+            mime_type=mime_type,
+            file_name=file_name,
+            generate_preview=False,
+        )
+        with self._same_file.hold(native.sha256):
+            duplicate = find_duplicate(self.kb, digest=native.sha256)
+            if duplicate is not None:
+                return self._existing(duplicate)
+            return self._publish(self._from_native(native), folder_id, title, False)
+
+    def preview_trusted_image(
+        self,
+        path: str | Path,
+        *,
+        expected_size: int | None = None,
+        expected_sha256: str | None = None,
+        max_edge: int = MAX_PREVIEW_EDGE,
+    ) -> bytes:
+        """Decode an authorized disk image (including HEIC) into bounded PNG preview bytes."""
+        validated = validate_trusted_selection(
+            TrustedFileSelection.from_raw(
+                path,
+                source="picker",
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            ),
+            data_dir=self.kb.data_dir,
+        )
+        if validated.classification.category != "image":
+            raise SourceRejected("Image preview is only available for image files.")
+        decoded = decode_verified_image(
+            validated,
+            generate_preview=True,
+            max_preview_edge=max_edge,
+        )
+        assert decoded.preview_png is not None
+        return decoded.preview_png
+
+    def preview_material_image(
+        self,
+        material_id: str,
+        *,
+        max_edge: int = MAX_PREVIEW_EDGE,
+    ) -> bytes:
+        """Decode an imported image material's confined ``.skaz/original.*`` into bounded PNG bytes."""
+        files = self._material_files(material_id)
+        if files.manifest.kind != "image":
+            raise SourceRejected("Image preview is only available for image materials.")
+        intake = self._intake(files.directory)
+        original_name = intake.original if intake and intake.original else None
+        if not original_name:
+            raise SourceRejected("This image material has no stored original file.")
+        service_dir = (files.directory / SERVICE_DIR).resolve(strict=True)
+        candidate = files.directory / SERVICE_DIR / original_name
+        try:
+            if candidate.is_symlink():
+                raise SourceRejected("SKAZ refuses symbolic links inside a material's service folder.")
+            resolved = candidate.resolve(strict=True)
+            info = resolved.stat()
+        except SourceRejected:
+            raise
+        except (OSError, RuntimeError) as error:
+            raise SourceRejected("The material's original image is missing or can't be opened.") from error
+        data_root = self.kb.data_dir.resolve()
+        if resolved.parent != service_dir or resolved == data_root or data_root in resolved.parents:
+            raise SourceRejected("The material's original image points outside its authorized folder.")
+        if not stat.S_ISREG(info.st_mode) or not os.access(resolved, os.R_OK):
+            raise SourceRejected("Choose a readable regular file.")
+        classified = classify_extension(resolved)
+        if classified.category != "image":
+            raise SourceRejected("This material's original file isn't a supported image.")
+        decoded = decode_image(
+            resolved,
+            expected_format=cast(ImageFormat, classified.format_id),
+            mime_type=classified.mime_type,
+            generate_preview=True,
+            max_preview_edge=max_edge,
+        )
+        assert decoded.preview_png is not None
+        return decoded.preview_png
+
+    @staticmethod
+    def _from_native(native: NativeIntakePrepared) -> Prepared:
+        extra = dict(native.extra)
+        if "format" in extra:
+            # IntakeRecord reserves "format" for the intake.json schema version (int = 1).
+            extra["file_format"] = extra.pop("format")
+        return Prepared(
+            kind=cast(MaterialKind, native.kind),
+            title=native.title,
+            fallback_title=native.fallback_title,
+            fragments=list(native.fragments),
+            findings=list(native.findings),
+            origin=native.origin,
+            extractor=native.extractor,
+            original=native.original,
+            failure=native.failure,
+            extra=extra,
+        )
 
     async def add_link(self, url: str, folder_id: str, title: str | None = None, *,
                        to_wiki: bool | None = None) -> IntakeResult:
@@ -383,23 +602,6 @@ class SourceService:
         return await classify_link(url, self.fetcher, video_probe=self.video_probe if probe else None,
                                    allow_vpn_fake_ip=True)
 
-    def _checked_file(self, raw: str | Path) -> Path:
-        """The file path from the open dialog: absolute, a readable regular file of a supported type,
-        not in a hidden folder or SKAZ's own data — checked where the file really is (``paths``)."""
-        path = given_path(raw, SourceRejected)
-        suffix = path.suffix.lower()
-        if suffix not in PDF_EXTENSIONS | TEXT_EXTENSIONS:
-            kind = f"{suffix} files" if suffix else "files without an extension"
-            raise SourceRejected(
-                f"SKAZ can't read {kind}. It adds PDF, Markdown (.md) and text (.txt) documents, "
-                "and audio and video files."
-            )
-        resolved, info = resolved_file(path, self.kb.data_dir, SourceRejected)
-        limit = MAX_PDF_BYTES if suffix in PDF_EXTENSIONS else MAX_TEXT_FILE_BYTES
-        if info.st_size > limit:
-            raise SourceRejected(f"This file is larger than {limit // (1024 * 1024)} MB.")
-        return resolved
-
     @staticmethod
     def _typed_name(title: str | None) -> None:
         if title is not None and title.strip():
@@ -444,6 +646,9 @@ class SourceService:
             self._write_exclusions(files.directory, exclusions)
             if not prepared.failure:
                 self.kb.set_material_status(material_id, "ready")
+        except SourceRejected:
+            self._rollback_material(material_id, files.directory)
+            raise
         except (OSError, KnowledgeError, ValidationError) as error:
             log.error("Finishing material %s failed: %s", material_id, error_note(error))
             with contextlib.suppress(OSError, KnowledgeError):
@@ -462,6 +667,19 @@ class SourceService:
             len(prepared.findings),
             prepared.failure,
         )
+
+    def _rollback_material(self, material_id: str, directory: Path) -> None:
+        with contextlib.suppress(OSError, KnowledgeError), self.kb.writing():
+                library = self.kb.require()
+                area = library.root / STAGING_PATH
+                area.mkdir(parents=True, exist_ok=True)
+                doomed = area / f"rollback-{uuid4().hex}"
+                if directory.exists():
+                    os.rename(directory, doomed)
+                    shutil.rmtree(doomed, ignore_errors=True)
+                with self.kb.db.write() as connection:
+                    connection.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+                    connection.execute("DELETE FROM wiki_checkpoints WHERE material_id = ?", (material_id,))
 
     # -- layer 3 bookkeeping ---------------------------------------------------
 
@@ -619,3 +837,118 @@ class SourceService:
                 current.notification_id = self._notify(material_id, files.title, new)
             self._write_exclusions(files.directory, current)
         return self.guard_report(material_id)
+
+    # -- visual preparation and frame retention (V3 seam for V1/V4) ------------
+
+    def prepare_image(
+        self,
+        path: str | Path,
+        *,
+        material_id: str | None = None,
+    ) -> PreparedVisual:
+        return self.visual.prepare_image(path, material_id=material_id)
+
+    def prepare_pdf_pages(
+        self,
+        material_id: str,
+        *,
+        pages: Sequence[int] | None = None,
+        page_range: tuple[int, int] | None = None,
+        query: str | None = None,
+        max_pages: int = DEFAULT_SEARCH_PDF_PAGES,
+    ) -> tuple[PreparedVisual, ...]:
+        return self.visual.prepare_pdf_pages(
+            material_id,
+            pages=pages,
+            page_range=page_range,
+            query=query,
+            max_pages=max_pages,
+        )
+
+    async def prepare_video_frames(
+        self,
+        material_id: str,
+        *,
+        timestamps_ms: Sequence[int] | None = None,
+        query: str | None = None,
+    ) -> tuple[PreparedVisual, ...]:
+        return await self.visual.prepare_video_frames(
+            material_id,
+            timestamps_ms=timestamps_ms,
+            query=query,
+        )
+
+    def retain_video_frames(
+        self,
+        material_id: str,
+        frames: Sequence[PreparedVisual],
+        *,
+        cited_timestamps_ms: Collection[int] = (),
+        cited_sha256s: Collection[str] = (),
+        pinned_timestamps_ms: Collection[int] = (),
+        pinned_sha256s: Collection[str] = (),
+        citation_refs: Mapping[int, Sequence[str]] | Sequence[str] = (),
+    ) -> tuple[RetainedFrameRecord, ...]:
+        return self.visual.retain_video_frames(
+            material_id,
+            frames,
+            cited_timestamps_ms=cited_timestamps_ms,
+            cited_sha256s=cited_sha256s,
+            pinned_timestamps_ms=pinned_timestamps_ms,
+            pinned_sha256s=pinned_sha256s,
+            citation_refs=citation_refs,
+        )
+
+    def pin_video_frame(self, material_id: str, frame: PreparedVisual) -> RetainedFrameRecord:
+        return self.visual.pin_video_frame(material_id, frame)
+
+    def unpin_video_frame(
+        self,
+        material_id: str,
+        frame_id_or_timestamp_ms: str | int,
+    ) -> tuple[RetainedFrameRecord, ...]:
+        return self.visual.unpin_video_frame(material_id, frame_id_or_timestamp_ms)
+
+    def list_retained_frames(self, material_id: str) -> tuple[RetainedFrameRecord, ...]:
+        return self.visual.list_retained_frames(material_id)
+
+    def read_retained_frame(
+        self,
+        material_id: str,
+        frame_id_or_timestamp_ms: str | int,
+    ) -> PreparedVisual:
+        return self.visual.read_retained_frame(material_id, frame_id_or_timestamp_ms)
+
+    def prepare_visual_seam(
+        self,
+        *,
+        material_id: str | None = None,
+        image_path: str | Path | None = None,
+        pages: Sequence[int] | None = None,
+        page_range: tuple[int, int] | None = None,
+        timestamps_ms: Sequence[int] | None = None,
+        query: str | None = None,
+        max_pages: int = DEFAULT_SEARCH_PDF_PAGES,
+    ) -> VisualFallbackSeam:
+        return self.visual.prepare_visual_seam(
+            material_id=material_id,
+            image_path=image_path,
+            pages=pages,
+            page_range=page_range,
+            timestamps_ms=timestamps_ms,
+            query=query,
+            max_pages=max_pages,
+        )
+
+    async def prepare_video_frames_seam(
+        self,
+        material_id: str,
+        *,
+        timestamps_ms: Sequence[int] | None = None,
+        query: str | None = None,
+    ) -> VisualFallbackSeam:
+        return await self.visual.prepare_video_frames_seam(
+            material_id,
+            timestamps_ms=timestamps_ms,
+            query=query,
+        )

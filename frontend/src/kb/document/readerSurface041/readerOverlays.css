@@ -1,0 +1,94 @@
+:where(.kb-reader-finish, .kb-reader-menu, .kb-reader-citation-preview) {
+  --kb-reader-contact: light-dark(
+    color-mix(in srgb, var(--kb-scrim) 25%, transparent),
+    color-mix(in srgb, var(--kb-scrim-strong) 65%, transparent)
+  );
+  --kb-reader-lift: light-dark(
+    color-mix(in srgb, var(--kb-scrim) 34%, transparent),
+    color-mix(in srgb, var(--kb-scrim-strong) 80%, transparent)
+  );
+  --kb-reader-edge: light-dark(
+    color-mix(in srgb, white 82%, transparent),
+    color-mix(in srgb, var(--kb-text) 13%, transparent)
+  );
+}
+
+/* Depth on the opaque sheets and the existing composer field. */
+.kb-reader-finish :is(.kb-center:has(> .kb-head--chat), .kb-doc--doc, .kb-doc--wikifile, .kb-doc--live) {
+  box-shadow: 0 1px 2px var(--kb-reader-contact), 0 4px 10px var(--kb-reader-contact);
+}
+
+.kb-reader-finish :is(.kb-head--chat, .kb-reader-header) {
+  position: relative;
+  z-index: 1;
+  background-color: var(--kb-pane);
+  box-shadow: inset 0 1px 0 var(--kb-reader-edge), 0 1px 3px var(--kb-reader-contact);
+}
+
+.kb-reader-finish :is(.kb-doc--doc, .kb-doc--wikifile, .kb-doc--live) .kb-doc__body,
+.kb-reader-finish .kb-center > .kb-chat__workspace {
+  background-color: var(--kb-pane);
+}
+
+.kb-reader-finish .kb-center .kb-composer {
+  box-shadow: inset 0 1px 3px var(--kb-reader-contact), 0 1px 0 var(--kb-reader-edge);
+}
+
+/* The opt-in classes belong on the portaled surfaces. */
+.kb-popover.kb-reader-menu[role='menu'],
+.kb-popover.kb-srcpop-wrap.kb-reader-citation-preview {
+  min-width: min(180px, calc(100vw - 2 * var(--kb-sp-8)));
+  max-width: min(300px, calc(100vw - 2 * var(--kb-sp-8)));
+  max-height: calc(100dvh - 2 * var(--kb-sp-8));
+  overflow: auto;
+  background-color: var(--kb-pane);
+  color: var(--kb-text);
+  box-shadow:
+    0 1px 2px var(--kb-reader-contact),
+    0 7px 20px var(--kb-reader-lift),
+    inset 0 1px 0 var(--kb-reader-edge);
+}
+
+@supports ((backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px))) and (background: color-mix(in srgb, black, transparent)) {
+  .kb-popover.kb-reader-menu[role='menu'],
+  .kb-popover.kb-srcpop-wrap.kb-reader-citation-preview {
+    background-color: color-mix(in srgb, var(--kb-pane) 94%, transparent);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .kb-popover.kb-reader-menu[role='menu'],
+  .kb-popover.kb-srcpop-wrap.kb-reader-citation-preview {
+    background-color: var(--kb-pane);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+.kb-popover.kb-reader-menu .kb-menu__item {
+  height: auto;
+  min-height: var(--kb-row-h);
+  padding-block: var(--kb-sp-4);
+  white-space: normal;
+}
+
+.kb-popover.kb-reader-menu .kb-menu__item.is-danger:active:not([aria-disabled='true']) {
+  background-color: var(--kb-danger-soft);
+}
+
+.kb-popover.kb-reader-menu .kb-menu__label {
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+
+.kb-popover.kb-reader-menu .kb-menu__note {
+  color: var(--kb-muted-strong);
+  overflow-wrap: anywhere;
+}
+
+.kb-popover.kb-srcpop-wrap.kb-reader-citation-preview
+  :is(.kb-srcpop__meta, .kb-srcpop__gone, .kb-srcpop__fraglabel, .kb-srcpop__fragtext.is-wait) {
+  color: var(--kb-muted-strong);
+}

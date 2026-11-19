@@ -5,7 +5,7 @@ import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
 import { materialWiki } from '../test/fakeKb';
 import { addedLabel } from './AllMaterials';
-import { addedNote, fileItem, itemMeta, NOT_A_LINK, pasteItem, speechBlock, wikiDefault, type LinkItem } from './addItems';
+import { addedNote, fileItem, isLocalVideo, itemMeta, LOCAL_VIDEO_AUDIO_ONLY_NOTICE, NOT_A_LINK, pasteItem, speechBlock, wikiDefault, type LinkItem } from './addItems';
 import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 
 async function ready() {
@@ -204,6 +204,10 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(pasteItem('  some notes\nmore  ')).toMatchObject({ type: 'text', text: 'some notes\nmore' });
     expect(pasteItem('   ')).toBeNull();
     expect(fileItem('/a/b/lecture.MP4', 'lecture.MP4', 10)).toMatchObject({ kind: 'speech', video: true });
+    expect(isLocalVideo(fileItem('/a/b/lecture.MP4', 'lecture.MP4', 10))).toBe(true);
+    expect(isLocalVideo(fileItem('/a/b/talk.mp3', 'talk.mp3', 10))).toBe(false);
+    expect(isLocalVideo(fileItem('/a/b.pdf', 'b.pdf', 10))).toBe(false);
+    expect(LOCAL_VIDEO_AUDIO_ONLY_NOTICE).toBe('SKAZ transcribes the audio only. It doesn’t save the video or its frames.');
     expect(fileItem('/a/b.pdf', 'b.pdf', 10)).toMatchObject({ kind: 'document' });
     const text = pasteItem('notes')!;
     const link = pasteItem('https://example.org')!;
@@ -522,6 +526,42 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(await screen.findByRole('dialog', { name: 'Add material' })).toBeInTheDocument();
     act(() => undefined);
   });
+
+  it('shows the pre-import audio-only notice for local video files, not for audio files or video links (01 decision 3)', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = await ready();
+    services.bridge.droppedMediaFile = (file: File) => ({ path: `/Users/me/${file.name}`, name: file.name, url: `skaz-media://${file.name}` });
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const notice = 'SKAZ transcribes the audio only. It doesn’t save the video or its frames.';
+
+    // Audio file and video link alone do not show the local-video audio-only notice.
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), {
+      dataTransfer: { files: [new File(['x'], 'lecture9.m4a', { type: 'audio/mp4' })], getData: () => '' },
+    });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Link or any text' }), 'https://www.youtube.com/watch?v=abc{Enter}');
+    expect(await within(dialog).findByText('Seminar on entropy')).toBeInTheDocument();
+    expect(within(dialog).queryByText(notice)).not.toBeInTheDocument();
+
+    // Dropping a local video file shows the notice before import.
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), {
+      dataTransfer: { files: [new File(['v'], 'seminar.mp4', { type: 'video/mp4' })], getData: () => '' },
+    });
+    expect(within(dialog).getByTestId('local-video-audio-only')).toHaveTextContent(notice);
+
+    // Removing the local video file hides the notice again while keeping audio and video link.
+    await user.click(within(dialog).getByRole('button', { name: 'Remove seminar.mp4' }));
+    expect(within(dialog).queryByText(notice)).not.toBeInTheDocument();
+
+    // Re-adding the local video file and pressing Add imports it via speech import.
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), {
+      dataTransfer: { files: [new File(['v'], 'seminar.mp4', { type: 'video/mp4' })], getData: () => '' },
+    });
+    expect(within(dialog).getByText(notice)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Add 3' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    expect(fake.calls.some((c) => c.path === '/kb/imports' && (c.body as { path?: string })?.path === '/Users/me/seminar.mp4')).toBe(true);
+  });
 });
 
 describe('Selecting several materials in the table (0.3.1 F2/F4/F5)', () => {
@@ -652,5 +692,185 @@ describe('addedNote (N2, Q1 n2 M1): what the Add list says after an add', () => 
     expect(addedNote([{ ...old, videoFailure: 'Private video.' }])).toEqual({ openId: 'a', text: 'The article is already in your library; the video wasn’t added: Private video.' });
     expect(addedNote([a, { ...v, existing: { title: 'V' } }])).toEqual({ openId: 'v', text: 'The article was added; the video is already in your library' });
     expect(addedNote([{ ...a, videoFailure: 'Private video.' }])).toEqual({ openId: 'a', text: 'The article was added; the video wasn’t added: Private video.' });
+  });
+});
+
+describe('DOCX and image materials in AllMaterials and AddMaterialModal', () => {
+  it('filters DOCX under Documents and image under Images, and excludes images from batch Add to wiki', async () => {
+    const user = userEvent.setup();
+    const world = docWorld();
+    const base = world.materials.find((m) => m.id === 'm-txt')!;
+    world.materials.unshift(
+      {
+        ...base,
+        id: 'm-docx',
+        title: 'KV Cache Notes',
+        kind: 'docx',
+        status: 'ready',
+        wiki: materialWiki('not_in_wiki'),
+        wiki_state: 'not_in_wiki',
+      },
+      {
+        ...base,
+        id: 'm-img',
+        title: 'Attention Diagram',
+        kind: 'image',
+        status: 'ready',
+        fragment_count: 0,
+        fragments: [],
+        wiki: materialWiki('not_in_wiki'),
+        wiki_state: 'not_in_wiki',
+      },
+    );
+    renderKb({ world, prefs: { section: 'materials' } });
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    const table = await within(center).findByRole('grid');
+
+    expect(within(table).getByRole('img', { name: 'DOCX' })).toBeInTheDocument();
+    expect(within(table).getByRole('img', { name: 'Image' })).toBeInTheDocument();
+
+    // Documents filter includes DOCX and preserves PDF
+    await user.click(within(center).getByRole('radio', { name: 'Documents' }));
+    expect(within(center).getByRole('button', { name: 'KV Cache Notes' })).toBeInTheDocument();
+    expect(within(center).getByRole('button', { name: /Textbook/ })).toBeInTheDocument();
+    expect(within(center).queryByRole('button', { name: 'Attention Diagram' })).not.toBeInTheDocument();
+
+    // Images filter shows only image materials
+    await user.click(within(center).getByRole('radio', { name: 'Images' }));
+    expect(within(center).getByRole('button', { name: 'Attention Diagram' })).toBeInTheDocument();
+    expect(within(center).queryByRole('button', { name: 'KV Cache Notes' })).not.toBeInTheDocument();
+
+    // Cards layout also renders image and DOCX labels truthfully
+    await user.click(within(center).getByRole('radio', { name: 'All' }));
+    await user.click(within(center).getByRole('radio', { name: 'Cards' }));
+    const cards = within(center).getByRole('grid', { name: 'Materials' });
+    expect(within(cards).getByRole('img', { name: 'DOCX' })).toBeInTheDocument();
+    expect(within(cards).getByRole('img', { name: 'Image' })).toBeInTheDocument();
+
+    // Selecting both DOCX and image only counts DOCX for batch Add to wiki
+    await user.click(within(center).getByRole('radio', { name: 'Table' }));
+    const docxRow = within(center).getByRole('button', { name: 'KV Cache Notes' }).closest('tr')!;
+    const imgRow = within(center).getByRole('button', { name: 'Attention Diagram' }).closest('tr')!;
+    await user.click(docxRow.querySelector('[data-sel-box]')!);
+    await user.click(imgRow.querySelector('[data-sel-box]')!);
+    const bar = within(center).getByRole('toolbar', { name: '2 selected' });
+    expect(within(bar).getByRole('button', { name: 'Add to wiki · 1' })).toBeInTheDocument();
+  });
+
+  it('shows image icon for queued images and pdf icon for DOCX in AddMaterialModal', async () => {
+    const user = userEvent.setup();
+    const chooseMaterialFiles = vi.fn(async () => [
+      { path: '/tmp/notes.docx', name: 'notes.docx', size: 2048 },
+      { path: '/tmp/photo.heic', name: 'photo.heic', size: 4096 },
+    ]);
+    renderKb({ world: docWorld(), prefs: { section: 'materials' }, bridge: { chooseMaterialFiles } });
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    await user.click(screen.getByTestId('add-material'));
+    const modal = await screen.findByRole('dialog', { name: 'Add material' });
+    await user.click(within(modal).getByRole('button', { name: 'choose on the computer' }));
+    const queue = await within(modal).findByRole('list', { name: 'To add' });
+    const rows = within(queue).getAllByRole('listitem');
+    expect(rows[0]!.querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('pdf');
+    expect(rows[1]!.querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('image');
+  });
+
+  it('uses nativeIntake selection tokens in AddMaterialModal, surfaces changed-file reselection errors, and replaces stale tokens on fresh selection', async () => {
+    const user = userEvent.setup();
+    const shaV1 = 'a'.repeat(64);
+    const shaV2 = 'b'.repeat(64);
+    let pickCount = 0;
+    const chooseMaterialFiles = vi.fn(async () => {
+      pickCount += 1;
+      const isFresh = pickCount > 1;
+      return {
+        accepted: [{
+          selectionId: isFresh ? 'sel-fresh' : 'sel-stale',
+          path: '/tmp/notes.docx',
+          name: 'notes.docx',
+          size: 2048,
+          sha256: isFresh ? shaV2 : shaV1,
+          ext: 'docx',
+          formatId: 'docx',
+          category: 'docx' as const,
+          route: 'document' as const,
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          source: 'picker' as const,
+          nativePreviewable: false,
+        }],
+        rejected: [],
+      };
+    });
+    const importSelection = vi.fn(async (req: { selectionId: string; folderId: string }) => {
+      if (req.selectionId === 'sel-stale') {
+        return {
+          ok: false as const,
+          status: 422,
+          code: 'file_changed',
+          detail: 'The selected file changed after it was chosen. Choose the file again to preview or add it.',
+        };
+      }
+      return {
+        ok: true as const,
+        status: 201,
+        data: {
+          material: {
+            id: 'mat-fresh',
+            title: 'notes',
+            kind: 'docx',
+            status: 'ready',
+            folder_id: req.folderId,
+            languages: [],
+            fragment_count: 1,
+            created_at: '2026-11-19T00:00:00Z',
+            wiki_state: 'not_in_wiki',
+          },
+          excluded_count: 0,
+          hidden_count: 0,
+          failure_reason: null,
+          video: null,
+          video_failure_reason: null,
+          already_in_library: false,
+        },
+      };
+    });
+
+    renderKb({
+      world: docWorld(),
+      prefs: { section: 'materials' },
+      bridge: {
+        nativeIntake: {
+          chooseMaterialFiles,
+          droppedMaterialFiles: vi.fn(async () => ({ accepted: [], rejected: [] })),
+          validateClipboardImage: vi.fn(async () => ({ ok: false as const, reason: 'unused' })),
+          importSelection,
+          imagePreview: vi.fn(async () => ({ ok: false as const, status: 403, detail: 'unused' })),
+        },
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    await user.click(screen.getByTestId('add-material'));
+    const modal = await screen.findByRole('dialog', { name: 'Add material' });
+    await user.click(within(modal).getByRole('button', { name: 'choose on the computer' }));
+    await within(modal).findByText('notes.docx');
+
+    // First submit with stale token shows clear changed-file message asking for reselection
+    await user.click(within(modal).getByRole('button', { name: 'Add' }));
+    expect(await within(modal).findByText('The selected file changed after it was chosen. Choose the file again to preview or add it.')).toBeInTheDocument();
+    expect(importSelection).toHaveBeenLastCalledWith(expect.objectContaining({ selectionId: 'sel-stale' }));
+
+    // Retrying without reselecting still uses the old token and stays rejected (never silently refreshed)
+    await user.click(within(modal).getByRole('button', { name: 'Add' }));
+    expect(importSelection).toHaveBeenCalledTimes(2);
+    expect(importSelection).toHaveBeenLastCalledWith(expect.objectContaining({ selectionId: 'sel-stale' }));
+
+    // Deliberate fresh selection replaces the stale token, clears the alert, and imports cleanly
+    await user.click(within(modal).getByRole('button', { name: 'choose on the computer' }));
+    await waitFor(() => expect(within(modal).queryByText(/changed after it was chosen/)).not.toBeInTheDocument());
+    await user.click(within(modal).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    expect(importSelection).toHaveBeenLastCalledWith(expect.objectContaining({ selectionId: 'sel-fresh' }));
   });
 });

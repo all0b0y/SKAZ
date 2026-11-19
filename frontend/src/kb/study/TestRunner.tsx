@@ -5,7 +5,7 @@ import { SPRING_SMALL } from '../ui/motion';
 import { SourceMarks } from '../cite/SourceMarks';
 import { useServices } from '../state/context';
 import { agentName } from '../chat/permission';
-import { formatScore, studyApi, type KbStudyPart, type KbStudyQuestion } from './api';
+import { NOT_FROM_MATERIALS, formatScore, isAgentBasis, isRightOption, studyApi, type KbStudyPart, type KbStudyQuestion } from './api';
 import type { StudyActions } from './useStudy';
 import type { KbPermissionPart } from '../api/permissions';
 import { OpenCompact, OpenReport, STATUS_WORD, statusOf } from './OpenReview';
@@ -133,6 +133,7 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRech
     setPicked((now) => (question.type === 'multi' ? (now.includes(id) ? now.filter((x) => x !== id) : [...now, id]) : [id]));
   };
   const agent = agentName((part.engine ?? 'codex') as KbPermissionPart['engine']);
+  const agentBasis = isAgentBasis(question);
   const multi = question.type === 'multi';
   const options = question.type === 'choice' || multi ? question.options : [];
   // The keyboard picks what a click would: nothing once checked or while a request runs.
@@ -154,11 +155,13 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRech
         </button>
       </div>
       <p className="kb-st-tq" id={`q-${question.id}`}>{question.question}</p>
+      {agentBasis && <p className="kb-st-basis" data-basis="agent">{NOT_FROM_MATERIALS}</p>}
       {(question.type === 'choice' || multi) && (
         <div className="kb-st-opts" role={multi ? 'group' : 'radiogroup'} aria-labelledby={`q-${question.id}`}>
           {question.options.map((o, i) => {
             const sel = picked.includes(o.id);
-            const right = o.origin === 'source';
+            const right = isRightOption(question, o);
+            const fromSource = !agentBasis && o.origin === 'source';
             const state = !checked ? (sel ? 'sel' : '') : right ? 'ok' : sel ? 'bad' : '';
             return (
               <button key={o.id} type="button" className={`kb-st-opt${state ? ` is-${state}` : ''}${sel ? ' is-picked' : ''}`}
@@ -168,8 +171,15 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRech
                 <span className="kb-st-opt__text">{o.text}</span>
                 {checked && (
                   <span className="kb-st-tag">
-                    {right ? <><Icon name="allowed" size={13} />{sel || !multi ? 'Correct · from source' : 'Also right · from source'}</>
-                      : sel ? <><Icon name="denied" size={13} />Your pick · {agent} made this one up</> : `made up by ${agent}`}
+                    {right ? (
+                      <><Icon name="allowed" size={13} />{sel || !multi
+                        ? (fromSource ? 'Correct · from source' : 'Correct')
+                        : (fromSource ? 'Also right · from source' : 'Also right')}</>
+                    ) : sel ? (
+                      <><Icon name="denied" size={13} />{agentBasis ? 'Your pick' : `Your pick · ${agent} made this one up`}</>
+                    ) : (
+                      agentBasis ? null : `made up by ${agent}`
+                    )}
                   </span>
                 )}
               </button>
@@ -193,8 +203,14 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRech
           <Icon name={response!.score === 1 ? 'allowed' : 'minus'} size={16} />
           <div>
             <span className="kb-st-rt">{response!.score === 1 ? 'Got it.' : 'Not yet.'}</span>{' '}
-            {question.type === 'short' ? <>The source says: «{question.answers[0]}»</> : <>From the source</>}
-            <SourceMarks citations={question.citations} />
+            {agentBasis
+              ? (question.type === 'short' ? <>Answer: «{question.answers[0]}»</> : <>{question.answers.join(' · ')}</>)
+              : (
+                <>
+                  {question.type === 'short' ? <>The source says: «{question.answers[0]}»</> : <>From the source</>}
+                  <SourceMarks citations={question.citations} />
+                </>
+              )}
           </div>
         </div>
       )}
@@ -210,7 +226,9 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRech
           {reviewOpen && response.review && (
             <OpenReport review={response.review} response={response} busy={!!busy && busy !== 'review'}
               who={response.checked_by ? `Opinion of ${response.checked_by}` : `${agent}’s opinion`}
-              source={<>Source: «{question.answers[0]}»<SourceMarks citations={question.citations} /></>}
+              source={agentBasis
+                ? <>Answer: «{question.answers[0]}» · {NOT_FROM_MATERIALS}</>
+                : <>Source: «{question.answers[0]}»<SourceMarks citations={question.citations} /></>}
               onRecheck={onRecheck} onCount={onCount}
               footer={<div className="kb-st-rv__foot"><Button size="sm" icon="askAgent" onClick={onAsk}>Ask the agent</Button></div>} />
           )}

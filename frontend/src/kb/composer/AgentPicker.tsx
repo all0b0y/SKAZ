@@ -103,13 +103,15 @@ export interface PickerSettingsUse {
 
 const lastOfAgent = (agents: { agents: KbAgent[] } | null): LastOf => (engine) => agents?.agents.find((a) => a.id === engine)?.last_choice;
 
-export function AgentPicker({ choice, onChoose, existingChat, lastOf, settings }: {
+export function AgentPicker({ choice, onChoose, existingChat, lastOf, settings, openRequest = 0 }: {
   choice: AgentChoice | null;
   onChoose: (choice: AgentChoice) => void;
   existingChat: boolean;
   /** Default: each agent's last chat choice (models screen v2). */
   lastOf?: LastOf;
   settings?: PickerSettingsUse;
+  /** Incrementing counter to open the picker externally without submitting. */
+  openRequest?: number;
 }) {
   const anchor = useRef<HTMLButtonElement | null>(null);
   const search = useRef<HTMLInputElement | null>(null);
@@ -119,6 +121,9 @@ export function AgentPicker({ choice, onChoose, existingChat, lastOf, settings }
   const [, setFoldTick] = useState(0);
   const agents = useAgents((s) => s.agents);
   const { agents: agentsStore } = useServices();
+  useEffect(() => {
+    if (openRequest > 0) setOpen(true);
+  }, [openRequest]);
   // Opening the menu checks the agents by themselves (throttled in the store).
   useEffect(() => { if (open) agentsStore.getState().autoCheck('open'); }, [open, agentsStore]);
   useEffect(() => { if (!open) { setQuery(''); setExpanded(new Set()); } }, [open]);

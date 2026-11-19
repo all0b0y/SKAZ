@@ -11,6 +11,8 @@ export const KIND_ICON: Record<Kind, IconName> = {
   video_link: 'video',
   pdf: 'pdf',
   book: 'pdf',
+  docx: 'pdf',
+  image: 'image',
   web: 'link',
   text: 'text',
 };
@@ -22,6 +24,8 @@ export const KIND_LABEL: Record<Kind, string> = {
   video_link: 'Video link',
   pdf: 'PDF',
   book: 'Book',
+  docx: 'DOCX',
+  image: 'Image',
   web: 'Article',
   text: 'Text',
 };

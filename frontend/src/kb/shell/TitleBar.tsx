@@ -18,9 +18,10 @@ export function TitleBar() {
       <div className="kb-titlebar__group">
         <IconButton
           // Static glyph that shows the state (close ⇤ while open, open ⇥ while hidden); it does not animate.
+          // 13/A: a Hide/Show command, not an on-state indicator — no aria-pressed and no resting fill;
+          // the accessible name, the glyph and the tooltip carry the state, hover/focus still tint.
           icon={sideOpen ? 'sidebarClose' : 'sidebarOpen'}
           label={sideOpen ? 'Hide side panel' : 'Show side panel'}
-          aria-pressed={sideOpen}
           aria-controls="kb-side"
           onClick={() => prefs.getState().set({ sideOpen: !sideOpen })}
         />

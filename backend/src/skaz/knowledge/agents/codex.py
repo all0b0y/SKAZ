@@ -51,6 +51,12 @@ from ...gateways.codex_session import (
     thread_start_params,
 )
 from ...gateways.codex_tools import CodexTools
+from ...visual_transport041.capabilities import AdapterTransportProbe, parse_codex_model_visual
+from ...visual_transport041.payloads import (
+    VisualAuthorizationError,
+    VisualPayloadTooLargeError,
+    build_codex_turn_input,
+)
 from ..permissions.refusals import OUTSIDE, refused
 from ..permissions.waits import RunWaits
 from .engine import (
@@ -339,6 +345,22 @@ class CodexEngine:
         view = getattr(self._connection, "view", None)
         return codex_login_progress(view) if isinstance(view, dict) else None
 
+    async def probe_visual_transport(self) -> AdapterTransportProbe:
+        """Report whether Codex App Server transport can carry authorized image blocks."""
+        status = await self.status()
+        if not status.ready:
+            return AdapterTransportProbe(
+                engine="codex",
+                transport_supports_image=False,
+                max_payload_bytes=MAX_MESSAGE_BYTES - 4096,
+                reason=status.reason or "Codex is not ready.",
+            )
+        return AdapterTransportProbe(
+            engine="codex",
+            transport_supports_image=True,
+            max_payload_bytes=MAX_MESSAGE_BYTES - 4096,
+        )
+
     async def models(self) -> Sequence[ModelOption]:
         """Visible models from ``model/list``; empty when Codex is missing or does not answer."""
         if self._connection.binary is None:
@@ -509,8 +531,21 @@ class CodexEngine:
         )
         opening = (thread_resume_params(thread_params, plan.session_id) if resume and plan is not None
                    and plan.session_id else thread_params)
+        try:
+            turn_items = (
+                build_codex_turn_input(
+                    text,
+                    turn.visuals,
+                    model_id=turn.model,
+                    max_frame_bytes=MAX_MESSAGE_BYTES - 4096,
+                )
+                if turn.visuals
+                else [{"type": "text", "text": text, "text_elements": []}]
+            )
+        except (VisualAuthorizationError, VisualPayloadTooLargeError) as error:
+            return Failed(run_id, "incompatible", str(error), unsent=True, permanent=True)
         turn_params: dict[str, Any] = {
-            "input": [{"type": "text", "text": text, "text_elements": []}],
+            "input": turn_items,
             **({"model": turn.model} if turn.model else {}),
             **({"effort": turn.effort} if turn.effort else {}),
             **({"outputSchema": dict(turn.response_schema)} if turn.response_schema is not None else {}),
@@ -811,8 +846,17 @@ def _model_page(reply: object) -> tuple[list[ModelOption], str | None]:
         efforts = tuple(effort["reasoningEffort"] for effort in model.get("supportedReasoningEfforts") or []
                         if isinstance(effort, dict) and isinstance(effort.get("reasoningEffort"), str))
         default = model.get("defaultReasoningEffort")
-        options.append(ModelOption(model["model"], str(model.get("displayName") or model["model"]), efforts,
-                                   default if isinstance(default, str) and default in efforts else None))
+        visual = parse_codex_model_visual(model)
+        options.append(
+            ModelOption(
+                model["model"],
+                str(model.get("displayName") or model["model"]),
+                efforts,
+                default if isinstance(default, str) and default in efforts else None,
+                input_modalities=visual.input_modalities,
+                supports_image=visual.supports_image,
+            )
+        )
     return options, cursor
 
 

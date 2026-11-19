@@ -1,0 +1,93 @@
+/*
+ * B1 — SKAZ 0.4.1, decision 04 (amendment 2026-11-17): the native chat scrollbar disappears;
+ * only the bar goes — trackpad, wheel, ↑/↓, the dots and the return button keep scrolling. The
+ * rail and button visuals follow the accepted unified mock
+ * `.dev/task-context/navigation-mockup.html`, on the app's tokens.
+ *
+ * The host opts the scroller in with `data-anchors="true"` (ChatView's `role="log"` element), so
+ * this stylesheet owns the rule without editing the shared chat.css. The rail and the button are
+ * positioned over the chat stage — siblings of the scroller inside its positioned wrapper
+ * (`.kb-chat__stage`), the same placement ScrollEdges uses.
+ */
+
+/* Only the bar disappears; scrolling itself is untouched. */
+.kb-chat__scroll[data-anchors='true'] { scrollbar-width: none; }
+.kb-chat__scroll[data-anchors='true']::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* The dot column: quiet at rest, a comfortable hit zone on hover and keyboard focus. */
+.kb-anchor-rail {
+  position: absolute;
+  z-index: 5;
+  top: 14px;
+  bottom: 44px;
+  right: 2px;
+  width: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  gap: 12px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  border-radius: 12px;
+  transition: width 0.15s ease, background 0.15s ease;
+}
+.kb-anchor-rail::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.kb-anchor-rail:hover,
+.kb-anchor-rail:focus-within {
+  width: 28px;
+  background: color-mix(in srgb, var(--kb-accent-soft) 55%, transparent);
+}
+
+.kb-anchor-dot {
+  height: 6px;
+  width: 6px;
+  padding: 0;
+  flex: none;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--kb-muted) 52%, var(--kb-line));
+  cursor: pointer;
+  transition: width 0.15s ease, height 0.15s ease, background 0.15s ease;
+}
+.kb-anchor-rail:hover .kb-anchor-dot,
+.kb-anchor-rail:focus-within .kb-anchor-dot { width: 10px; }
+.kb-anchor-dot[data-active='true'] { height: 18px; width: 5px; border-radius: 3px; background: var(--kb-text); }
+.kb-anchor-dot:hover { background: var(--kb-text); }
+.kb-anchor-dot:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 2px; }
+
+/* The ↓ return-to-latest button, above the composer's right edge. */
+.kb-return-bottom {
+  position: absolute;
+  bottom: 12px;
+  right: 15px;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--kb-line);
+  border-radius: 50%;
+  background: var(--kb-bg);
+  color: var(--kb-text);
+  cursor: pointer;
+  box-shadow: var(--kb-shadow-raise);
+  transition: background 0.12s ease;
+}
+/* `display: grid` above would override the UA's [hidden] rule — keep the attribute authoritative. */
+.kb-return-bottom[hidden] { display: none; }
+.kb-return-bottom:hover { background: var(--kb-accent-soft); }
+.kb-return-bottom:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 2px; }
+.kb-return-bottom svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kb-anchor-rail, .kb-anchor-dot, .kb-return-bottom { transition: none; }
+}

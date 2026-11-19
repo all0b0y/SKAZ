@@ -812,6 +812,7 @@ async def test_a_double_save_to_wiki_writes_one_page(env: Env) -> None:
     saved, again = (first, second) if first.status_code == 200 else (second, first)
     assert again.json()["code"] == "ALREADY_SAVED" and again.json()["saved_page_id"] == saved.json()["id"]
     assert await analyses() - before == {saved.json()["id"]}
+    assert len(env.agents.engines["codex"].turns) == 2  # the original answer and one shaping turn
 
 
 async def test_saving_an_answer_under_a_taken_name_is_refused_until_the_chat_is_renamed(env: Env) -> None:
@@ -1033,3 +1034,140 @@ async def test_excluded_fragments_stay_out_of_context_and_citations(env: Env) ->
     request = env.agents.engines["codex"].turns[-1].messages[-1].content
     assert "Второе начало термодинамики" not in request and "Итоги лекции" in request
     assert [(part["citation"]["seg"]) for part in chips(message, "cite")] == [3]
+
+
+async def test_shape_selected_answer_before_save(env: Env) -> None:
+    env.agents.scripts["codex"] = lambda _turn: text("Sure!\n\nEntropy increases. A second idea.")
+    chat = await env.chat()
+    answer = await env.answered(chat["id"], "Explain entropy")
+    env.agents.shape_scripts["codex"] = lambda _turn: text('{"omit":[0],"break_before":[2]}')
+    saved = await env.client.post(f"/kb/chats/{chat['id']}/messages/{answer['id']}/save")
+    assert saved.status_code == 200, saved.text
+    record = env.runtime.kb.page_repo.get(saved.json()["id"])
+    written = (Path(env.runtime.kb.library_root) / record.rel_path).read_text()
+    assert [b.body for b in parse_page(written).blocks()] == ["Entropy increases.", "A second idea."]
+    assert env.agents.engines["codex"].turns[-1].tools is None
+
+
+@pytest.mark.parametrize("failure", ["success", "limit", "network", "same", "invalid", "citation"])
+async def test_shape_fallback_and_validate_citations(env: Env, failure: str) -> None:
+    from skaz.knowledge.agents.engine import Failed
+
+    env.agents.scripts["codex"] = lambda _: text(
+        f"Happy to help! Entropy increases ⟦m:{env.library.lecture}:1|мера беспорядка системы⟧.")
+    chat = await env.chat()
+    answer = await env.answered(chat["id"], "Entropy")
+    settings = env.runtime.kb.settings
+    settings.set("wiki_engine", "codex" if failure == "same" else "claude_code")
+    settings.set("wiki_model", "fake-model")
+    if failure == "network":
+        env.agents.shape_scripts["codex"] = lambda _: [Failed("", "network", "Offline.")]
+    elif failure == "invalid":
+        env.agents.shape_scripts["codex"] = lambda _: text('{"quote":"invented","omit":[],"break_before":[]}')
+    elif failure == "citation":
+        env.agents.shape_scripts["codex"] = lambda _: text('{"omit":[1],"break_before":[]}')
+    else:
+        env.agents.shape_scripts["codex"] = lambda _: [limit_failure()]
+    env.agents.shape_scripts["claude_code"] = (
+        (lambda _: [limit_failure("Wiki quota exhausted.")]) if failure == "limit" else
+        (lambda _: text('{"omit":[0],"break_before":[]}')))
+    before = {page.id for page in env.runtime.kb.pages(kind="analysis")}
+    response = await env.client.post(f"/kb/chats/{chat['id']}/messages/{answer['id']}/save")
+    alternate = env.agents.engines["claude_code"].turns
+    assert len(alternate) == int(failure in ("success", "limit"))
+    if alternate:
+        assert alternate[0].model == "fake-model" and alternate[0].tools is None and alternate[0].web is None
+    if failure == "success":
+        assert response.status_code == 200
+        assert "Wiki LLM: Claude Code (fake-model)" in response.json()["warning"]
+        record = env.runtime.kb.page_repo.get(response.json()["id"])
+        written = (Path(env.runtime.kb.library_root) / record.rel_path).read_text()
+        assert "Happy to help!" not in written and "#^seg-1" in written
+        assert parse_page(written).blocks()[0].cites[0].quote == "мера беспорядка системы"
+    else:
+        assert response.status_code in (409, 422)
+        assert {page.id for page in env.runtime.kb.pages(kind="analysis")} == before
+        assert (await env.message(chat["id"], answer["id"]))["saved_page_id"] is None
+        expected = {"limit": "Wiki quota exhausted", "same": "limit", "network": "Offline",
+                    "invalid": "invalid wiki edit", "citation": "invalid wiki edit"}
+        assert expected[failure] in response.json()["detail"]
+
+
+async def test_stop_while_shaping_releases_the_answer_for_retry(env: Env) -> None:
+    chat = await env.chat()
+    answer = await env.answered(chat["id"], "Save and stop")
+    env.agents.shape_scripts["codex"] = lambda _: [Gate(asyncio.Event())]
+    url = f"/kb/chats/{chat['id']}/messages/{answer['id']}"
+    before = {page.id for page in env.runtime.kb.pages(kind="analysis")}
+    pending = asyncio.create_task(env.client.post(url + "/save"))
+    await settle(lambda: bool(env.agents.engines["codex"].active_runs()))
+    stopped = await env.client.post(url + "/stop")
+    assert stopped.status_code == 200 and stopped.json()["state"] == "done"
+    assert (await pending).json()["code"] == "CANCELLED"
+    assert {page.id for page in env.runtime.kb.pages(kind="analysis")} == before
+    del env.agents.shape_scripts["codex"]
+    saved = await env.client.post(url + "/save")
+    assert saved.status_code == 200
+    assert {page.id for page in env.runtime.kb.pages(kind="analysis")} - before == {saved.json()["id"]}
+
+
+async def test_retry_repairs_a_missing_backlink_without_shaping_again(env: Env) -> None:
+    chat = await env.chat()
+    answer = await env.answered(chat["id"], "A recoverable analysis")
+    url = f"/kb/chats/{chat['id']}/messages/{answer['id']}/save"
+    saved = await env.client.post(url)
+    assert saved.status_code == 200
+    # Simulate an interruption after the filesystem page landed but before the message backlink.
+    with env.runtime.kb.db.write() as connection:
+        connection.execute("UPDATE chat_messages SET saved_page_id=NULL WHERE id=?", (answer["id"],))
+    before = {page.id for page in env.runtime.kb.pages(kind="analysis")}
+    await env.client.patch(f"/kb/chats/{chat['id']}", json={"title": "Another available title"})
+    retry = await env.client.post(url)
+    assert retry.status_code == 409 and retry.json()["saved_page_id"] == saved.json()["id"]
+    assert (await env.message(chat["id"], answer["id"]))["saved_page_id"] == saved.json()["id"]
+    assert {page.id for page in env.runtime.kb.pages(kind="analysis")} == before
+    assert len(env.agents.engines["codex"].turns) == 2
+
+
+async def test_stop_during_page_write_waits_for_the_backlink(env: Env,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    from threading import Event
+
+    from skaz.knowledge.chats.model import Chat
+    from skaz.knowledge.markdown.page import PageDocument
+
+    chat = await env.chat()
+    answer = await env.answered(chat["id"], "Stop during a page write")
+    url = f"/kb/chats/{chat['id']}/messages/{answer['id']}"
+    written, release = Event(), Event()
+    create = env.runtime.kb.create_page
+
+    def hold_after_write(document: PageDocument) -> Path:
+        path = Path(create(document))
+        written.set()
+        assert release.wait(5)
+        return path
+
+    monkeypatch.setattr(env.runtime.kb, "create_page", hold_after_write)
+    save = asyncio.create_task(env.client.post(url + "/save"))
+    await settle(written.is_set)
+    stop_started = asyncio.Event()
+    load_chat = env.chats._chat
+
+    async def start_stop(chat_id: str) -> Chat:
+        loaded = await load_chat(chat_id)
+        stop_started.set()
+        return loaded
+
+    monkeypatch.setattr(env.chats, "_chat", start_stop)
+    stop = asyncio.create_task(env.client.post(url + "/stop"))
+    try:
+        await asyncio.wait_for(stop_started.wait(), 2)
+        assert not stop.done()
+    finally:
+        release.set()
+    saved, stopped = await asyncio.gather(save, stop)
+    assert saved.status_code == 200
+    assert stopped.json()["saved_page_id"] == saved.json()["id"]
+    retry = await env.client.post(url + "/save")
+    assert retry.status_code == 409 and retry.json()["saved_page_id"] == saved.json()["id"]

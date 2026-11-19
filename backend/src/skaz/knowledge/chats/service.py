@@ -30,6 +30,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ...native_io import disk_call
+from ...visual_transport041.authorization import AuthorizedVisualPayload
+from ...visual_transport041.runtime import (
+    VisualPreflightOutcome,
+    authorize_visual_turn,
+    derive_visual_intent,
+    preflight_visual_turn,
+)
 from ..agents import update_gate
 from ..agents.engine import (
     AgentEngine,
@@ -46,6 +53,7 @@ from ..agents.engine import (
     ToolResult,
     ToolSpec,
     TurnMessage,
+    collect,
     session_support,
 )
 from ..agents.last_choice import LastChoice
@@ -58,7 +66,7 @@ from ..answer_blocks.part import BlockPart, MaterialSource, drawing
 from ..errors import KnowledgeError, NotFound
 from ..ids import new_id
 from ..ingest.protocols import IdentityTextLayer, TextLayer
-from ..ingest.settings import read_settings
+from ..ingest.settings import read_engine_pauses, read_settings
 from ..keyed_locks import KeyedLocks
 from ..logsafe import error_note
 from ..markdown.text import name_key
@@ -76,15 +84,17 @@ from ..permissions.search_rules import (
     SearchRulesStore,
     rules_instructions,
 )
-from ..permissions.source_scope import scope_of, sources_note
+from ..permissions.source_scope import SourceScope, scope_of, sources_note
 from ..permissions.store import PermissionRecord, QuestionRecord, RunRef
 from ..permissions.web_search import ChatWebGate, WebSearchBroker, WebSearchRecord
 from ..permissions.web_tool import WEB_TOOL
 from ..service import KnowledgeService
 from ..skills.settings import enabled_skills
+from ..sources.service import SourceService
 from ..study.scheduling import Mode
 from ..study.store import StudyBlock
-from .analysis import AnalysisWriter, Section
+from . import shaping
+from .analysis import NOTHING_TO_SAVE, ONLY_UNCITED_DIAGRAMS, AnalysisRefused, AnalysisWriter, Section
 from .blocks import AnswerBlocks, finish_drawing
 from .context import ContextBuilder, history, instructions
 from .events import ChatEvent, ChatFeed, ListFeed
@@ -122,6 +132,7 @@ from .model import (
     ResearchPart,
     Selection,
     StudyPart,
+    TextOnlyPart,
     TextPart,
     ToolPart,
     WebSearchPart,
@@ -237,6 +248,8 @@ class _Run:
     #: Q1 n78 H-2: a hard search rule is in force, so this (Claude Code) chat searches through
     #: ``skaz_web_search`` — SKAZ screens the links first — and its own WebSearch is not offered.
     skaz_web: bool = False
+    #: V4: verified visual payloads authorized for this turn's model/transport only.
+    visuals: tuple[AuthorizedVisualPayload, ...] = ()
 
 
 class ChatService:
@@ -246,8 +259,10 @@ class ChatService:
                  permissions: PermissionBroker | None = None,
                  questions: QuestionBroker | None = None,
                  study: StudyService | None = None,
-                 web: WebSearchBroker | None = None) -> None:
+                 web: WebSearchBroker | None = None,
+                 sources: Callable[[], SourceService] | SourceService | None = None) -> None:
         self.kb = kb
+        self._sources_provider = sources
         self.repo = ChatRepository(kb.db)
         self.usage_log = UsageLog(kb.db)
         self.summaries = ChatSummaries(kb.db, self.usage_log)
@@ -270,7 +285,8 @@ class ChatService:
         self._stop_timeout_s = stop_timeout_s
         self._close_stop_s = close_stop_s
         #: One "Save to wiki" per answer at a time: a double click must not write two analysis pages.
-        self._saving = KeyedLocks()
+        self._saves: dict[tuple[str, str], asyncio.Task[tuple[str, str, str, str | None]]] = {}
+        self._committing_saves: set[tuple[str, str]] = set()
         #: One part change of a saved answer at a time (read-modify-write of its parts).
         self._parts = KeyedLocks()
         #: Answers that were streaming when SKAZ stopped are "interrupted" (resumable) from now on.
@@ -717,11 +733,85 @@ class ChatService:
 
     # -- asking ---------------------------------------------------------------------
 
-    async def send(self, chat_id: str, given: MessageInput) -> tuple[Message, Message]:
+    def _sources(self) -> SourceService:
+        if callable(self._sources_provider):
+            return self._sources_provider()
+        if self._sources_provider is not None:
+            return self._sources_provider
+        return SourceService(self.kb)
+
+    async def _authorize_visuals(
+        self,
+        chat: Chat,
+        given: MessageInput,
+    ) -> tuple[tuple[AuthorizedVisualPayload, ...], bool]:
+        return await authorize_visual_turn(
+            kb=self.kb,
+            sources=self._sources(),
+            registry=self.registry,
+            engine_id=chat.engine,
+            model_id=chat.model,
+            given=given,
+            scope=await self._visual_scope(chat.id),
+        )
+
+    async def _visual_scope(self, chat_id: str) -> SourceScope | None:
+        return await disk_call(
+            lambda: scope_of(SearchRulesStore(self.kb.db, self.kb.settings).chat(chat_id)),
+        )
+
+    async def visual_preflight(
+        self,
+        *,
+        chat_id: str | None = None,
+        engine: EngineId | None = None,
+        model: str | None = None,
+        given: MessageInput,
+    ) -> VisualPreflightOutcome:
+        scope = None
+        target_engine: EngineId
+        target_model: str | None = model
+        if chat_id is not None:
+            chat = await self._chat(chat_id)
+            target_engine = engine if engine is not None else chat.engine
+            if target_model is None and engine is None:
+                target_model = chat.model
+            scope = await self._visual_scope(chat.id)
+        else:
+            target_engine = engine if engine is not None else await disk_call(self.registry.default)
+        await self.registry.require_known(target_engine)
+        return await preflight_visual_turn(
+            kb=self.kb,
+            sources=self._sources(),
+            registry=self.registry,
+            engine_id=target_engine,
+            model_id=target_model,
+            given=given,
+            scope=scope,
+        )
+
+    async def send(
+        self,
+        chat_id: str,
+        given: MessageInput,
+        *,
+        expected_target: tuple[EngineId, str | None, str | None] | None = None,
+    ) -> tuple[Message, Message]:
         chat = await self._chat(chat_id)
+        if expected_target is not None and (chat.engine, chat.model, chat.effort) != expected_target:
+            raise ChatConflict(
+                "The agent selection changed. Review it and send again.", "CHAT_TARGET_CHANGED",
+            )
         run = self._runs.get(chat_id)
         if run is not None and self.questions is not None and \
                 await disk_call(self.questions.waiting_in, chat_id):
+            plan = await disk_call(
+                derive_visual_intent, self.kb, self._sources(), given, await self._visual_scope(chat_id),
+            )
+            if plan.requires_visual or given.text_only:
+                raise ChatConflict(
+                    "Finish the agent’s question before sending visual sources.", "WAITING_FOR_QUESTION",
+                )
             return await self._answer_question(chat, run, given)
         self._reserve(chat_id)
         try:
@@ -730,10 +820,11 @@ class ChatService:
             if given.selection is not None:  # P2: only ids that exist in the stored answer
                 checked = await self._checked_selection(prior, given.selection, chat_id)
                 given = replace(given, selection=checked)
+            visuals, text_only_mode = await self._authorize_visuals(chat, given)
             now = utc_now()
             user = Message(id=new_id("msg"), chat_id=chat_id, seq=0, role="user", state="done",
                            created_at=now, parts=(TextPart(given.text),), input=given)
-            answer = self._new_answer(chat, user.id, now)
+            answer = self._new_answer(chat, user.id, now, text_only=text_only_mode)
             updates: dict[str, Any] = {"updated_at": now, "last_preview": preview(user.parts),
                                        "unread": False}
             if chat.title_auto and not any(message.role == "user" for message in prior):
@@ -751,7 +842,7 @@ class ChatService:
         feed.emit("message", answer.id, message=answer)
         if "title" in updates:
             feed.emit("title", None, text=updates["title"])
-        self._start(chat, engine, answer, user, prior)
+        self._start(chat, engine, answer, user, prior, visuals=visuals)
         return user, answer
 
     async def regenerate(self, chat_id: str, message_id: str) -> tuple[Message, Message]:
@@ -777,8 +868,9 @@ class ChatService:
             engine = await self.registry.require_known(chat.engine)  # bug 7: no fresh check first
             messages = await disk_call(self.repo.messages, chat_id)
             prior = [message for message in messages if message.seq < question.seq]
+            visuals, text_only_mode = await self._authorize_visuals(chat, question.input)
             now = utc_now()
-            fresh = self._new_answer(chat, question.id, now)
+            fresh = self._new_answer(chat, question.id, now, text_only=text_only_mode)
             chat_update = {"updated_at": now, "unread": False}
             if resume:  # the interrupted answer gives its place to the new one (2026-10-21)
                 answer = await disk_call(self.repo.replace_answer, target, fresh, chat_update)
@@ -790,7 +882,7 @@ class ChatService:
         if resume:
             self._feed(chat_id).emit("removed", target.id)
         self._feed(chat_id).emit("message", answer.id, message=answer)
-        self._start(chat, engine, answer, question, prior)
+        self._start(chat, engine, answer, question, prior, visuals=visuals)
         return question, answer
 
     async def edit(self, chat_id: str, message_id: str, given: MessageInput) -> tuple[Message, Message]:
@@ -809,8 +901,9 @@ class ChatService:
             context = target.input.context if target.input is not None else given.context
             # The question keeps its selection too (P2): the edit changes the words.
             kept = target.input.selection if target.input is not None else None
-            question = replace(target, parts=(TextPart(given.text),),
-                               input=replace(given, context=context, selection=kept))
+            edited_input = replace(given, context=context, selection=kept)
+            visuals, text_only_mode = await self._authorize_visuals(chat, edited_input)
+            question = replace(target, parts=(TextPart(given.text),), input=edited_input)
             now = utc_now()
             updates: dict[str, Any] = {"updated_at": now, "last_preview": preview(question.parts),
                                        "unread": False}
@@ -818,8 +911,12 @@ class ChatService:
             merged = tuple(dict.fromkeys((*chat.folder_ids, *folders)))
             if merged != chat.folder_ids:
                 updates["folder_ids"] = merged
-            removed, answer = await disk_call(self.repo.rewrite_from, question,
-                                              self._new_answer(chat, question.id, now), updates)
+            removed, answer = await disk_call(
+                self.repo.rewrite_from,
+                question,
+                self._new_answer(chat, question.id, now, text_only=text_only_mode),
+                updates,
+            )
         except BaseException:
             self._reserved.discard(chat_id)
             raise
@@ -828,14 +925,15 @@ class ChatService:
             feed.emit("removed", gone)
         feed.emit("message", question.id, message=question)
         feed.emit("message", answer.id, message=answer)
-        self._start(chat, engine, answer, question, prior)
+        self._start(chat, engine, answer, question, prior, visuals=visuals)
         return question, answer
 
     @staticmethod
-    def _new_answer(chat: Chat, question_id: str, now: str) -> Message:
+    def _new_answer(chat: Chat, question_id: str, now: str, *, text_only: bool = False) -> Message:
+        parts: tuple[Part, ...] = (TextOnlyPart(),) if text_only else ()
         return Message(id=new_id("msg"), chat_id=chat.id, seq=0, role="assistant", state="streaming",
-                       created_at=now, engine=chat.engine, model=chat.model, effort=chat.effort,
-                       reply_to=question_id)
+                       created_at=now, parts=parts, engine=chat.engine, model=chat.model,
+                       effort=chat.effort, reply_to=question_id)
 
     async def _checked_selection(self, prior: Sequence[Message], selection: Selection,
                                  chat_id: str) -> Selection:
@@ -871,9 +969,9 @@ class ChatService:
         return folders
 
     def _start(self, chat: Chat, engine: AgentEngine, answer: Message, question: Message,
-               prior: Sequence[Message]) -> None:
+               prior: Sequence[Message], *, visuals: tuple[AuthorizedVisualPayload, ...] = ()) -> None:
         now = time.monotonic()
-        run = _Run(chat.id, answer.id, engine, answer, saved_at=now, started_at=now)
+        run = _Run(chat.id, answer.id, engine, answer, saved_at=now, started_at=now, visuals=visuals)
         self._runs[chat.id] = run
         self._reserved.discard(chat.id)
         run.task = asyncio.create_task(self._drive(run, chat, question, list(prior)),
@@ -1085,7 +1183,8 @@ class ChatService:
         return AgentTurn(run_id=run.run_id, messages=messages, instructions=told,
                          tools=self._tools_for(chat, skaz_web=run.skaz_web),
                          web=gate, model=chat.model, effort=chat.effort, history_summary=summary,
-                         session=decision.plan if decision is not None else None)
+                         session=decision.plan if decision is not None else None,
+                         visuals=run.visuals)
 
     async def _bound(self, run: _Run, event: SessionBound) -> None:
         """The agent took this turn into a session: remember it at once (a crash mid-answer then still
@@ -1394,7 +1493,8 @@ class ChatService:
         if state == "cancelled" and run.closing:
             state, failure = "interrupted", Failure("other", RESTART_REASON)
         if state == "done" and not any(not isinstance(part, TextPart) or part.text.strip()
-                                       for part in run.message.parts if not isinstance(part, KnowledgePart)):
+                                       for part in run.message.parts
+                                       if not isinstance(part, (KnowledgePart, TextOnlyPart))):
             state, failure = "failed", Failure("other", EMPTY_ANSWER)
         message = replace(run.message, state=state, failure=failure)
         run.message = message
@@ -1466,6 +1566,11 @@ class ChatService:
 
     async def stop(self, chat_id: str, message_id: str) -> Message:
         await self._chat(chat_id)
+        save = self._saves.get((chat_id, message_id))
+        if save is not None:
+            if (chat_id, message_id) not in self._committing_saves:
+                save.cancel()
+            await asyncio.gather(save, return_exceptions=True)
         run = self._runs.get(chat_id)
         if run is not None and run.message.id == message_id:
             await self._stop_run(run)
@@ -1512,6 +1617,10 @@ class ChatService:
         """App shutdown: every answer ends as interrupted (resumable) with the text it streamed so far,
         within ``close_stop_s`` per answer, before the database closes."""
         self._closing = True
+        saves = list(self._saves.values())
+        for save in saves:
+            save.cancel()
+        await asyncio.gather(*saves, return_exceptions=True)
         runs = list(self._runs.values())
         for run in runs:
             run.closing = True
@@ -1558,29 +1667,135 @@ class ChatService:
 
     async def save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str, str | None]:
         """The answer as an analysis page; a repeated (also a concurrent) save is 409 ``ALREADY_SAVED``
-        naming the page the first one wrote. The last item is the warning about what was left out."""
-        async with self._saving.hold(message_id):
-            return await self._save_message(chat_id, message_id)
+        naming the page the first one wrote. The notice discloses alternate use and omissions."""
+        key = (chat_id, message_id)
+        pending = self._saves.get(key)
+        if self._closing:
+            raise ChatConflict("SKAZ is closing. Try again after restart.", "CLOSING")
+        task = pending or asyncio.create_task(self._save_message(chat_id, message_id))
+        self._saves[key] = task
+        try:
+            if pending is None:
+                return await task
+            page_id, *_ = await asyncio.shield(task)
+            raise ChatConflict("This answer is already saved in the wiki.", "ALREADY_SAVED",
+                               saved_page_id=page_id)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current and current.cancelling():
+                raise
+            raise ChatConflict("Wiki shaping was cancelled.", "CANCELLED") from None
+        finally:
+            if pending is None:
+                self._saves.pop(key, None)
+
+    async def _shape_turn(self, engine_id: EngineId, model: str | None, effort: str | None,
+                          edit: shaping.AnalysisEdit) -> tuple[str, Failed | None]:
+        engine = await self.registry.require(engine_id)
+        await self._check_model(engine_id, model, effort)
+        turn = AgentTurn(new_id("shape"), (TurnMessage("user", edit.prompt),), shaping.INSTRUCTIONS,
+                         tools=None, model=model, effort=effort, response_schema=shaping.SCHEMA)
+        try:
+            result = await collect(engine.run(turn))
+        except asyncio.CancelledError:
+            await engine.interrupt(turn.run_id)
+            raise
+        except Exception as error:
+            raise AnalysisRefused("The agent stopped while shaping the wiki page. Try again.") from error
+        return result.text, result.terminal if isinstance(result.terminal, Failed) else None
+
+    async def _shape_analysis(self, chat: Chat, message: Message,
+                              edit: shaping.AnalysisEdit) -> tuple[str, str | None]:
+        primary = message.engine or chat.engine
+        model = message.model if message.engine else chat.model
+        effort = message.effort if message.engine else chat.effort
+        text, failure = await self._shape_turn(primary, model, effort, edit)
+        if failure is None:
+            return text, None
+        if failure.kind != "limit" or failure.transient:
+            raise AnalysisRefused(failure.message)
+        settings = await disk_call(read_settings, self.kb.settings)
+        alternate = cast(EngineId, settings.engine or self.registry.default())
+        limit = f"Chat model reached its limit. {failure.message}"
+        if alternate == primary:
+            view = await self.registry.known_view(primary)
+            default = view.current_model or (view.models[0].id if view.models else None)
+            chat_model = model or default
+            wiki_model = settings.model or default
+            if not chat_model or not wiki_model or chat_model == wiki_model:
+                raise ChatConflict(limit + " No distinct wiki model is available.", "ENGINE_LIMIT")
+        if alternate in await disk_call(read_engine_pauses, self.kb.settings):
+            raise ChatConflict(limit + " The wiki agent is paused on a quota limit.", "ENGINE_LIMIT")
+        label = ENGINE_NAMES[alternate] + (f" ({settings.model})" if settings.model else "")
+        try:
+            text, failure = await self._shape_turn(alternate, settings.model, settings.effort, edit)
+        except KnowledgeError as error:
+            raise ChatConflict(f"{limit} Wiki LLM {label}: {error.message}", "WIKI_UNAVAILABLE") from error
+        if failure is not None:
+            code = "ENGINE_LIMIT" if failure.kind == "limit" else "WIKI_UNAVAILABLE"
+            raise ChatConflict(f"{limit} Wiki LLM {label}: {failure.message}", code)
+        return text, label
 
     async def _save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str, str | None]:
         chat = await self._chat(chat_id)
         message = await self._message(chat_id, message_id)
         if message.role != "assistant" or message.state != "done":
             raise ChatConflict("Only a finished answer can be saved to the wiki.", "NOT_FINISHED")
-        saved_id = message.saved_page_id
-        saved = await disk_call(self.kb.page_repo.get, saved_id) if saved_id else None
+        # A retry after a crash between the page write and backlink finds the original page by id.
+        page_id = f"pg-analysis-{message.id}"
+        saved = await disk_call(self.kb.page_repo.get, page_id)
+        if saved is None and message.saved_page_id and message.saved_page_id != page_id:
+            saved = await disk_call(self.kb.page_repo.get, message.saved_page_id)
         if saved is not None:
+            if saved.id != message.saved_page_id:
+                async with self._parts.hold(message_id):
+                    updated = replace(await self._message(chat_id, message_id), saved_page_id=saved.id)
+                    await disk_call(self.repo.save_message, updated)
+                    self._feed(chat_id).emit("state", updated.id, message=updated)
             raise ChatConflict("This answer is already saved in the wiki.", "ALREADY_SAVED",
                                saved_page_id=saved.id)
         question = await disk_call(self.repo.message, chat_id, message.reply_to or "")
         question_text = question.input.text if question is not None and question.input is not None else ""
-        writer = self._writer()
-        record = await disk_call(writer.save, [question_text, chat.title],
-                                 [Section(question_text, message.parts)], chat_id)
-        updated = replace(message, saved_page_id=record.id)
-        await disk_call(self.repo.save_message, updated)
+        edit = await disk_call(self._analysis_edit, question_text, message)
+        response, alternate = await self._shape_analysis(chat, message, edit)
+        try:
+            items = edit.apply(response)
+        except AnalysisRefused as error:
+            if alternate:
+                reason = f"Chat model reached its limit. Wiki LLM {alternate}: {error.message}"
+                raise AnalysisRefused(reason) from error
+            raise
+        async with self._parts.hold(message_id):
+            latest = await self._message(chat_id, message_id)
+            # Page creation and the message backlink settle together even on request cancellation.
+            def commit() -> tuple[Message, str, str, str, str | None]:
+                with self.kb.writing():
+                    writer = self._writer()
+                    parts = writer.section_blocks(question_text, items)
+                    record = writer.save_blocks([question_text, chat.title], parts, chat_id, page_id=page_id)
+                updated = replace(latest, saved_page_id=record.id)
+                self.repo.save_message(updated)
+                notice = (f"Chat model reached its limit. Shaped with Wiki LLM: {alternate}."
+                          if alternate else None)
+                warning = " ".join(item for item in (notice, writer.warning) if item)
+                return updated, record.id, record.kind, record.title, warning or None
+
+            key = (chat_id, message_id)
+            self._committing_saves.add(key)
+            try:
+                updated, page_id, kind, title, warning = await disk_call(commit)
+            finally:
+                self._committing_saves.discard(key)
         self._feed(chat_id).emit("state", updated.id, message=updated)
-        return record.id, record.kind, record.title, writer.warning
+        return page_id, kind, title, warning
+
+    def _analysis_edit(self, question: str, message: Message) -> shaping.AnalysisEdit:
+        writer = self._writer()
+        chunks = writer.chunks(message.parts)
+        # Apply the original instruction and content checks before sending anything to an agent.
+        if not writer.section_blocks(question, chunks):
+            raise AnalysisRefused(ONLY_UNCITED_DIAGRAMS if writer.left_out_diagrams else NOTHING_TO_SAVE)
+        return shaping.AnalysisEdit(chunks)
 
     async def save_chat(self, chat_id: str) -> tuple[str, str, str, str | None]:
         chat = await self._chat(chat_id)

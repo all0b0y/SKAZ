@@ -95,6 +95,17 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ...native_io import disk_call
+from ...visual_transport041.capabilities import (
+    AdapterTransportProbe,
+    parse_acp_transport_probe,
+    parse_opencode_model_visual,
+)
+from ...visual_transport041.payloads import (
+    NDJSON_MAX_FRAME_BYTES,
+    VisualAuthorizationError,
+    VisualPayloadTooLargeError,
+    build_acp_prompt_blocks,
+)
 from ..install.system import (
     Located,
     LocateFn,
@@ -390,7 +401,7 @@ def free_tier(model: Mapping[str, Any]) -> bool:
 
 
 def model_options(models: Sequence[Mapping[str, Any]], credentials: Sequence[str]) -> tuple[ModelOption, ...]:
-    entries: list[tuple[str, str, tuple[str, ...]]] = []
+    entries: list[tuple[str, str, tuple[str, ...], tuple[str, ...], bool | None]] = []
     for model in models:
         model_id = f"{model['providerID']}/{model['id']}"
         if not provider_allowed(model_id, credentials) or free_tier(model):
@@ -402,12 +413,18 @@ def model_options(models: Sequence[Mapping[str, Any]], credentials: Sequence[str
         elif isinstance(variants, list):
             efforts = tuple(item["id"] for item in variants if isinstance(item, Mapping)
                             and isinstance(item.get("id"), str) and item["id"] != "default")
-        entries.append((model_id, str(model.get("name") or model["id"]), efforts))
-    names = [name for _id, name, _efforts in entries]
+        visual = parse_opencode_model_visual(model)
+        entries.append((model_id, str(model.get("name") or model["id"]), efforts,
+                        visual.input_modalities, visual.supports_image))
+    names = [name for _id, name, _efforts, _modalities, _supports in entries]
     def label(model_id: str, name: str) -> str:
         return name if names.count(name) == 1 else f"{name} · {model_id.split('/', 1)[0]}"
 
-    return tuple(ModelOption(model_id, label(model_id, name), efforts) for model_id, name, efforts in entries)
+    return tuple(
+        ModelOption(model_id, label(model_id, name), efforts,
+                    input_modalities=modalities, supports_image=supports)
+        for model_id, name, efforts, modalities, supports in entries
+    )
 
 
 def opencode_prompt(turn: AgentTurn) -> str:
@@ -585,6 +602,7 @@ class OpenCodeEngine:
         #: Ids of OpenCode's free-tier models from the last catalogue read (``None`` = not read yet).
         self._free: frozenset[str] | None = None
         self.current_model: str | None = None
+        self._transport_probe: AdapterTransportProbe | None = None
 
     @property
     def id(self) -> EngineId:
@@ -785,6 +803,39 @@ class OpenCodeEngine:
         return EngineStatus("opencode", installed=True, version=shown, signed_in=signed_in,
                             reason=None if signed_in else NO_PROVIDER)
 
+    async def probe_visual_transport(self) -> AdapterTransportProbe:
+        """Return ACP ``promptCapabilities.image`` from the latest or fresh ``initialize`` handshake."""
+        if self._transport_probe is not None:
+            return self._transport_probe
+        located = self._locate("opencode")
+        if located is None:
+            return AdapterTransportProbe(
+                engine="opencode", transport_supports_image=False, reason=NOT_INSTALLED,
+            )
+        status = await self.status()
+        if not status.ready:
+            return AdapterTransportProbe(
+                engine="opencode",
+                transport_supports_image=False,
+                reason=status.reason or "OpenCode is not ready.",
+            )
+        self.prepare()
+        work = self.runs_dir / f"vprobe-{uuid.uuid4().hex}"
+        work.mkdir(mode=0o700, parents=True, exist_ok=True)
+        run_config = work / "skaz-run.json"
+        run_config.write_text(run_config_text("Capability probe."), encoding="utf-8")
+        try:
+            async with self._acp(located, work, run_config, _ActiveRun()) as (_connection, initialized):
+                return parse_acp_transport_probe("opencode", initialized)
+        except (_Refused, AcpError, AcpClosed, TimeoutError, OSError):
+            return AdapterTransportProbe(
+                engine="opencode",
+                transport_supports_image=False,
+                reason="SKAZ couldn't verify OpenCode ACP image capability.",
+            )
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
     async def models(self) -> Sequence[ModelOption]:
         """OpenCode's catalogue for the providers signed in in SKAZ's folder, with their efforts."""
         located = self._locate("opencode")
@@ -930,7 +981,7 @@ class OpenCodeEngine:
 
     @contextlib.asynccontextmanager
     async def _acp(self, located: Located, work: Path, run_config: Path,
-                   active: _ActiveRun) -> AsyncIterator[AcpConnection]:
+                   active: _ActiveRun) -> AsyncIterator[tuple[AcpConnection, dict[str, Any]]]:
         self.prepare()
         argv = [str(located.binary), "acp"]
         refuse_sudo(argv)
@@ -938,7 +989,7 @@ class OpenCodeEngine:
             *argv, cwd=str(work), env=self.environment(located, run_config=run_config),
             start_new_session=True,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            limit=32 * 1024 * 1024,
+            limit=NDJSON_MAX_FRAME_BYTES,
         )
         CHILDREN.add(process, group=True)
         active.process = process
@@ -949,7 +1000,7 @@ class OpenCodeEngine:
         active.connection = connection
         try:
             try:
-                await connection.request("initialize", {
+                initialized = await connection.request("initialize", {
                     "protocolVersion": PROTOCOL_VERSION,
                     "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False},
                                            "terminal": False},
@@ -959,7 +1010,8 @@ class OpenCodeEngine:
                 raise _Refused(Failed("", "other", "OpenCode took too long to start. Try again.")) from error
             except (AcpClosed, AcpError) as error:
                 raise _Refused(Failed("", "other", "OpenCode stopped while starting.")) from error
-            yield connection
+            self._transport_probe = parse_acp_transport_probe("opencode", initialized)
+            yield connection, initialized
         finally:
             await connection.close()
             if process.returncode is None:
@@ -1062,9 +1114,9 @@ class OpenCodeEngine:
                                           "oauth": False, "codemode": False},
                     }), encoding="utf-8")
                     run_config.chmod(0o600)
-            async with self._acp(located, folder, run_config, active) as connection:
+            async with self._acp(located, folder, run_config, active) as (connection, initialized):
                 events = self._session(turn, prompt, servers, folder, run_config, credentials, connection,
-                                       active)
+                                       active, initialized=initialized)
                 async for event in events:
                     yield event
         except _Refused as refusal:
@@ -1089,7 +1141,8 @@ class OpenCodeEngine:
 
     async def _session(self, turn: AgentTurn, prompt: str, servers: list[dict[str, Any]], work: Path,
                        run_config: Path, credentials: Sequence[str], connection: AcpConnection,
-                       active: _ActiveRun) -> AsyncIterator[AgentEvent]:
+                       active: _ActiveRun, *,
+                       initialized: Mapping[str, Any] | None = None) -> AsyncIterator[AgentEvent]:
         run_id = turn.run_id
         plan = turn.session
         if plan is not None and plan.mode != "start" and plan.session_id:
@@ -1127,10 +1180,34 @@ class OpenCodeEngine:
                 self._keep(session_id, run_config)
                 active.forget = False
             yield SessionBound(run_id, session_id, f"turn-{uuid.uuid4().hex}")
+        if turn.visuals:
+            probe = parse_acp_transport_probe("opencode", initialized)
+            if probe.transport_supports_image is not True:
+                raise _Refused(
+                    Failed(
+                        run_id,
+                        "incompatible",
+                        probe.reason or "OpenCode ACP transport does not support images.",
+                        unsent=True,
+                    )
+                )
+            try:
+                prompt_blocks = await disk_call(
+                    build_acp_prompt_blocks,
+                    prompt,
+                    turn.visuals,
+                    engine="opencode",
+                    model_id=turn.model,
+                    session_id=session_id,
+                )
+            except (VisualAuthorizationError, VisualPayloadTooLargeError) as error:
+                raise _Refused(Failed(run_id, "incompatible", str(error), unsent=True)) from error
+        else:
+            prompt_blocks = [{"type": "text", "text": prompt}]
         watcher = asyncio.create_task(self._stop_after_cancel(active))
         try:
             request = asyncio.create_task(connection.request(
-                "session/prompt", {"sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}))
+                "session/prompt", {"sessionId": session_id, "prompt": prompt_blocks}))
             outside = False
             async for event in self._updates(run_id, session_id, connection, request):
                 if event is None:  # a tool outside SKAZ's: stop at once, never wait for its result

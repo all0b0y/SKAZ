@@ -133,8 +133,12 @@ class StudyTools:
             SkazTool(
                 "skaz_study_make_deck",
                 "Make flashcards from the user's materials or wiki pages and show them in the chat. Each "
-                "answer needs a citation whose quote is copied verbatim from the fragment; a card without "
-                "one is dropped. Your own example or mnemonic goes in explanation, never in the answer."
+                "source-backed answer (basis 'source', the default) needs a citation whose quote is copied "
+                "verbatim from the fragment; a card without one is dropped. Only when the user explicitly "
+                "asks in the chat for cards from your own knowledge, set basis 'agent' (with no citations) "
+                "on those cards — they are shown as 'Not based on your materials'; missing materials, "
+                "missing quotes or search errors never turn this on. Your own example or mnemonic goes in "
+                "explanation, never in the answer."
                 + shown,
                 MakeDeckArgs,
                 run=self._run(self._make_deck),
@@ -143,10 +147,14 @@ class StudyTools:
             SkazTool(
                 "skaz_study_make_test",
                 "Make a test (choice, multi, short or open questions, as the user asked) and show it in the "
-                "chat. Every right answer needs a citation with a verbatim quote; wrong options are yours "
-                "and are shown as made up by you. Choice and short answers are checked by SKAZ; open "
-                "answers are checked by you later against the open question's key ideas: give 2–6 of them, "
-                "each with a verbatim citation (the points a full answer covers)." + shown,
+                "chat. Every source-backed right answer (basis 'source', the default) needs a citation with "
+                "a verbatim quote; wrong options are yours and are shown as made up by you. Only when the "
+                "user explicitly asks in the chat for questions from your own knowledge, set basis 'agent' "
+                "(with no citations) on those questions — they are shown as 'Not based on your materials'; "
+                "missing materials, missing quotes or search errors never turn this on. Choice and short "
+                "answers are checked by SKAZ; open answers are checked by you later against the open "
+                "question's key ideas: give 2–6 of them, each with a verbatim citation when basis is "
+                "'source' (the points a full answer covers)." + shown,
                 MakeTestArgs,
                 run=self._run(self._make_test),
                 timeout_s=60.0,
@@ -221,7 +229,8 @@ class StudyTools:
 
     async def _make_deck(self, ref: RunRef | None, args: MakeDeckArgs) -> dict[str, Any]:
         assert ref is not None
-        made = await disk_call(self.study.make_deck, ref, args.title, args.cards)
+        allow_agent = await disk_call(self.study.allows_agent_knowledge, ref)
+        made = await disk_call(self.study.make_deck, ref, args.title, args.cards, allow_agent=allow_agent)
         return {
             "status": "shown",
             "study_id": made.block.id,
@@ -232,7 +241,8 @@ class StudyTools:
 
     async def _make_test(self, ref: RunRef | None, args: MakeTestArgs) -> dict[str, Any]:
         assert ref is not None
-        made = await disk_call(self.study.make_test, ref, args.title, args.questions)
+        allow_agent = await disk_call(self.study.allows_agent_knowledge, ref)
+        made = await disk_call(self.study.make_test, ref, args.title, args.questions, allow_agent=allow_agent)
         return {
             "status": "shown",
             "study_id": made.block.id,
