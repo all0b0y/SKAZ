@@ -250,6 +250,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
               <Button size="sm" variant="quiet" aria-label="Open the notes" data-reader-action="notes"
                 onClick={() => openDocument({ type: 'page', id: notesPageId }, {
                   destination: 'transcript', returnFocus: 'notes', origin: document.activeElement,
+                  preserveCloseFocus: true,
                 })}>Notes</Button>
             )}
             <IconButton icon="chats" label="Ask about material" disabled={!material || isWithoutSpeech(material)}
