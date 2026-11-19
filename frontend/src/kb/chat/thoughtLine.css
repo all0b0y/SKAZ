@@ -1,0 +1,134 @@
+/*
+ * Item 7 (07-EARLY-TOOL-BUBBLE.md / navigation-mockup.html):
+ * When tool calls exceed five, only the five latest stay in the visible row; earlier N-5 calls
+ * collapse behind one stationary trigger that reveals them inline below the row on hover or focus.
+ */
+
+.kb-thought__family {
+  display: flex;
+  flex-direction: column;
+}
+
+.kb-thought__visible {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kb-sp-6);
+  padding: var(--kb-sp-8) 0 var(--kb-sp-4);
+}
+
+.kb-thought:not([data-working]) .kb-thought__visible {
+  padding-top: var(--kb-sp-4);
+}
+
+.kb-thought__visible > .kb-thought__calls {
+  display: contents;
+}
+
+.kb-thought__earlier-trigger {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 26px;
+  padding: 0 var(--kb-sp-10);
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  color: var(--kb-text);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: background-color 120ms ease;
+}
+
+.kb-thought__earlier-trigger:hover,
+.kb-thought__earlier-trigger[aria-expanded='true'] {
+  background: var(--kb-accent-soft);
+}
+
+.kb-thought__earlier-trigger:active {
+  background: var(--kb-accent-press);
+}
+
+.kb-thought__earlier-trigger:focus-visible {
+  outline: 2px solid var(--kb-accent);
+  outline-offset: 2px;
+  border-radius: var(--kb-r-pill);
+}
+
+.kb-thought__earlier-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s ease;
+}
+
+.kb-thought__earlier-fold[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.kb-thought__earlier-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.kb-thought__earlier-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kb-sp-6);
+  padding: var(--kb-sp-4) 0;
+  margin: 0;
+  list-style: none;
+}
+
+.kb-thought[data-level='full'] .kb-thought__earlier-fold[data-open='true'] .kb-call {
+  animation: kb-early-chip-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.kb-thought[data-level='full'] .kb-thought__earlier-fold[data-open='true'] .kb-call:nth-child(2n) {
+  animation-delay: 40ms;
+}
+
+.kb-thought[data-level='full'] .kb-thought__earlier-fold[data-open='true'] .kb-call:nth-child(3n) {
+  animation-delay: 80ms;
+}
+
+.kb-thought[data-level='full'] .kb-thought__earlier-fold[data-open='true'] .kb-call:nth-child(4n) {
+  animation-delay: 120ms;
+}
+
+.kb-thought[data-level='full'] .kb-thought__earlier-fold[data-open='true'] .kb-call:nth-child(5n) {
+  animation-delay: 160ms;
+}
+
+@keyframes kb-early-chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.kb-thought[data-level='calm'] .kb-thought__earlier-fold {
+  transition: opacity 0.16s ease;
+}
+
+.kb-thought[data-level='off'] .kb-thought__earlier-fold,
+.kb-thought[data-level='off'] .kb-thought__earlier-trigger {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kb-thought__earlier-fold {
+    transition: opacity 0.16s ease;
+  }
+
+  .kb-thought__earlier-fold[data-open='true'] .kb-call {
+    animation: none;
+    animation-delay: 0ms;
+  }
+}

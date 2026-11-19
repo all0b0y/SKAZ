@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { KbMessage, KbMessagePart, KbWebSearchPart } from '../../api/kb/types.gen';
 import { Icon, type IconName } from '../ui/Icon';
 import { useMotionLevel } from '../ui/motionLevel';
 import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
 import { CallSweep } from '../fx/indicators/CallSweep';
+import './thoughtLine.css';
 
 /*
  * Stage 6 B3 — ThoughtLine + CallChip (DESIGN-SYSTEM.md decision 30; look and timings: the demo
@@ -172,6 +173,110 @@ const INERT = { inert: '' } as object;
  * own transitionend, or after this time when none comes (motion off, a hidden pane).
  */
 export const FOLD_UNMOUNT_MS = 400;
+const RECENT_CALL_LIMIT = 5;
+
+function EarlierCallsGroup({
+  earlier,
+  latest,
+  open,
+  onOpenChange,
+  renderChip,
+}: {
+  earlier: ToolCall[];
+  latest: ToolCall[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  renderChip: (call: ToolCall) => JSX.Element;
+}) {
+  const earlierId = useId();
+  const familyRef = useRef<HTMLDivElement | null>(null);
+  const hoveredRef = useRef(false);
+  const focusedRef = useRef(false);
+  const pointerDownRef = useRef(false);
+
+  // Listen to native `mouseleave` on the family container so moving from the trigger into the
+  // revealed chips stays open in both browsers and jsdom/user-event (React's synthetic onMouseLeave
+  // inspects `mouseout.relatedTarget`, which user-event v14 omits).
+  useEffect(() => {
+    const el = familyRef.current;
+    if (!el) return undefined;
+    const onLeave = () => {
+      hoveredRef.current = false;
+      if (!focusedRef.current) onOpenChange(false);
+    };
+    el.addEventListener('mouseleave', onLeave);
+    return () => el.removeEventListener('mouseleave', onLeave);
+  }, [onOpenChange]);
+
+  return (
+    <div
+      ref={familyRef}
+      className="kb-thought__family"
+      onBlur={(e) => {
+        const next = e.relatedTarget as Node | null;
+        if (next && e.currentTarget.contains(next)) return;
+        focusedRef.current = false;
+        if (!hoveredRef.current) onOpenChange(false);
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== 'Escape' || !open) return;
+        e.preventDefault();
+        e.stopPropagation();
+        focusedRef.current = false;
+        onOpenChange(false);
+      }}
+    >
+      <div className="kb-thought__visible">
+        <button
+          type="button"
+          className="kb-thought__earlier-trigger"
+          aria-expanded={open}
+          aria-controls={earlierId}
+          aria-label={`Show ${earlier.length} earlier tool ${earlier.length === 1 ? 'call' : 'calls'}`}
+          onMouseEnter={() => {
+            hoveredRef.current = true;
+            onOpenChange(true);
+          }}
+          onMouseDown={() => {
+            pointerDownRef.current = true;
+          }}
+          onMouseUp={() => {
+            pointerDownRef.current = false;
+          }}
+          onFocus={() => {
+            const fromPointer = pointerDownRef.current;
+            pointerDownRef.current = false;
+            if (fromPointer) return;
+            focusedRef.current = true;
+            onOpenChange(true);
+          }}
+          onClick={(e) => {
+            if (e.detail === 0) focusedRef.current = true;
+            if (!open) onOpenChange(true);
+          }}
+        >
+          {earlier.length} {earlier.length === 1 ? 'earlier call' : 'earlier calls'}
+        </button>
+        <ul className="kb-thought__calls" aria-label="Tool calls">
+          {latest.map(renderChip)}
+        </ul>
+      </div>
+      <div
+        id={earlierId}
+        className="kb-thought__earlier-fold"
+        data-open={open ? 'true' : 'false'}
+        aria-hidden={open ? undefined : 'true'}
+        {...(open ? {} : INERT)}
+      >
+        <div className="kb-thought__earlier-inner">
+          <ul className="kb-thought__earlier-list" aria-label="Earlier tool calls">
+            {earlier.map(renderChip)}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * The agent's work above an answer. `head` is the thinking line's words (shown while the answer has
@@ -182,6 +287,7 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
   const { n, failed } = activityCounts(message.parts);
   const { clock, start } = useLiveClock(message, calls);
   const [open, setOpen] = useState(false);
+  const [earlyOpen, setEarlyOpen] = useState(false);
   const level = useMotionLevel();
   const working = message.state === 'streaming';
   const unfolded = working || open;
@@ -197,9 +303,18 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
     const id = setTimeout(foldAway, FOLD_UNMOUNT_MS);
     return () => clearTimeout(id);
   }, [unfolded, kept, level]);
+  useEffect(() => {
+    if (!unfolded || calls.length <= RECENT_CALL_LIMIT) setEarlyOpen(false);
+  }, [unfolded, calls.length, message.id]);
   if (!working && n === 0) return null;
   const arrived = !working && clock.endedAt !== null;
   const Summary = calls.length ? 'button' : 'div';
+  const hasEarlier = calls.length > RECENT_CALL_LIMIT;
+  const earlier = hasEarlier ? calls.slice(0, calls.length - RECENT_CALL_LIMIT) : [];
+  const latest = hasEarlier ? calls.slice(-RECENT_CALL_LIMIT) : calls;
+  const renderChip = (c: ToolCall) => (
+    <CallChip key={c.index} call={c} seenAt={remounted.current ? undefined : clock.seen.get(c.index)} />
+  );
   return (
     <div className="kb-tools kb-thought" data-level={level} data-working={working ? 'true' : undefined}
       data-arrived={arrived ? 'true' : undefined}>
@@ -222,11 +337,19 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
               <Elapsed className="kb-thought__time" role="timer" from={start} />
             </div>
           )}
-          {calls.length > 0 && (unfolded || (kept && level !== 'off')) && (
+          {calls.length > 0 && (unfolded || (kept && level !== 'off')) && (hasEarlier ? (
+            <EarlierCallsGroup
+              earlier={earlier}
+              latest={latest}
+              open={earlyOpen}
+              onOpenChange={setEarlyOpen}
+              renderChip={renderChip}
+            />
+          ) : (
             <ul className="kb-thought__calls" aria-label="Tool calls">
-              {calls.map((c) => <CallChip key={c.index} call={c} seenAt={remounted.current ? undefined : clock.seen.get(c.index)} />)}
+              {calls.map(renderChip)}
             </ul>
-          )}
+          ))}
         </div>
       </div>
     </div>
