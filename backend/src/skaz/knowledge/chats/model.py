@@ -33,6 +33,13 @@ class KnowledgePart:
 
 
 @dataclass(frozen=True)
+class TextOnlyPart:
+    """Explicit user-chosen text-only continuation disclosure; no image was sent or analysed."""
+
+    label: str = "Text only · Image not analysed"
+
+
+@dataclass(frozen=True)
 class TextPart:
     text: str
 
@@ -136,7 +143,7 @@ class MemoryPart:
     undone: bool = False
 
 
-Part = (KnowledgePart | TextPart | CitePart | PagePart | ConnectionPart | ToolPart
+Part = (KnowledgePart | TextOnlyPart | TextPart | CitePart | PagePart | ConnectionPart | ToolPart
         | PermissionPart | QuestionPart | StudyPart
         | WebSearchPart | MemoryPart | BlockPart | WikiFixPart | ResearchPart)
 
@@ -144,6 +151,8 @@ Part = (KnowledgePart | TextPart | CitePart | PagePart | ConnectionPart | ToolPa
 def part_to_json(part: Part) -> dict[str, Any]:
     if isinstance(part, KnowledgePart):
         return {"type": "knowledge"}
+    if isinstance(part, TextOnlyPart):
+        return {"type": "text_only", "label": part.label}
     if isinstance(part, TextPart):
         return {"type": "text", "text": part.text}
     if isinstance(part, CitePart):
@@ -185,6 +194,8 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
     kind = data.get("type")
     if kind == "knowledge":
         return KnowledgePart()
+    if kind == "text_only":
+        return TextOnlyPart(str(data.get("label") or "Text only · Image not analysed"))
     if kind == "text":
         return TextPart(str(data.get("text", "")))
     if kind == "cite":
@@ -318,11 +329,15 @@ class MessageInput:
     context: OpenContext = field(default_factory=OpenContext)
     #: P2: what the user picked in an earlier answer, asked about with this message.
     selection: Selection | None = None
+    #: V4: explicit user choice to continue with source text only when visual input is unavailable.
+    text_only: bool = False
 
     def to_json(self) -> dict[str, Any]:
         data = self._json()
         if self.selection is not None:
             data["selection"] = self.selection.to_json()
+        if self.text_only:
+            data["text_only"] = True
         return data
 
     def _json(self) -> dict[str, Any]:
@@ -354,6 +369,7 @@ class MessageInput:
                                 _optional(context.get("study_id"))),
             selection=(Selection.from_json(data["selection"]) if isinstance(data.get("selection"), Mapping)
                        else None),
+            text_only=bool(data.get("text_only", False)),
         )
 
 

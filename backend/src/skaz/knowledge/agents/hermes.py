@@ -129,6 +129,17 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ...native_io import disk_call
+from ...visual_transport041.capabilities import (
+    AdapterTransportProbe,
+    parse_acp_transport_probe,
+    parse_hermes_model_visual,
+)
+from ...visual_transport041.payloads import (
+    NDJSON_MAX_FRAME_BYTES,
+    VisualAuthorizationError,
+    VisualPayloadTooLargeError,
+    build_acp_prompt_blocks,
+)
 from ..install.system import (
     Captured,
     Located,
@@ -552,6 +563,7 @@ class HermesEngine:
         #: The repair Hermes suggested at the last unreadable version, if SKAZ may offer it.
         self._repair: tuple[str, ...] | None = None
         self.current_model: str | None = None
+        self._transport_probe: AdapterTransportProbe | None = None
         self._history_tasks: set[asyncio.Task[None]] = set()
         self._swept = False
         self._gateway: GatewayDaemon | None = None
@@ -725,6 +737,7 @@ class HermesEngine:
         self._sweep_once()
         try:
             async with self._acp(located, self.runs_dir / "status") as (_connection, initialized):
+                self._transport_probe = parse_acp_transport_probe("hermes", initialized)
                 methods = initialized.get("authMethods") or []
         except _Refused as refused:
             incompatible = refused.failure.kind == "incompatible"
@@ -736,6 +749,31 @@ class HermesEngine:
         return EngineStatus("hermes", installed=True, version=shown, signed_in=configured,
                             reason=None if configured else NO_PROVIDER)
 
+    async def probe_visual_transport(self) -> AdapterTransportProbe:
+        """Return ACP ``promptCapabilities.image`` from the latest or fresh ``initialize`` handshake."""
+        if self._transport_probe is not None:
+            return self._transport_probe
+        located = self._locate("hermes")
+        if located is None or not self.set_up() or not self.checked():
+            return AdapterTransportProbe(
+                engine="hermes",
+                transport_supports_image=False,
+                reason="Hermes Agent is not ready.",
+            )
+        work = self.runs_dir / f"vprobe-{uuid.uuid4().hex}"
+        try:
+            async with self._acp(located, work) as (_connection, initialized):
+                self._transport_probe = parse_acp_transport_probe("hermes", initialized)
+                return self._transport_probe
+        except (_Refused, AcpError, AcpClosed, TimeoutError, LauncherTampered, OSError):
+            return AdapterTransportProbe(
+                engine="hermes",
+                transport_supports_image=False,
+                reason="SKAZ couldn't verify Hermes ACP image capability.",
+            )
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+
     async def models(self) -> Sequence[ModelOption]:
         """What is set up in SKAZ's Hermes folder; empty until a provider is chosen there."""
         located = self._locate("hermes")
@@ -744,7 +782,8 @@ class HermesEngine:
         work = self.runs_dir / f"models-{uuid.uuid4().hex}"
         session_id = ""
         try:
-            async with self._acp(located, work) as (connection, _initialized):
+            async with self._acp(located, work) as (connection, initialized):
+                self._transport_probe = parse_acp_transport_probe("hermes", initialized)
                 session = await connection.request("session/new", {"cwd": str(work), "mcpServers": []},
                                                    timeout=self._start_timeout)
                 # Hermes 0.22 keeps a session from ``session/new`` on (not only once prompted).
@@ -760,8 +799,19 @@ class HermesEngine:
         state = session.get("models") or {}
         current = state.get("currentModelId")
         self.current_model = current if isinstance(current, str) else None
-        options = [ModelOption(str(m["modelId"]), str(m.get("name") or m["modelId"]))
-                   for m in state.get("availableModels") or [] if isinstance(m, dict) and m.get("modelId")]
+        options: list[ModelOption] = []
+        for m in state.get("availableModels") or []:
+            if not isinstance(m, dict) or not m.get("modelId"):
+                continue
+            visual = parse_hermes_model_visual(m)
+            options.append(
+                ModelOption(
+                    str(m["modelId"]),
+                    str(m.get("name") or m["modelId"]),
+                    input_modalities=visual.input_modalities,
+                    supports_image=visual.supports_image,
+                )
+            )
         options.sort(key=lambda option: option.id != self.current_model)
         return tuple(options)
 
@@ -1066,7 +1116,7 @@ class HermesEngine:
         process = await asyncio.create_subprocess_exec(
             *argv, cwd=str(work), env=self.environment(located), start_new_session=True,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            limit=32 * 1024 * 1024,
+            limit=NDJSON_MAX_FRAME_BYTES,
         )
         CHILDREN.add(process, group=True)  # quitting SKAZ signals it first (knowledge.shutdown)
         if active is not None:
@@ -1210,8 +1260,10 @@ class HermesEngine:
                 granted = True
                 servers.append({"type": "http", "name": MCP_SERVER_NAME, "url": access.url,
                                 "headers": [{"name": "Authorization", "value": f"Bearer {access.token}"}]})
-            async with self._acp(located, work, active) as (connection, _initialized):
-                async for event in self._session(turn, prompt, servers, work, connection, active):
+            async with self._acp(located, work, active) as (connection, initialized):
+                self._transport_probe = parse_acp_transport_probe("hermes", initialized)
+                async for event in self._session(turn, prompt, servers, work, connection, active,
+                                                 initialized=initialized):
                     yield event
         except _Refused as refused:
             failure = refused.failure
@@ -1233,7 +1285,8 @@ class HermesEngine:
                 self._in_background(self._forget([active.session_id]))
 
     async def _session(self, turn: AgentTurn, prompt: str, servers: list[dict[str, Any]], work: Path,
-                       connection: AcpConnection, active: _ActiveRun) -> AsyncIterator[AgentEvent]:
+                       connection: AcpConnection, active: _ActiveRun, *,
+                       initialized: Mapping[str, Any] | None = None) -> AsyncIterator[AgentEvent]:
         run_id = turn.run_id
         plan = turn.session
         if plan is not None and plan.mode != "start" and plan.session_id:
@@ -1255,6 +1308,30 @@ class HermesEngine:
                 active.forget = True
                 self._remember(session_id)  # before any prompt: Hermes saves the session from the first one
         await self._select_model(turn, session, connection, session_id, active.requests)
+        if turn.visuals:
+            probe = parse_acp_transport_probe("hermes", initialized)
+            if probe.transport_supports_image is not True:
+                raise _Refused(
+                    Failed(
+                        run_id,
+                        "incompatible",
+                        probe.reason or "Hermes ACP transport does not support images.",
+                        unsent=True,
+                    )
+                )
+            try:
+                prompt_blocks = await disk_call(
+                    build_acp_prompt_blocks,
+                    prompt,
+                    turn.visuals,
+                    engine="hermes",
+                    model_id=turn.model,
+                    session_id=session_id,
+                )
+            except (VisualAuthorizationError, VisualPayloadTooLargeError) as error:
+                raise _Refused(Failed(run_id, "incompatible", str(error), unsent=True)) from error
+        else:
+            prompt_blocks = [{"type": "text", "text": prompt}]
         listing = await self._local_command(connection, session_id, "/tools")
         if not tools_listing_allowed(listing):
             raise _Refused(Failed(run_id, "incompatible", LIMITS_NOT_APPLIED))
@@ -1273,7 +1350,7 @@ class HermesEngine:
         try:
             active.prompted = True  # from here the request may have reached the model
             request = asyncio.create_task(connection.request(
-                "session/prompt", {"sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}))
+                "session/prompt", {"sessionId": session_id, "prompt": prompt_blocks}))
             async for event in self._updates(run_id, session_id, connection, request):
                 yield event
             try:

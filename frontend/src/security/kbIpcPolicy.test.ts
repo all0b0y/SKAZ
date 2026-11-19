@@ -428,3 +428,15 @@ describe('Electron IPC policy — «Fix in wiki» (P2)', () => {
     }
   });
 });
+
+describe('Electron IPC policy — visual admission', () => {
+  it('allows the exact preflight route with the same bounded body as a chat send', () => {
+    const path = '/kb/chats/visual-preflight';
+    const text = 'x'.repeat(100_000);
+    expect(validateBridgeRequest({ method: 'POST', path, body: { text } })).toBeNull();
+    expect(validateBridgeRequest({ method: 'POST', path, body: { text: text.repeat(10) } }))
+      .toMatch(/too large/);
+    expect(validateBridgeRequest({ method: 'PUT', path })).toMatch(/not allowed/);
+    expect(validateBridgeRequest({ method: 'POST', path: `${path}/extra` })).toMatch(/not allowed/);
+  });
+});

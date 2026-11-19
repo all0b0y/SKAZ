@@ -91,7 +91,9 @@ def agent_view(hub: AgentsHub, view: AgentView, prefs: Mapping[str, Any] | None 
         models=[KbAgentModel(id=m.option.id, label=m.option.label, efforts=list(m.option.efforts),
                              default_effort=m.option.default_effort, provider=m.display.provider,
                              provider_label=m.display.provider_label, name=m.display.name, tag=m.display.tag,
-                             visible=m.visible, default_visible=m.default_visible, favorite=m.favorite)
+                             visible=m.visible, default_visible=m.default_visible, favorite=m.favorite,
+                             supports_image=m.option.supports_image,
+                             input_modalities=list(m.option.input_modalities))
                 for m in listed.models],
         visible=listed.visible,
         providers=[KbAgentProvider(id=p.id, label=p.label, visible=p.visible, shown=p.shown, total=p.total)
@@ -101,7 +103,20 @@ def agent_view(hub: AgentsHub, view: AgentView, prefs: Mapping[str, Any] | None 
         questions="native" if view.engine in NATIVE_QUESTIONS else "skaz",
         last_choice=KbAgentLastChoice(model=last[0], effort=last[1]) if last is not None else None,
         web_search=_web_search(hub, view.engine),
+        visual_transport=_visual_transport(hub, view.engine)[0],
+        visual_transport_reason=_visual_transport(hub, view.engine)[1],
     )
+
+
+def _visual_transport(hub: AgentsHub, engine_id: str) -> tuple[bool | None, str | None]:
+    engines = getattr(hub.registry, "engines", None)
+    engine = engines.get(engine_id) if isinstance(engines, dict) else None
+    if engine is None:
+        return None, None
+    probe = getattr(engine, "_transport_probe", None) or getattr(engine, "visual_transport_probe", None)
+    if probe is None:
+        return None, None
+    return bool(getattr(probe, "transport_supports_image", False)), getattr(probe, "reason", None)
 
 
 def _web_search(hub: AgentsHub, engine_id: str) -> KbAgentWebSearch:

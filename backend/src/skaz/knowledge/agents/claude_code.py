@@ -71,6 +71,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from ...native_io import disk_call
+from ...visual_transport041.capabilities import AdapterTransportProbe
+from ...visual_transport041.payloads import (
+    NDJSON_MAX_FRAME_BYTES,
+    VisualAuthorizationError,
+    VisualPayloadTooLargeError,
+    build_claude_user_message,
+)
 from ..install.system import (
     Located,
     LocateFn,
@@ -151,11 +159,12 @@ _EFFORTS = ("low", "medium", "high", "xhigh", "max")
 #: Documented model aliases (code.claude.com/docs/en/model-config#model-aliases).
 CLAUDE_MODELS: tuple[ModelOption, ...] = (
     ModelOption("default", "Account default"),
-    ModelOption("opus", "Opus (latest)", _EFFORTS),
-    ModelOption("sonnet", "Sonnet (latest)", _EFFORTS),
-    ModelOption("haiku", "Haiku (latest)"),
+    ModelOption("opus", "Opus (latest)", _EFFORTS, input_modalities=("text", "image"), supports_image=True),
+    ModelOption(
+        "sonnet", "Sonnet (latest)", _EFFORTS, input_modalities=("text", "image"), supports_image=True,
+    ),
+    ModelOption("haiku", "Haiku (latest)", input_modalities=("text", "image"), supports_image=True),
 )
-_LINE_LIMIT = 32 * 1024 * 1024
 _STRUCTURED_TOOL = "StructuredOutput"
 #: Claude Code's own web search tool (the only built-in tool a chat turn may get, W-2).
 WEB_TOOL = "WebSearch"
@@ -341,6 +350,17 @@ class ClaudeCodeEngine:
         sign_in = SIGN_IN if self.own_folder else SHARED_SIGN_IN_REASON
         return EngineStatus("claude_code", installed=True, version=shown, signed_in=signed_in,
                             reason=None if signed_in else sign_in)
+
+    async def probe_visual_transport(self) -> AdapterTransportProbe:
+        """Report whether Claude Code stream-json transport can carry authorized image blocks."""
+        status = await self.status()
+        if not status.ready:
+            return AdapterTransportProbe(
+                engine="claude_code",
+                transport_supports_image=False,
+                reason=status.reason or "Claude Code is not ready.",
+            )
+        return AdapterTransportProbe(engine="claude_code", transport_supports_image=True)
 
     async def models(self) -> Sequence[ModelOption]:
         return CLAUDE_MODELS
@@ -533,7 +553,7 @@ class ClaudeCodeEngine:
             process = await asyncio.create_subprocess_exec(
                 *argv, cwd=str(work), env=self.run_env(located), start_new_session=True,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, limit=_LINE_LIMIT,
+                stderr=asyncio.subprocess.PIPE, limit=NDJSON_MAX_FRAME_BYTES,
             )
             CHILDREN.add(process, group=True)  # quitting SKAZ signals it first (knowledge.shutdown)
             active.process = process
@@ -597,8 +617,15 @@ class ClaudeCodeEngine:
                       active: _ActiveRun, session_id: str | None = None) -> AsyncIterator[AgentEvent]:
         run_id = turn.run_id
         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
-        message = {"type": "user", "message": {"role": "user", "content": prompt},
-                   "parent_tool_use_id": None}
+        try:
+            message = (
+                await disk_call(build_claude_user_message, prompt, turn.visuals, model_id=turn.model)
+                if turn.visuals
+                else build_claude_user_message(prompt)
+            )
+        except (VisualAuthorizationError, VisualPayloadTooLargeError) as error:
+            yield Failed(run_id, "incompatible", str(error), unsent=True, permanent=True)
+            return
         gate = turn.web if self.web_blocked is None else None
         try:
             process.stdin.write((json.dumps(message, ensure_ascii=False) + "\n").encode())
