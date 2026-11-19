@@ -18,7 +18,6 @@ from .contracts import (
     UnsupportedVisualResult,
     VisualCapabilityDecision,
     VisualFallbackSeam,
-    VisualSourceKind,
     VisualSourceLocator,
 )
 
@@ -118,7 +117,7 @@ class AuthorizedVisualPayload:
 
 def _default_detail_for(
     reason_code: UnsupportedVisualReason,
-    source_kind: VisualSourceKind,
+    locator: VisualSourceLocator,
     text_only_available: bool,
     custom_reason: str | None = None,
 ) -> str:
@@ -126,13 +125,15 @@ def _default_detail_for(
         return custom_reason
     if reason_code == "local_video_no_frames":
         return "SKAZ transcribes the audio only. It doesn’t save the video or its frames."
-    if source_kind == "pdf":
+    if locator.source_kind == "pdf":
+        if locator.page is not None and not text_only_available:
+            return "Text-only continuation requires readable text for the selected pages and sources."
         return (
             "The PDF text is still available."
             if text_only_available
             else "This PDF has no readable text layer to use instead."
         )
-    if source_kind == "video_link":
+    if locator.source_kind == "video_link":
         return (
             "The video transcript is still available."
             if text_only_available
@@ -178,7 +179,7 @@ def build_unsupported_result(
         title=custom_title or _title_for(reason_code),
         detail=_default_detail_for(
             reason_code,
-            locator.source_kind,
+            locator,
             text_only_available,
             custom_reason=custom_detail,
         ),

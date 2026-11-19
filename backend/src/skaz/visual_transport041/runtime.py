@@ -19,6 +19,7 @@ from ..native_io import disk_call
 if TYPE_CHECKING:
     from ..knowledge.chats.model import MessageInput
     from ..knowledge.library.library import MaterialFiles
+    from ..knowledge.markdown.source import Fragment
     from ..knowledge.sources.visual import PreparedVisual as V3PreparedVisual
     from ..knowledge.sources.visual import VisualSourceUnsupported
 from ..knowledge.permissions.source_scope import SourceScope
@@ -126,13 +127,14 @@ class VisualSourceCandidate:
     permitted: bool
     permission_reason: str | None = None
     explicit_pages: tuple[int, ...] = ()
+    has_selected_pdf_text: bool | None = None
 
 
 @dataclass(frozen=True)
 class VisualRequestPlan:
     requires_visual: bool
     candidates: tuple[VisualSourceCandidate, ...] = ()
-    text_only_available: bool = False
+    has_text_for_all_sources: bool = False
     primary_locator: VisualSourceLocator | None = None
 
 
@@ -168,14 +170,14 @@ def _source_kind_for_material(kind: str) -> VisualSourceKind | None:
     return None
 
 
-def _has_visible_fragments(sources: SourceService, material_id: str) -> bool:
+def _visible_fragments(sources: SourceService, material_id: str) -> list[Fragment]:
     from ..knowledge.sources.visual import VisualSourceUnsupported
 
     try:
         files = sources.visual._material_files(material_id)
     except VisualSourceUnsupported:
-        return False
-    return bool(sources.visual._visible_fragments(files))
+        return []
+    return sources.visual._visible_fragments(files)
 
 
 def derive_visual_intent(
@@ -205,6 +207,7 @@ def derive_visual_intent(
         ordered_ids.append((given.context.material_id, False))
 
     explicit_pages = tuple(parse_explicit_pages(given.text))
+    explicit_page_set = frozenset(explicit_pages)
     pdf_cue = has_visual_query_cue(given.text, allow_pages=True)
     media_cue = has_visual_query_cue(given.text, allow_pages=False)
 
@@ -220,7 +223,8 @@ def derive_visual_intent(
             continue
 
         allowed = scope is None or scope.allows(material_id)
-        has_text = _has_visible_fragments(sources, material_id) if allowed else False
+        visible = _visible_fragments(sources, material_id) if allowed else []
+        has_text = bool(visible)
         include = False
         if source_kind == "image":
             include = is_attachment or media_cue
@@ -251,19 +255,23 @@ def derive_visual_intent(
                 permitted=allowed,
                 permission_reason=scope.refusal(material_id) if (scope is not None and not allowed) else None,
                 explicit_pages=explicit_pages,
+                has_selected_pdf_text=(
+                    any(fragment.page in explicit_page_set and fragment.text.strip() for fragment in visible)
+                    if page is not None
+                    else None
+                ),
             )
         )
 
     if not candidates:
         return VisualRequestPlan(requires_visual=False)
 
-    text_only_ok = not missing_attachment and all(
-        item.permitted and item.has_source_text for item in candidates
-    )
     return VisualRequestPlan(
         requires_visual=True,
         candidates=tuple(candidates),
-        text_only_available=text_only_ok,
+        has_text_for_all_sources=not missing_attachment and all(
+            item.permitted and item.has_source_text for item in candidates
+        ),
         primary_locator=candidates[0].locator,
     )
 
@@ -396,7 +404,7 @@ def _map_v3_unsupported(
     return result
 
 
-def _preflight_source_block(
+def _preflight_source(
     sources: SourceService,
     candidate: VisualSourceCandidate,
     *,
@@ -405,7 +413,8 @@ def _preflight_source_block(
     compatible: Sequence[CompatibleModelHint],
     text_only_available: bool,
     query: str = "",
-) -> UnsupportedVisualResult | None:
+) -> UnsupportedVisualResult | bool:
+    """Return a source refusal or the checked text-only availability for a usable visual source."""
     if not candidate.permitted:
         return build_unsupported_result(
             reason_code="source_not_permitted",
@@ -492,6 +501,8 @@ def _preflight_source_block(
             select_pdf_pages_by_text,
         )
 
+        has_selected_text = candidate.has_source_text and candidate.has_selected_pdf_text is not False
+        selected_text_available = text_only_available and has_selected_text
         try:
             from ..knowledge.sources.native_intake041.formats import MAX_PDF_BYTES
             from ..knowledge.sources.pdf import PdfRejected, open_pdf
@@ -506,7 +517,7 @@ def _preflight_source_block(
                 raise VisualSourceUnsupported(
                     "pdf_render_unavailable",
                     err.message,
-                    has_source_text=candidate.has_source_text,
+                    has_source_text=has_selected_text,
                 ) from err
             page_count = len(reader.pages)
             if candidate.explicit_pages:
@@ -553,9 +564,12 @@ def _preflight_source_block(
                     "pdf_render_unavailable",
                     "SKAZ couldn't find a local renderer for the selected PDF pages.",
                     page_count=page_count,
-                    has_source_text=candidate.has_source_text,
+                    has_source_text=has_selected_text,
                 )
         except VisualSourceUnsupported as err:
+            # A rejected page selection retains the existing whole-PDF text fallback.
+            if err.reason not in ("page_out_of_range", "page_range_required"):
+                text_only_available = selected_text_available
             return _map_v3_unsupported(
                 err,
                 engine_id=engine_id,
@@ -576,7 +590,8 @@ def _preflight_source_block(
                 if isinstance(err, KnowledgeError)
                 else "The material's original file can't be opened.",
             )
-    return None
+        return selected_text_available
+    return text_only_available
 
 
 async def preflight_visual_turn(
@@ -643,7 +658,7 @@ async def preflight_visual_turn(
             engine=engine_id,
             model_id=model_id,
             locator=primary.locator,
-            text_only_available=plan.text_only_available,
+            text_only_available=text_only_available,
             compatible_models=compatible,
         )
         return VisualPreflightOutcome(
@@ -651,7 +666,7 @@ async def preflight_visual_turn(
             supported=False,
             decision=decision,
             unsupported=unsupported,
-            text_only_available=plan.text_only_available,
+            text_only_available=text_only_available,
             locator=primary.locator,
             compatible_models=compatible,
         )
@@ -661,7 +676,7 @@ async def preflight_visual_turn(
         supported=True,
         decision=decision,
         unsupported=None,
-        text_only_available=plan.text_only_available,
+        text_only_available=text_only_available,
         locator=primary.locator,
         compatible_models=compatible,
     )
@@ -722,23 +737,25 @@ def _check_sources(
 ) -> tuple[UnsupportedVisualResult | None, VisualSourceLocator | None, bool]:
     first: UnsupportedVisualResult | None = None
     locator: VisualSourceLocator | None = None
-    text_only_available = plan.text_only_available
+    text_only_available = plan.has_text_for_all_sources
     for candidate in plan.candidates:
-        blocked = _preflight_source_block(
+        checked = _preflight_source(
             sources,
             candidate,
             engine_id=engine_id,
             model_id=model_id,
             compatible=compatible,
-            text_only_available=plan.text_only_available,
+            text_only_available=text_only_available,
             query=query,
         )
-        if blocked is not None:
-            text_only_available &= blocked.text_only_available
+        if isinstance(checked, UnsupportedVisualResult):
+            text_only_available &= checked.text_only_available
             if first is None:
-                first, locator = blocked, candidate.locator
-            if not text_only_available:
-                break
+                first, locator = checked, candidate.locator
+        else:
+            text_only_available &= checked
+        if first is not None and not text_only_available:
+            break
     if first is not None:
         first = replace(first, text_only_available=text_only_available)
     return first, locator, text_only_available
@@ -767,7 +784,7 @@ def _to_v4_prepared(
         byte_size=len(v3_item.data),
         width=v3_item.width,
         height=v3_item.height,
-        source_text_available=candidate.has_source_text,
+        source_text_available=candidate.has_source_text and candidate.has_selected_pdf_text is not False,
         permitted=candidate.permitted,
         permission_reason=candidate.permission_reason,
         linked_frame=v3_item if candidate.source_kind == "video_link" else None,
@@ -887,6 +904,15 @@ async def authorize_visual_turn(
     primary = plan.candidates[0]
     decision, transport, compatible = await evaluate_target_capability(registry, engine_id, model_id)
 
+    async def text_only_for_refusal() -> bool:
+        # Page bounds need checking when a PDF has text only outside the requested pages.
+        if plan.has_text_for_all_sources and any(c.has_selected_pdf_text is False for c in plan.candidates):
+            _, _, available = await disk_call(
+                _check_sources, sources, plan, engine_id, model_id, compatible, given.text,
+            )
+            return available
+        return plan.has_text_for_all_sources
+
     if given.text_only:
         blocked, locator, text_only_available = (
             await disk_call(
@@ -898,7 +924,7 @@ async def authorize_visual_turn(
                 compatible,
                 given.text,
             )
-            if plan.text_only_available
+            if plan.has_text_for_all_sources
             else (None, None, False)
         )
         if text_only_available:
@@ -926,17 +952,18 @@ async def authorize_visual_turn(
         None,
     )
     if visual_block is not None:
-        blocked = await disk_call(
-            _preflight_source_block,
+        text_only_available = await text_only_for_refusal()
+        source_refusal = await disk_call(
+            _preflight_source,
             sources,
             visual_block,
             engine_id=engine_id,
             model_id=model_id,
             compatible=compatible,
-            text_only_available=plan.text_only_available,
+            text_only_available=text_only_available,
         )
-        assert blocked is not None
-        raise VisualUnsupportedError(blocked, visual_block.locator)
+        assert isinstance(source_refusal, UnsupportedVisualResult)
+        raise VisualUnsupportedError(source_refusal, visual_block.locator)
 
     if not decision.supported:
         reason = decision.reason_code or "model_capability_unverified"
@@ -945,7 +972,7 @@ async def authorize_visual_turn(
             engine=engine_id,
             model_id=model_id,
             locator=primary.locator,
-            text_only_available=plan.text_only_available,
+            text_only_available=await text_only_for_refusal(),
             compatible_models=compatible,
         )
         raise VisualUnsupportedError(result, primary.locator)
@@ -1006,7 +1033,7 @@ async def authorize_visual_turn(
                         engine=engine_id,
                         model_id=model_id,
                         locator=item.locator,
-                        text_only_available=plan.text_only_available,
+                        text_only_available=await text_only_for_refusal(),
                         compatible_models=compatible,
                         custom_detail="The images together exceed this agent's visual transport limit.",
                     ),
@@ -1019,11 +1046,13 @@ async def authorize_visual_turn(
                 expected_locator=item.locator,
                 expected_engine=engine_id,
                 expected_model_id=model_id,
-                source_text_available=plan.text_only_available,
+                source_text_available=plan.has_text_for_all_sources,
                 compatible_models=compatible,
                 max_bytes=raw_limit,
             )
             if isinstance(outcome, UnsupportedVisualResult):
+                if outcome.text_only_available:
+                    outcome = replace(outcome, text_only_available=await text_only_for_refusal())
                 raise VisualUnsupportedError(outcome, item.locator)
             authorized.append(outcome)
             remaining -= overhead + 4 * ((item.byte_size + 2) // 3)
