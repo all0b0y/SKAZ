@@ -1,6 +1,6 @@
 import { usePageVisible } from './usePageVisible';
 import { useMotionLevel, useReducedMotion, useStillIndicators } from '../ui/motionLevel';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
@@ -163,7 +163,26 @@ export function ChatView({ hidden }: { hidden: boolean }) {
     inWiki,
     acceptsTarget: acceptsAttachmentDrop,
   });
-  const find = useFindInChat({ chatId: effectiveHidden ? null : currentId, scopeRef, scrollRef, reducedMotion: reduced });
+  const stopReturnForFind = useCallback((position: ScrollToOptions) => {
+    if (returnLanding.current === null) return;
+    returnLanding.current = null;
+    const el = scrollRef.current;
+    if (!el || typeof el.scrollTo !== 'function') return;
+    el.scrollTo(position);
+
+    // Chromium can deliver a final compositor update after the instant scroll.
+    const holdPosition = (event: Event) => { if (event.target === el) el.scrollTo(position); };
+    const release = () => el.removeEventListener('scroll', holdPosition, true);
+    el.addEventListener('scroll', holdPosition, true);
+    const frame = requestAnimationFrame(release);
+    return () => {
+      cancelAnimationFrame(frame);
+      release();
+    };
+  }, []);
+  const find = useFindInChat({
+    chatId: effectiveHidden ? null : currentId, scopeRef, scrollRef, reducedMotion: reduced, beforeOpen: stopReturnForFind,
+  });
   const findingChat = useRef<string | null>(null);
   // Decision 32: the main field is still only at «off» or the system's reduced motion; at «calm» it
   // keeps answering clicks and only its background drift stops.
