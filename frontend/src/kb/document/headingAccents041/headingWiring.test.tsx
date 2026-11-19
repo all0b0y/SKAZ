@@ -52,6 +52,29 @@ function headingChatWorld() {
   return world;
 }
 
+/** An answer the agent stopped mid-heading: the streamed opener `#` is the last token that arrived. */
+const STOPPED_REPLY = [
+  '# Atomicity and rollback',
+  'A transaction applies every change or none of them.',
+  '#',
+].join('\n\n');
+
+function stoppedChatWorld(opener: string) {
+  const world = chatWorld();
+  const at = new Date(Date.now() - 30 * 60_000).toISOString();
+  const chat: KbChat = {
+    id: 'c-ham-stop', title: 'Stopped mid-heading', pinned: false, engine: 'claude_code', model: 'claude-opus-5-5',
+    effort: 'medium', created_at: at, updated_at: at, last_preview: '', recording_material_id: null,
+    folder_ids: [], state: 'idle', unread: false, cursor: 0,
+    messages: [
+      chatMessage('ham-q', 1, 'user', at, [{ type: 'text', text: 'Lay out atomicity and isolation step by step.' }]),
+      chatMessage('ham-a', 2, 'assistant', at, [{ type: 'text', text: STOPPED_REPLY.slice(0, -1) + opener }], { state: 'cancelled' }),
+    ],
+  };
+  world.chats.push(chat);
+  return world;
+}
+
 /** The right panel with a document open, the way page.test.tsx opens one. */
 async function openDocument(id: string, type: 'page' | 'material' = 'page') {
   const r = renderKb({ world: docWorld() });
@@ -145,6 +168,25 @@ describe('G1: the main headings of a chat answer', () => {
     for (const el of document.querySelectorAll('.kb-ham')) {
       expect(el.closest('article')?.getAttribute('aria-label')).toBe('Answer');
     }
+  });
+
+  it.each(['#', '# ##'])('an answer stopped at %j keeps no empty heading or stand-alone `//`', async (opener) => {
+    const user = userEvent.setup();
+    renderKb({ world: stoppedChatWorld(opener) });
+    await user.click(await screen.findByRole('button', { name: /Stopped mid-heading/ }));
+    // The stop is settled in the conversation, so the incomplete opener is its final state.
+    expect(await screen.findByText('Stopped. The question is kept — you can regenerate the answer.'))
+      .toBeInTheDocument();
+    const answer = screen.getByRole('article', { name: 'Answer' });
+    const main = within(answer).getByRole('heading', { level: 3, name: 'Atomicity and rollback' });
+    // The populated main heading before the stop keeps the accepted decoration and its own words.
+    expect(main.querySelector('.kb-ham')?.getAttribute('data-ham')).toBe('slashes');
+    expect(main.textContent).toBe('Atomicity and rollback');
+    // The bare opener the answer stopped at has no heading words (or empty heading to navigate to).
+    expect(within(answer).queryAllByRole('heading')).toHaveLength(1);
+    expect(answer.querySelectorAll('.kb-ham')).toHaveLength(1);
+    await user.click(within(answer).getByRole('button', { name: 'Copy' }));
+    expect(await navigator.clipboard.readText()).toBe(STOPPED_REPLY.slice(0, -1) + opener);
   });
 });
 

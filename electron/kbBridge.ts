@@ -3,13 +3,14 @@
 // injected), so the policy is unit-tested; ipc.ts wires the real dialog/fs/fetch.
 
 import type { DictationResult, JsonResponse, MaterialFileChoice, TextFileSave } from '../frontend/src/api/bridge';
+import type { KbImagePreviewRequest, KbMaterialAdded } from '../frontend/src/api/kb/types.gen';
 import type {
   ClipboardImageValidation,
   MaterialIntakeBatch,
   NativeIntakeImagePreview,
   NativeIntakeImportRequest,
 } from './nativeIntake041/contracts';
-import { nativeIntakeHandlers, type BoundedFileFingerprint, type MaybePromise } from './nativeIntake041/trustedIntake';
+import { nativeIntakeHandlers, type BoundedFileFingerprint, type ClipboardSelectionEntry, type MaybePromise } from './nativeIntake041/trustedIntake';
 
 /** One dictation clip: PCM16 mono WAV, at most 8 MB and 120 seconds (the backend limit). */
 export const MAX_DICTATION_BYTES = 8 * 1024 * 1024;
@@ -98,6 +99,8 @@ async function readFailure(res: Response): Promise<{ detail: string; code?: stri
 /** Main-process bridge handlers, each already behind the trusted-sender check in ipc.ts. */
 export function kbBridgeHandlers(deps: KbBridgeDeps) {
   let saving = false;
+  // Preview authorization follows the admitted clipboard entry and expires with its eviction.
+  const clipboardMaterialIds = new WeakMap<ClipboardSelectionEntry, string>();
   const intake = nativeIntakeHandlers({
     showOpenDialog: deps.showOpenDialog,
     realPath: deps.realPath,
@@ -129,6 +132,25 @@ export function kbBridgeHandlers(deps: KbBridgeDeps) {
       if (!res.ok) return { ok: false, status: res.status, ...(await readFailure(res)) };
       const text = await res.text();
       return { ok: true, status: res.status, data: text.length > 0 ? (JSON.parse(text) as unknown) : null };
+    } catch (err) {
+      return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  async function imagePreviewPng(
+    handle: { port: number; token: string },
+    body: KbImagePreviewRequest,
+  ): Promise<JsonResponse<NativeIntakeImagePreview>> {
+    try {
+      const res = await deps.fetch(`http://127.0.0.1:${handle.port}/kb/materials/image-preview`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${handle.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!res.ok) return { ok: false, status: res.status, ...(await readFailure(res)) };
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      return { ok: true, status: 200, data: { mimeType: 'image/png', bytes } };
     } catch (err) {
       return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
     }
@@ -261,7 +283,12 @@ export function kbBridgeHandlers(deps: KbBridgeDeps) {
           });
           if (!res.ok) return { ok: false, status: res.status, ...(await readFailure(res)) };
           const text = await res.text();
-          return { ok: true, status: res.status, data: text.length > 0 ? (JSON.parse(text) as unknown) : null };
+          const data = text.length > 0 ? JSON.parse(text) as KbMaterialAdded : null;
+          const id = data?.material?.id;
+          if (!clip.selection.nativePreviewable && typeof id === 'string' && id) {
+            clipboardMaterialIds.set(clip, id);
+          }
+          return { ok: true, status: res.status, data };
         } catch (err) {
           return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
         }
@@ -288,23 +315,11 @@ export function kbBridgeHandlers(deps: KbBridgeDeps) {
           };
         }
         const checked = verified.selection;
-        try {
-          const res = await deps.fetch(`http://127.0.0.1:${handle.port}/kb/materials/image-preview`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${handle.token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              path: checked.path,
-              expected_size: checked.size,
-              ...(checked.sha256 ? { expected_sha256: checked.sha256 } : {}),
-            }),
-            signal: AbortSignal.timeout(120_000),
-          });
-          if (!res.ok) return { ok: false, status: res.status, ...(await readFailure(res)) };
-          const bytes = new Uint8Array(await res.arrayBuffer());
-          return { ok: true, status: 200, data: { mimeType: 'image/png', bytes } };
-        } catch (err) {
-          return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
-        }
+        return imagePreviewPng(handle, {
+          path: checked.path,
+          expected_size: checked.size,
+          ...(checked.sha256 ? { expected_sha256: checked.sha256 } : {}),
+        });
       }
 
       const clip = intake.getClipboardSelection(selectionId);
@@ -317,6 +332,12 @@ export function kbBridgeHandlers(deps: KbBridgeDeps) {
             bytes: new Uint8Array(clip.bytes),
           },
         };
+      }
+      const materialId = clip && clipboardMaterialIds.get(clip);
+      if (materialId) {
+        const handle = deps.handle();
+        if (!handle) return { ok: false, status: 0, detail: 'backend not ready' };
+        return imagePreviewPng(handle, { material_id: materialId });
       }
 
       return { ok: false, status: 403, detail: 'Image preview is only available for authorized image selections.' };

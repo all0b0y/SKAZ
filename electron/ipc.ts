@@ -8,6 +8,7 @@ import type { NativeAudioMeta, NativeFailure } from '../frontend/src/api/nativeL
 import type { BackendManager } from './backend';
 import { REQUEST_TIMEOUT_MS, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
+import { readRequestFailure } from './requestFailure';
 import { kbBridgeHandlers } from './kbBridge';
 import { hashBoundedDiskFile } from './nativeIntake041/diskFingerprint';
 import { ExportFolders, openInObsidian, resolveTarget, type LibraryActionDeps } from './libraryActions';
@@ -38,20 +39,6 @@ function buildUrl(port: number, path: string, query?: BridgeRequest['query']): s
     }
   }
   return url.toString();
-}
-
-/** The backend's plain-English `detail` and, when present, its machine-readable `error_code`. */
-async function readFailure(res: Response): Promise<{ detail: string; code?: string }> {
-  try {
-    const body = (await res.json()) as { detail?: unknown; error_code?: unknown; code?: unknown };
-    const detail = typeof body?.detail === 'string' ? body.detail : `HTTP ${res.status}`;
-    // 0.4.0 contract routes answer `{"code": …}`; older routes use `error_code`.
-    const code = typeof body?.error_code === 'string' ? body.error_code
-      : typeof body?.code === 'string' ? body.code : undefined;
-    return code === undefined ? { detail } : { detail, code };
-  } catch {
-    return { detail: `HTTP ${res.status}` };
-  }
 }
 
 export function registerIpc(
@@ -313,7 +300,7 @@ export function registerIpc(
         body: hasBody ? JSON.stringify(req.body) : undefined,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-      if (!res.ok) return { ok: false, status: res.status, ...(await readFailure(res)) };
+      if (!res.ok) return { ok: false, status: res.status, ...(await readRequestFailure(res)) };
       const text = await res.text();
       const data = text.length > 0 ? (JSON.parse(text) as unknown) : null;
       return { ok: true, status: res.status, data };

@@ -37,6 +37,7 @@ export interface DraftVisualFallbackState {
   attachmentKeys: readonly string[];
   locator?: VisualSourceLocator;
   requestKey?: string;
+  fromSend?: boolean;
 }
 
 export type DraftFallbackMap = Readonly<Record<string, DraftVisualFallbackState>>;
@@ -92,6 +93,7 @@ export function createUnsupportedResult({
   locator,
   textOnlyAvailable,
   compatibleModels = [],
+  customTitle,
   customDetail,
 }: {
   reasonCode?: UnsupportedVisualReason;
@@ -99,13 +101,14 @@ export function createUnsupportedResult({
   locator: VisualSourceLocator;
   textOnlyAvailable: boolean;
   compatibleModels?: readonly CompatibleModelHint[];
+  customTitle?: string | null;
   customDetail?: string | null;
 }): UnsupportedVisualResult {
   const code = reasonCode ?? decision.reasonCode ?? 'model_capability_unverified';
   return {
     ok: false,
     reasonCode: code,
-    title: titleForReason(code),
+    title: customTitle || titleForReason(code),
     detail: unsupportedDetailForSource(locator.sourceKind, textOnlyAvailable, customDetail),
     engine: decision.engine,
     modelId: decision.modelId,
@@ -123,6 +126,7 @@ export function createFallbackSeam({
   textOnlyAvailable,
   compatibleModels = [],
   reasonCode,
+  customTitle,
   customDetail,
 }: {
   decision: VisualCapabilityDecision;
@@ -130,6 +134,7 @@ export function createFallbackSeam({
   textOnlyAvailable: boolean;
   compatibleModels?: readonly CompatibleModelHint[];
   reasonCode?: UnsupportedVisualReason;
+  customTitle?: string | null;
   customDetail?: string | null;
 }): VisualFallbackSeam {
   const verified = isDecisionVerified(decision);
@@ -149,6 +154,7 @@ export function createFallbackSeam({
           locator,
           textOnlyAvailable,
           compatibleModels,
+          customTitle,
           customDetail,
         })
       : null,

@@ -46,7 +46,7 @@ from .guard.exclusions import EXCLUDED_FILE, ExclusionFile
 from .links import VIDEO_EXTENSIONS
 from .material_info import read_intake
 from .paths import given_path, resolved_file
-from .pdf import PdfRejected, open_pdf, single_page_pdf
+from .pdf import PdfRejected, open_pdf, pdf_raster_inputs
 
 LOCATOR_VERSION: Literal[1] = 1
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif"})
@@ -384,15 +384,15 @@ def inspect_image_bytes(data: bytes, *, max_bytes: int = MAX_IMAGE_BYTES) -> Ima
 # -- Query parsing for explicit PDF pages and video timestamps ------------------
 
 
-_PAGE_RANGE_RE = re.compile(
-    r"\b(?:pages?|pp\.?|slides?|стр(?:аниц[аыеу])?\.?|с\.|слайд(?:ы|ах|ов)?)\s*"
-    r"(\d{1,4})\s*(?:[-–—]|to|по)\s*(\d{1,4})\b",
-    re.IGNORECASE,
+_PAGE_NUMBER = r"\d{1,12}\b"
+_PAGE_ITEM = rf"#?({_PAGE_NUMBER})(?:\s*(?:[-–—]|to|по)\s*#?({_PAGE_NUMBER}))?"
+_FIRST_PAGE = re.compile(
+    r"\b(?:pages?|pp?\.?|slides?|стр(?:аниц(?:ах|[аыеу]))?\.?|с\.|слайд(?:ах|ов|[еыу])?)\s*"
+    + _PAGE_ITEM, re.IGNORECASE,
 )
-_SINGLE_PAGE_RE = re.compile(
-    r"\b(?:pages?|pp?\.?|slides?|стр(?:аниц[аыеу])?\.?|с\.|слайд(?:е|ы|у)?)\s*#?(\d{1,4})"
-    r"(?:\s*(?:,|and|и)\s*(\d{1,4}))?\b",
-    re.IGNORECASE,
+_PAGE_CONJUNCTION = r"(?:(?:and|и)\s+|&\s*)"
+_NEXT_PAGE = re.compile(
+    rf"\s*(?:,\s*{_PAGE_CONJUNCTION}?|{_PAGE_CONJUNCTION})" + _PAGE_ITEM, re.IGNORECASE,
 )
 _TIMESTAMP_RE = re.compile(r"\b(?:(\d{1,2}):)?([0-5]?\d):([0-5]\d)\b")
 _WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9]{2,}")
@@ -408,29 +408,31 @@ _CAPTION_WORDS = frozenset({
 })
 
 
+def _explicit_page_range(start: int, end: int) -> list[int]:
+    # For an over-limit range preserve both endpoints for bounds checks and enough
+    # distinct pages for count rejection, regardless of its numeric span.
+    step = 1 if start <= end else -1
+    span = min(abs(end - start), MAX_SELECTED_PDF_PAGES)
+    pages = [start + step * offset for offset in range(span + 1)]
+    if pages[-1] != end:
+        pages.append(end)
+    return pages
+
+
 def parse_explicit_pages(query: str | None) -> list[int]:
     """Extract 1-based page numbers and ranges explicitly named in ``query``, preserving order."""
     if not query:
         return []
-    found: list[int] = []
-    consumed_spans: list[tuple[int, int]] = []
-    for match in _PAGE_RANGE_RE.finditer(query):
-        start, end = int(match.group(1)), int(match.group(2))
-        consumed_spans.append(match.span())
-        low, high = (start, end) if start <= end else (end, start)
-        for number in range(low, min(high, low + 50) + 1):
-            if number >= 1 and number not in found:
-                found.append(number)
-    for match in _SINGLE_PAGE_RE.finditer(query):
-        span = match.span()
-        if any( not (span[1] <= c[0] or span[0] >= c[1]) for c in consumed_spans):
-            continue
-        for group in (match.group(1), match.group(2)):
-            if group is not None:
-                number = int(group)
-                if number >= 1 and number not in found:
-                    found.append(number)
-    return found
+    found: dict[int, None] = {}
+    for first in _FIRST_PAGE.finditer(query):
+        item: re.Match[str] | None = first
+        while item is not None:
+            start = int(item[1])
+            end = int(item[2]) if item[2] is not None else start
+            for page in _explicit_page_range(start, end):
+                found[page] = None
+            item = _NEXT_PAGE.match(query, item.end())
+    return list(found)
 
 
 def parse_timestamps_ms(query: str | None) -> list[int]:
@@ -520,10 +522,14 @@ def select_pdf_pages_by_text(
 # -- Default on-demand PDF page renderer ----------------------------------------
 
 
+def _find_pdf_renderer() -> str | None:
+    return shutil.which("sips") or ("/usr/bin/sips" if os.access("/usr/bin/sips", os.X_OK) else None)
+
+
 def default_pdf_page_renderer(single_page_pdf_bytes: bytes, page_number: int) -> bytes:
     """Rasterize the complete selected page with macOS sips in a temporary directory."""
     message = f"SKAZ couldn't render page {page_number} of this PDF on this computer."
-    sips = shutil.which("sips") or ("/usr/bin/sips" if os.access("/usr/bin/sips", os.X_OK) else None)
+    sips = _find_pdf_renderer()
     if sips is None:
         raise VisualSourceUnsupported("pdf_render_unavailable", message)
     try:
@@ -565,6 +571,10 @@ class VisualSourcePreparer:
         self.frame_retriever = frame_retriever
         self.frame_policy = frame_policy
         self._frame_lock = threading.RLock()
+
+    def pdf_renderer_known_unavailable(self) -> bool:
+        """Discovery only. A discovered or injected renderer may still fail during rendering."""
+        return self.page_renderer is default_pdf_page_renderer and _find_pdf_renderer() is None
 
     def _policy_for(self, source: VideoSource) -> LinkedFramePolicy:
         if isinstance(self.frame_policy, LinkedFramePolicy):
@@ -727,8 +737,7 @@ class VisualSourcePreparer:
         elif page_range is not None:
             explicit = True
             start, end = int(page_range[0]), int(page_range[1])
-            low, high = (start, end) if start <= end else (end, start)
-            selected = list(range(low, high + 1))
+            selected = _explicit_page_range(start, end)
         else:
             parsed = parse_explicit_pages(query)
             if parsed:
@@ -795,8 +804,13 @@ class VisualSourcePreparer:
                 file_name=original_name,
             )
             try:
-                page_pdf = single_page_pdf(reader, page_number)
-                image_bytes = self.page_renderer(page_pdf, page_number)
+                display, *comparisons = pdf_raster_inputs(reader, page_number)
+                image_bytes = self.page_renderer(display, page_number)
+                for filtered in comparisons:
+                    if self.page_renderer(filtered, page_number) != image_bytes:
+                        raise PdfRejected(
+                            f"SKAZ can't faithfully render page {page_number} with its hidden text."
+                        )
                 header = inspect_image_bytes(image_bytes)
             except (PdfRejected, VisualSourceUnsupported) as error:
                 raise VisualSourceUnsupported(
@@ -1058,47 +1072,60 @@ class VisualSourcePreparer:
     ) -> tuple[RetainedFrameRecord, ...]:
         """Persist only cited or manually pinned frames when the source permits retention (decision 1.4)."""
         files, source, _policy = self._require_retainable_video_link(material_id)
-        cited_ts = {int(ts) for ts in cited_timestamps_ms}
-        pinned_ts = {int(ts) for ts in pinned_timestamps_ms}
-        cited_hashes = set(cited_sha256s)
-        pinned_hashes = set(pinned_sha256s)
+        for frame in frames:
+            if (
+                frame.locator.material_id != material_id or frame.locator.source_url != source.url
+                or frame.locator.kind != "video_frame" or frame.timestamp_ms is None
+            ):
+                raise VisualSourceUnsupported(
+                    "retention_not_permitted", "This frame belongs to another source."
+                )
+
+        def resolve(selector: int | str) -> int | None:
+            if isinstance(selector, int):
+                matches = [i for i, frame in enumerate(frames) if frame.timestamp_ms == selector]
+                if not matches:
+                    matches = [
+                        i for i, frame in enumerate(frames) if frame.requested_timestamp_ms == selector
+                    ]
+            else:
+                matches = [i for i, frame in enumerate(frames) if frame.sha256 == selector]
+            identities = {(frames[i].timestamp_ms, frames[i].sha256) for i in matches}
+            if len(identities) > 1:
+                raise VisualSourceUnsupported(
+                    "retention_not_permitted", "This frame selection is ambiguous. Select a specific frame."
+                )
+            if not matches:
+                return None
+            first = frames[matches[0]]
+            return next(i for i, f in enumerate(frames)
+                        if f.timestamp_ms == first.timestamp_ms and f.sha256 == first.sha256)
+
+        cited = {resolve(ts) for ts in cited_timestamps_ms} | {resolve(digest) for digest in cited_sha256s}
+        pinned = {resolve(ts) for ts in pinned_timestamps_ms} | {resolve(digest) for digest in pinned_sha256s}
+        refs_by_index: dict[int, list[str]] = {}
+        if isinstance(citation_refs, Mapping):
+            for timestamp, refs in citation_refs.items():
+                frame_index = resolve(timestamp)
+                if frame_index is not None and frame_index in cited:
+                    refs_by_index.setdefault(frame_index, []).extend(refs)
+        else:
+            refs_by_index = {i: list(citation_refs) for i in cited if i is not None}
 
         selected: list[tuple[PreparedVisual, tuple[FrameRetentionReason, ...], tuple[str, ...]]] = []
-        for frame in frames:
-            actual_ts = frame.timestamp_ms
-            req_ts = frame.requested_timestamp_ms
-            is_cited = (
-                (actual_ts is not None and actual_ts in cited_ts)
-                or (req_ts is not None and req_ts in cited_ts)
-                or frame.sha256 in cited_hashes
-            )
-            is_pinned = (
-                (actual_ts is not None and actual_ts in pinned_ts)
-                or (req_ts is not None and req_ts in pinned_ts)
-                or frame.sha256 in pinned_hashes
-            )
-            if not is_cited and not is_pinned:
+        for i, frame in enumerate(frames):
+            if i not in cited and i not in pinned:
                 continue
-            if not frame.retention_permitted or frame.locator.kind != "video_frame":
+            if not frame.retention_permitted or frame.sha256 != content_hash(frame.data):
                 raise VisualSourceUnsupported(
-                    "retention_not_permitted",
-                    "This frame cannot be stored: the source does not permit frame retention.",
+                    "retention_not_permitted", "The prepared frame cannot be retained for this source."
                 )
             reasons: list[FrameRetentionReason] = []
-            if is_cited:
+            if i in cited:
                 reasons.append("cited")
-            if is_pinned:
+            if i in pinned:
                 reasons.append("pinned")
-            refs: list[str] = []
-            if isinstance(citation_refs, Mapping):
-                for key_ts in (actual_ts, req_ts):
-                    if key_ts is not None and key_ts in citation_refs:
-                        for ref in citation_refs[key_ts]:
-                            if ref not in refs:
-                                refs.append(ref)
-            else:
-                refs = list(dict.fromkeys(citation_refs))
-            selected.append((frame, tuple(reasons), tuple(refs)))
+            selected.append((frame, tuple(reasons), tuple(dict.fromkeys(refs_by_index.get(i, [])))))
 
         if not selected:
             return ()

@@ -65,18 +65,25 @@ describe('Quick questions while recording (v39 rec)', () => {
   it('"Explain a term" puts "Explain the term: " in the focused field with the recording attached; nothing is sent', async () => {
     const { user, record, fake, input } = await setup();
     record('recording');
-    await user.click(within(await screen.findByRole('group', { name: GROUP })).getByRole('button', { name: 'Explain a term' }));
+    const group = await screen.findByRole('group', { name: GROUP });
+    const explain = () => within(group).getByRole('button', { name: 'Explain a term' });
+    const draft = () => within(screen.getByRole('list', { name: 'Draft attachments' }));
+    await user.click(explain());
     expect(input.textContent).toBe('Explain the term: ');
     expect(input).toHaveFocus();
-    const chips = screen.getByRole('list', { name: 'Attachments' });
-    expect(within(chips).getByText('Lecture 8 — entropy')).toBeInTheDocument();
-    await user.keyboard('entropy{Enter}');
+    expect(draft().getByText('Lecture 8 — entropy')).toBeVisible();
+    expect(draft().getAllByRole('listitem')).toHaveLength(1);
+    await user.keyboard('entropy');
+    expect(sent(fake.calls)).toHaveLength(0);
+    await user.keyboard('{Enter}');
     await waitFor(() => expect(sent(fake.calls)).toHaveLength(1));
     expect(sent(fake.calls)[0]!.body).toMatchObject({ text: 'Explain the term: entropy', attachments: ['m1'] });
     // A second click does not attach the recording twice.
-    await user.click(within(screen.getByRole('group', { name: GROUP })).getByRole('button', { name: 'Explain a term' }));
-    await user.click(within(screen.getByRole('group', { name: GROUP })).getByRole('button', { name: 'Explain a term' }));
-    expect(within(screen.getByRole('list', { name: 'Attachments' })).getAllByText('Lecture 8 — entropy')).toHaveLength(1);
+    await user.click(explain());
+    await user.click(explain());
+    expect(draft().getByText('Lecture 8 — entropy')).toBeVisible();
+    expect(draft().getAllByRole('listitem')).toHaveLength(1);
+    expect(sent(fake.calls)).toHaveLength(1);
   });
 
   it('an unavailable agent disables the chips with its reason; nothing goes to another agent', async () => {

@@ -30,6 +30,10 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
 @media (prefers-reduced-motion: reduce) { .kb-titlebar { transition: none; } }
 .kb-titlebar__group { display: flex; align-items: center; gap: var(--kb-sp-8); -webkit-app-region: no-drag; min-width: 0; }
 .kb-titlebar__drag { flex: 1; min-width: 0; align-self: stretch; }
+.kb-titlebar__panel-toggle:focus-visible {
+  background: var(--kb-accent-soft);
+  color: var(--kb-text);
+}
 
 .kb-capsule,
 .kb-pill {

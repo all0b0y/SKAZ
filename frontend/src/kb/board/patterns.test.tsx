@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { PatternFrame } from './PatternFrame';
 import { PATTERNS } from './patterns';
@@ -91,13 +92,35 @@ describe('layer 3 · states are the real ones', () => {
   }, 15_000);
 
   it('composer: empty, with the handed-over text, with three attachment states', async () => {
+    const user = userEvent.setup();
     const { container } = render(<PatternFrame id="composer" look={DEFAULT_LOOK} />);
     await ready();
     const [empty, text, attached] = [...container.querySelectorAll<HTMLElement>('.kb-board__pstage')];
-    expect(empty!.querySelector('.kb-attachments')).toBeNull();
-    expect(text).toHaveTextContent('How is Boltzmann’s entropy related to the cross-entropy loss?');
-    expect(attached!.querySelectorAll('.kb-attachment')).toHaveLength(3);
-    expect(attached!.querySelector('.kb-attachment.is-failed')).toHaveTextContent('This file type can’t be read.');
+    expect(within(empty!).getByRole('textbox', { name: 'Message' })).toBeEmptyDOMElement();
+    expect(within(empty!).queryByRole('list', { name: 'Draft attachments' })).not.toBeInTheDocument();
+    expect(within(text!).getByRole('textbox', { name: 'Message' })).toHaveTextContent('How is Boltzmann’s entropy related to the cross-entropy loss?');
+
+    const composer = within(attached!);
+    const strip = within(composer.getByRole('list', { name: 'Draft attachments' }));
+    const readyFile = strip.getByRole('button', { name: 'View Information theory ch2.pdf' });
+    expect(readyFile).toBeVisible();
+    expect(readyFile.closest('li')).toHaveAttribute('data-state', 'ready');
+    const failedFile = strip.getByRole('button', { name: 'View slides.key' });
+    expect(failedFile.closest('li')).toHaveAttribute('data-state', 'failed');
+    expect(within(failedFile).getByText('This file type can’t be read.')).toBeVisible();
+    expect(composer.getByRole('alert')).toHaveTextContent('slides.key: This file type can’t be read. Remove or replace before sending.');
+    expect(composer.getByRole('button', { name: /^Send$/ })).toHaveAttribute('aria-disabled', 'true');
+
+    await user.click(strip.getByRole('button', { name: 'Show all 3 attachments' }));
+    const dialog = screen.getByRole('dialog', { name: 'Attachments' });
+    await waitFor(() => expect(dialog).toBeVisible());
+    const details = within(dialog);
+    expect(details.getAllByRole('listitem')).toHaveLength(3);
+    expect(details.getByText('Information theory ch2.pdf')).toBeVisible();
+    expect(details.getByText('slides.key')).toBeVisible();
+    const loadingFile = details.getByText('lecture-9.m4a').closest('li')!;
+    expect(loadingFile).toHaveAttribute('data-state', 'adding');
+    expect(within(loadingFile).getByText('Preparing…')).toBeVisible();
   }, 15_000);
 
   it('toast: the real toasts stay up (no timer closes them on the board)', async () => {

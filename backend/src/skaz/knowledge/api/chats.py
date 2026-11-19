@@ -55,6 +55,7 @@ from ..permissions.web_search import WebSearchRecord, WebSearchStore
 from ..service import KnowledgeService
 from ..store.database import MAX_DB_INT
 from ..study.service import StudyService
+from .chat_frames import list_answer_frames, pin_answer_frame
 from .deps import kb_call
 from .schemas import KbCitation, KbPageRef
 from .schemas_blocks import answer_block_part
@@ -141,6 +142,10 @@ class ChatRoute(APIRoute):
 
 
 router = APIRouter(prefix="/kb/chats", tags=["kb"], route_class=ChatRoute)
+router.add_api_route("/{chat_id}/answer-frames", list_answer_frames, methods=["GET"])
+router.add_api_route(
+    "/{chat_id}/messages/{message_id}/frames/{frame_id}/pin", pin_answer_frame, methods=["POST"],
+)
 
 
 def get_chats(request: Request) -> ChatService:
@@ -158,12 +163,12 @@ Wait = Annotated[float, Query(ge=0, le=MAX_WAIT_S)]
 class Presenter:
     """Domain messages → API models; titles, times and availability are looked up now."""
 
-    def __init__(self, kb: KnowledgeService) -> None:
+    def __init__(self, kb: KnowledgeService, study: StudyService | None = None) -> None:
         self.kb = kb
         self.controls = ControlStore(kb.db)
         self.web = WebSearchStore(kb.db)
-        #: Reads study blocks for their parts (no writes: saving goes through the app's service).
-        self.study = StudyService(kb, None, language=lambda: "en")
+        #: Chat presenters share the runtime's pending Study checks.
+        self.study = study if study is not None else StudyService(kb, None, language=lambda: "en")
         self._folders: dict[str, str] = {}
 
     def citation(self, material_id: str, seg: int, quote: str | None) -> KbCitation:
@@ -341,20 +346,22 @@ def question_part(record: QuestionRecord) -> KbQuestionPart:
     )
 
 
-def full_chat(kb: KnowledgeService, view: ChatView) -> KbChat:
-    presenter = Presenter(kb)
+def full_chat(kb: KnowledgeService, view: ChatView, study: StudyService | None = None) -> KbChat:
+    presenter = Presenter(kb, study)
     discuss = discuss_badge(kb.db, view.chat.id)
     return KbChat(**summary(view, discuss).model_dump(),
                   messages=[presenter.message(m) for m in view.messages], cursor=view.cursor)
 
 
-def _messages(kb: KnowledgeService, messages: list[Message]) -> list[KbMessage]:
-    presenter = Presenter(kb)
+def _messages(kb: KnowledgeService, messages: list[Message], study: StudyService | None) -> list[KbMessage]:
+    presenter = Presenter(kb, study)
     return [presenter.message(message) for message in messages]
 
 
-def _send_result(kb: KnowledgeService, pair: tuple[Message, Message]) -> KbSendResult:
-    user, assistant = _messages(kb, list(pair))
+def _send_result(
+    kb: KnowledgeService, pair: tuple[Message, Message], study: StudyService | None,
+) -> KbSendResult:
+    user, assistant = _messages(kb, list(pair), study)
     return KbSendResult(user=user, assistant=assistant)
 
 
@@ -412,7 +419,7 @@ async def create_chat(chats: ChatsDep, body: KbChatCreate | None = None) -> KbCh
     view = await chats.create(title=request.title, engine=request.engine, model=request.model,
                               effort=request.effort, recording_material_id=request.recording_material_id,
                               initial_search_rules=initial)
-    return await kb_call(full_chat, chats.kb, view)
+    return await kb_call(full_chat, chats.kb, view, chats.study)
 
 
 @router.put("/last-choice", status_code=204)
@@ -493,7 +500,7 @@ async def chat_list_events(chats: ChatsDep, after: After = 0, wait: Wait = 0) ->
 
 @router.get("/{chat_id}")
 async def read_chat(chat_id: str, chats: ChatsDep) -> KbChat:
-    return await kb_call(full_chat, chats.kb, await chats.get(chat_id))
+    return await kb_call(full_chat, chats.kb, await chats.get(chat_id), chats.study)
 
 
 @router.patch("/{chat_id}")
@@ -523,7 +530,7 @@ async def send_message(chat_id: str, body: KbSend, chats: ChatsDep) -> KbSendRes
     target = body.expected_target
     expected = (target.engine, target.model, target.effort) if target is not None else None
     user, answer = await chats.send(chat_id, to_input(body), expected_target=expected)
-    return await kb_call(_send_result, chats.kb, (user, answer))
+    return await kb_call(_send_result, chats.kb, (user, answer), chats.study)
 
 
 @router.get("/{chat_id}/events")
@@ -531,7 +538,7 @@ async def chat_events(chat_id: str, chats: ChatsDep, after: After = 0, wait: Wai
     events, cursor = await chats.events(chat_id, after, wait)
 
     def present() -> KbChatEvents:
-        presenter = Presenter(chats.kb)
+        presenter = Presenter(chats.kb, chats.study)
         return KbChatEvents(events=[presenter.event(event) for event in events], cursor=cursor)
 
     return await kb_call(present)
@@ -540,25 +547,26 @@ async def chat_events(chat_id: str, chats: ChatsDep, after: After = 0, wait: Wai
 @router.post("/{chat_id}/messages/{message_id}/stop")
 async def stop_answer(chat_id: str, message_id: str, chats: ChatsDep) -> KbMessage:
     message = await chats.stop(chat_id, message_id)
-    return (await kb_call(_messages, chats.kb, [message]))[0]
+    return (await kb_call(_messages, chats.kb, [message], chats.study))[0]
 
 
 @router.post("/{chat_id}/messages/{message_id}/regenerate", status_code=202)
 async def regenerate_answer(chat_id: str, message_id: str, chats: ChatsDep) -> KbSendResult:
     """A new answer to the same question; the earlier answer stays."""
-    return await kb_call(_send_result, chats.kb, await chats.regenerate(chat_id, message_id))
+    return await kb_call(_send_result, chats.kb, await chats.regenerate(chat_id, message_id), chats.study)
 
 
 @router.post("/{chat_id}/messages/{message_id}/resume", status_code=202)
 async def resume_answer(chat_id: str, message_id: str, chats: ChatsDep) -> KbSendResult:
     """After an interrupted answer: the same question is answered again from the start."""
-    return await kb_call(_send_result, chats.kb, await chats.resume(chat_id, message_id))
+    return await kb_call(_send_result, chats.kb, await chats.resume(chat_id, message_id), chats.study)
 
 
 @router.post("/{chat_id}/messages/{message_id}/edit", status_code=202)
 async def edit_question(chat_id: str, message_id: str, body: KbMessageEdit, chats: ChatsDep) -> KbSendResult:
     """Your question, changed: every later message goes and it is answered again (409 while answering)."""
-    return await kb_call(_send_result, chats.kb, await chats.edit(chat_id, message_id, to_input(body)))
+    edited = await chats.edit(chat_id, message_id, to_input(body))
+    return await kb_call(_send_result, chats.kb, edited, chats.study)
 
 
 @router.post("/{chat_id}/messages/{message_id}/save")

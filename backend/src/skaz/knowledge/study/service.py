@@ -71,6 +71,7 @@ from .items import StudyItems
 from .passes import Pass, PassAction, read_pass
 from .passes import apply as apply_pass
 from .review import (
+    NO_AGENT_IDEAS,
     NO_IDEAS,
     NOT_IN_ANSWER,
     Judge,
@@ -306,16 +307,18 @@ class StudyService:
         answer = by_id.get(ref.message_id)
         if answer is None or answer.role != "assistant" or answer.state != "streaming" or not answer.reply_to:
             return None
-        if any(m.seq > answer.seq and m.role == "assistant" for m in messages):
-            return None
         question = by_id.get(answer.reply_to)
         if question is None or question.role != "user" or question.seq >= answer.seq:
             return None
-        replied = {m.reply_to for m in messages if m.reply_to}
         texts = [question.input.text if question.input is not None else plain_text(question.parts)]
-        for m in messages:
-            if m.seq > answer.seq and m.role == "user" and m.id not in replied:
-                texts.append(m.input.text if m.input is not None else plain_text(m.parts))
+        # Resume can put the active answer before newer history. Only this run's absorbed messages count.
+        for message_id in ref.clarification_message_ids:
+            clarification = by_id.get(message_id)
+            if clarification is not None and clarification.role == "user":
+                texts.append(
+                    clarification.input.text if clarification.input is not None
+                    else plain_text(clarification.parts)
+                )
         combined = "\n".join(t.strip() for t in texts if t and t.strip())
         return combined or None
 
@@ -1076,7 +1079,7 @@ class StudyService:
         except BaseException:
             self._judging.discard(key)
             raise
-        self._spawn(self._judge(block, question, given, attempt.id), f"study-judge-{block_id}")
+        self._spawn(self._judge(block, question, given, attempt.id), f"study-judge-{block_id}", key)
         return block
 
     def running(self, attempt_id: str, item_id: str, idea_id: str | None = None) -> bool:
@@ -1088,10 +1091,15 @@ class StudyService:
         key = ("check", attempt_id, item_id) if idea_id is None else ("recheck", attempt_id, item_id, idea_id)
         return key in self._judging
 
-    def _spawn(self, work: Coroutine[Any, Any, None], name: str) -> None:
+    def _spawn(self, work: Coroutine[Any, Any, None], name: str, key: tuple[str, ...]) -> None:
+        def finished(task: asyncio.Task[None]) -> None:
+            # The check stays live until its result has been stored, including the final disk write.
+            self._judging.discard(key)
+            self._tasks.discard(task)
+
         task = asyncio.create_task(work, name=name)
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(finished)
 
     def ideas(self, item_id: str) -> list[dict[str, Any]] | None:
         """An open question's key ideas (P3-a decision 7); ``None`` until made or built."""
@@ -1112,7 +1120,7 @@ class StudyService:
         if ideas is None:
             built = built_ideas(raw, reader, sources, basis=question.basis)
             if not built:
-                raise StudyError(NO_IDEAS)
+                raise StudyError(NO_AGENT_IDEAS if question.basis == "agent" else NO_IDEAS)
             stored = self.items.put_ideas_once(question.id, built, now=_now(), block_id=block.id,
                                                page_id=block.page_id)
             if [dict(idea) for idea in stored] != [dict(idea) for idea in built]:
@@ -1123,7 +1131,6 @@ class StudyService:
         return scored({"text": given, "review": review, "checked_by": checked_by})
 
     async def _judge(self, block: StudyBlock, question: Question, given: str, attempt_id: str) -> None:
-        key = ("check", attempt_id, question.id)
         assert self.judge is not None
         try:
             ideas = await disk_call(self.ideas, question.id)
@@ -1136,8 +1143,6 @@ class StudyService:
             log.warning("Open answer check failed for %s: %s", block.id, type(error).__name__)
             entry = {"text": given, "checked": False, "score": None,
                      "error": "The agent couldn't check the answer. Try again."}
-        finally:
-            self._judging.discard(key)
         try:
             await disk_call(self._put_answer, await disk_call(self.get, block.id), question.id, entry,
                             attempt_id=attempt_id)
@@ -1218,8 +1223,10 @@ class StudyService:
         except BaseException:
             self._judging.discard(key)
             raise
-        self._spawn(self._recheck(block, question, dict(idea), str(entry.get("text") or ""), words,
-                                  attempt.id), f"study-recheck-{block_id}")
+        self._spawn(
+            self._recheck(block, question, dict(idea), str(entry.get("text") or ""), words, attempt.id),
+            f"study-recheck-{block_id}", key,
+        )
         return block
 
     async def _recheck(self, block: StudyBlock, question: Question, idea: dict[str, Any], answer: str,
@@ -1239,8 +1246,6 @@ class StudyService:
             log.warning("Key idea recheck failed for %s: %s", block.id, type(error).__name__)
             failed = {"status": None, "note": "The agent couldn't recheck it. Try again.", "words": words}
             fields = {"rechecking": False, "recheck": failed}
-        finally:
-            self._judging.discard(("recheck", attempt_id, question.id, str(idea["id"])))
         try:
             await disk_call(self._change_answer, block.id, question.id,
                             lambda e: self._with_idea(e, str(idea["id"]), **fields), attempt_id=attempt_id)

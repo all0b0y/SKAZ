@@ -1,9 +1,10 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { AnswerMarkdown, type InAppLink } from '../ui/AnswerMarkdown';
 import { Banner, Button, EmptyState, Spinner } from '../ui';
 import { useServices, useUi } from '../state/context';
 import type { WikiFileName } from '../state/document';
 import { ReaderPanelHeader } from '../document/readerSurface041/ReaderPanelHeader';
+import { useReaderFocus, wikiLinkFocus } from '../document/readerSurface041/useReaderFocus';
 import { blockMarkdown, inAppTarget } from '../document/text';
 import { useLoad } from '../document/useLoad';
 
@@ -18,14 +19,21 @@ const NOTE: Record<WikiFileName, string> = {
  * `Wiki/index.md` / `Wiki/log.md` in the right panel, read-only (B20): SKAZ writes these files;
  * their links open pages and materials here. Rendered by the safe Markdown renderer (no raw HTML).
  */
-export function WikiFileView({ name }: { name: WikiFileName }) {
+export function WikiFileView({ name, nonce }: { name: WikiFileName; nonce: number }) {
   const { client } = useServices();
   const openDocument = useUi((s) => s.openDocument);
   const { state, reload } = useLoad(`wiki-file-${name}`, () => client.call('GET /kb/wiki/files/{name}', { path: { name } }));
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useReaderFocus(bodyRef, nonce, state.load !== 'loading' || state.value !== null, null);
   const inAppLink = useCallback<InAppLink>((href, label, key) => {
     const target = inAppTarget(href);
     if (!target) return null;
-    return <button key={key} type="button" className="kb-wikilink" data-link={target.type} onClick={() => openDocument(target)}>{label}</button>;
+    return <button key={key} type="button" className="kb-wikilink" data-link={target.type} data-reader-wiki-link={href}
+      onClick={({ currentTarget }) => openDocument(target, {
+        destination: 'heading',
+        origin: currentTarget,
+        returnFocus: bodyRef.current ? wikiLinkFocus(bodyRef.current, currentTarget, href) : 'heading',
+      })}>{label}</button>;
   }, [openDocument]);
   const file = state.value;
   // The file's own first heading is the panel title already.
@@ -33,7 +41,7 @@ export function WikiFileView({ name }: { name: WikiFileName }) {
   return (
     <>
       <ReaderPanelHeader typeLabel={`Wiki ${TITLE[name].toLowerCase()}`} typeIcon="text" />
-      <div className="kb-doc__body">
+      <div className="kb-doc__body" ref={bodyRef}>
         {state.load === 'loading' && !file && <div className="kb-doc__wait"><Spinner label={`Opening the ${TITLE[name].toLowerCase()}`} /></div>}
         {state.load === 'error' && !file && (
           <Banner tone="error" title={`Couldn’t open the ${TITLE[name].toLowerCase()}.`}

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from ..knowledge.agents.engine import AgentEngine, EngineId, ModelOption
 from ..knowledge.agents.registry import ENGINE_IDS, EngineRegistry
 from ..knowledge.errors import KnowledgeError
+from ..knowledge.ids import new_id
 from ..native_io import disk_call
 
 if TYPE_CHECKING:
@@ -47,6 +48,7 @@ from .contracts import (
     VisualSourceKind,
     VisualSourceLocator,
 )
+from .payloads import linked_frame_caption
 
 _VISUAL_CUE_RE = re.compile(
     r"(?:"
@@ -74,11 +76,13 @@ class VisualUnsupportedError(KnowledgeError):
     def __init__(
         self,
         result: UnsupportedVisualResult,
+        locator: VisualSourceLocator,
         *,
         code: str = "VISUAL_UNSUPPORTED",
     ) -> None:
         super().__init__(result.detail)
         self.result = result
+        self.locator = locator
         self.code = code
 
     def payload(self) -> dict[str, Any]:
@@ -93,6 +97,13 @@ class VisualUnsupportedError(KnowledgeError):
             "source_label": self.result.source_label,
             "text_only_available": self.result.text_only_available,
             "draft_preserved": self.result.draft_preserved,
+            "locator": {
+                "material_id": self.locator.material_id,
+                "source_kind": self.locator.source_kind,
+                "page": self.locator.page,
+                "timestamp_ms": self.locator.timestamp_ms,
+                "label": self.locator.label,
+            },
             "compatible_models": [
                 {
                     "engine": hint.engine,
@@ -109,7 +120,7 @@ class VisualUnsupportedError(KnowledgeError):
 class VisualSourceCandidate:
     material_id: str
     source_kind: VisualSourceKind
-    label: str
+    title: str
     locator: VisualSourceLocator
     has_source_text: bool
     permitted: bool
@@ -214,7 +225,8 @@ def derive_visual_intent(
         if source_kind == "image":
             include = is_attachment or media_cue
         elif source_kind == "pdf":
-            include = pdf_cue or (is_attachment and allowed and not has_text)
+            # A scope-denied attachment has no usable text in this chat and must surface a refusal.
+            include = pdf_cue or (is_attachment and not has_text)
         elif source_kind in ("video_link", "local_video"):
             include = media_cue
 
@@ -222,7 +234,7 @@ def derive_visual_intent(
             continue
 
         page = explicit_pages[0] if source_kind == "pdf" and explicit_pages else None
-        label = f"{record.title} · Page {page}" if page is not None else record.title
+        label = _page_label(record.title, page)
         locator = VisualSourceLocator(
             material_id=material_id,
             source_kind=source_kind,
@@ -233,7 +245,7 @@ def derive_visual_intent(
             VisualSourceCandidate(
                 material_id=material_id,
                 source_kind=source_kind,
-                label=label,
+                title=record.title,
                 locator=locator,
                 has_source_text=has_text,
                 permitted=allowed,
@@ -254,6 +266,10 @@ def derive_visual_intent(
         text_only_available=text_only_ok,
         primary_locator=candidates[0].locator,
     )
+
+
+def _page_label(title: str, page: int | None) -> str:
+    return f"{title} · Page {page}" if page is not None else title
 
 
 async def probe_engine_visual_transport(engine: AgentEngine) -> AdapterTransportProbe:
@@ -351,6 +367,12 @@ def _map_v3_unsupported(
         "unsupported_image_format": "invalid_media_type",
         "source_not_found": "missing_payload",
     }
+    source_titles = {
+        "page_out_of_range": "PDF page is out of range",
+        "page_range_required": "Specify PDF pages",
+        "pdf_render_unavailable": "PDF pages are unavailable",
+        "video_frames_unsupported": "Video frames are unavailable",
+    }
     missing = error.reason == "source_not_found" or isinstance(error.__cause__, FileNotFoundError)
     code: UnsupportedVisualReason = (
         "missing_payload"
@@ -368,6 +390,7 @@ def _map_v3_unsupported(
         locator=candidate.locator,
         text_only_available=text_avail,
         compatible_models=compatible,
+        custom_title=None if missing else source_titles.get(error.reason),
         custom_detail=error.message,
     )
     return result
@@ -525,6 +548,13 @@ def _preflight_source_block(
                         page_count=page_count,
                         has_source_text=True,
                     )
+            if sources.visual.pdf_renderer_known_unavailable():
+                raise VisualSourceUnsupported(
+                    "pdf_render_unavailable",
+                    "SKAZ couldn't find a local renderer for the selected PDF pages.",
+                    page_count=page_count,
+                    has_source_text=candidate.has_source_text,
+                )
         except VisualSourceUnsupported as err:
             return _map_v3_unsupported(
                 err,
@@ -562,29 +592,19 @@ async def preflight_visual_turn(
     """Validate visual intent, source access, and ``(engine_id, model_id)`` capability before send."""
     plan = await disk_call(derive_visual_intent, kb, sources, given, scope)
     if not plan.requires_visual:
-        decision = (
-            VisualCapabilityDecision(
-                engine=engine_id,
-                model_id=model_id,
-                state="supported" if model_id else "unverified",
-                supported=bool(model_id),
-                transport_supports_image=True,
-                model_supports_image=True if model_id else None,
-            )
-            if model_id
-            else VisualCapabilityDecision(
-                engine=engine_id,
-                model_id=None,
-                state="unverified",
-                supported=False,
-                transport_supports_image=True,
-                model_supports_image=None,
-                reason_code="model_not_selected",
-            )
+        # Image support is unevaluated and irrelevant to admission for a plain-text turn.
+        decision = VisualCapabilityDecision(
+            engine=engine_id,
+            model_id=model_id,
+            state="unverified",
+            supported=False,
+            transport_supports_image=False,
+            model_supports_image=None,
+            verified_by="not_evaluated",
         )
         return VisualPreflightOutcome(
             requires_visual=False,
-            supported=True,
+            supported=False,
             decision=decision,
             unsupported=None,
             text_only_available=False,
@@ -730,15 +750,17 @@ def _to_v4_prepared(
     visual_id: str,
     candidate: VisualSourceCandidate,
 ) -> PreparedVisual:
+    page = v3_item.locator.page
     return PreparedVisual(
         visual_id=visual_id,
         locator=VisualSourceLocator(
             material_id=candidate.material_id,
             source_kind=candidate.source_kind,
-            page=v3_item.locator.page if candidate.source_kind == "pdf" else candidate.locator.page,
+            page=page,
             timestamp_ms=v3_item.locator.timestamp_ms,
-            label=candidate.label,
+            label=_page_label(candidate.title, page),
             source_sha256=v3_item.locator.source_sha256 or v3_item.sha256,
+            source_url=v3_item.locator.source_url,
         ),
         media_type=v3_item.media_type,
         data=v3_item.data,
@@ -748,6 +770,7 @@ def _to_v4_prepared(
         source_text_available=candidate.has_source_text,
         permitted=candidate.permitted,
         permission_reason=candidate.permission_reason,
+        linked_frame=v3_item if candidate.source_kind == "video_link" else None,
     )
 
 
@@ -828,7 +851,7 @@ async def _prepare_candidate_v4_items(
         return tuple(
             _to_v4_prepared(
                 item,
-                visual_id=f"vis-{candidate.material_id}-t{item.timestamp_ms}",
+                visual_id=new_id("vis"),
                 candidate=candidate,
             )
             for item in frames
@@ -894,7 +917,9 @@ async def authorize_visual_turn(
                 or "Text-only continuation requires available source text for every selected source."
             ),
         )
-        raise VisualUnsupportedError(result, code="VISUAL_TEXT_ONLY_UNAVAILABLE")
+        raise VisualUnsupportedError(
+            result, locator or blocked_cand.locator, code="VISUAL_TEXT_ONLY_UNAVAILABLE",
+        )
 
     visual_block = next(
         (c for c in plan.candidates if not c.permitted or c.source_kind == "local_video"),
@@ -911,7 +936,7 @@ async def authorize_visual_turn(
             text_only_available=plan.text_only_available,
         )
         assert blocked is not None
-        raise VisualUnsupportedError(blocked)
+        raise VisualUnsupportedError(blocked, visual_block.locator)
 
     if not decision.supported:
         reason = decision.reason_code or "model_capability_unverified"
@@ -923,7 +948,7 @@ async def authorize_visual_turn(
             text_only_available=plan.text_only_available,
             compatible_models=compatible,
         )
-        raise VisualUnsupportedError(result)
+        raise VisualUnsupportedError(result, primary.locator)
 
     max_bytes = transport.max_payload_bytes or DEFAULT_MAX_VISUAL_BYTES
     # Budget base64 and framing across the turn. Adapters also check their final prompt.
@@ -934,6 +959,15 @@ async def authorize_visual_turn(
         try:
             v4_items = await _prepare_candidate_v4_items(sources, cand, query=given.text)
         except VisualSourceUnsupported as err:
+            _, _, can_use_text = await disk_call(
+                _check_sources, sources, plan, engine_id, model_id, compatible, given.text,
+            )
+            locator = cand.locator
+            if err.locator is not None:
+                locator = replace(
+                    locator, page=err.locator.page, timestamp_ms=err.locator.timestamp_ms,
+                    label=_page_label(cand.title, err.locator.page),
+                )
             raise VisualUnsupportedError(
                 _map_v3_unsupported(
                     err,
@@ -941,8 +975,9 @@ async def authorize_visual_turn(
                     model_id=model_id,
                     candidate=cand,
                     compatible=compatible,
-                    text_only_available=plan.text_only_available,
-                )
+                    text_only_available=can_use_text,
+                ),
+                locator,
             ) from err
         except (KnowledgeError, OSError) as err:
             raise VisualUnsupportedError(
@@ -956,11 +991,14 @@ async def authorize_visual_turn(
                     custom_detail=err.message
                     if isinstance(err, KnowledgeError)
                     else "The material's original file can't be opened.",
-                )
+                ),
+                cand.locator,
             ) from err
 
         for item in v4_items:
-            raw_limit = min(MAX_IMAGE_BYTES, max(0, (remaining - 256) // 4) * 3)
+            caption = linked_frame_caption(item.locator, item.visual_id)
+            overhead = 256 + (len(caption.encode("utf-8")) + 96 if caption is not None else 0)
+            raw_limit = min(MAX_IMAGE_BYTES, max(0, (remaining - overhead) // 4) * 3)
             if raw_limit <= 0 or item.byte_size > raw_limit:
                 raise VisualUnsupportedError(
                     build_unsupported_result(
@@ -971,7 +1009,8 @@ async def authorize_visual_turn(
                         text_only_available=plan.text_only_available,
                         compatible_models=compatible,
                         custom_detail="The images together exceed this agent's visual transport limit.",
-                    )
+                    ),
+                    item.locator,
                 )
             outcome = await disk_call(
                 authorize_prepared_visual,
@@ -985,8 +1024,8 @@ async def authorize_visual_turn(
                 max_bytes=raw_limit,
             )
             if isinstance(outcome, UnsupportedVisualResult):
-                raise VisualUnsupportedError(outcome)
+                raise VisualUnsupportedError(outcome, item.locator)
             authorized.append(outcome)
-            remaining -= 256 + 4 * ((item.byte_size + 2) // 3)
+            remaining -= overhead + 4 * ((item.byte_size + 2) // 3)
 
     return tuple(authorized), False

@@ -22,6 +22,7 @@ export function TitleBar() {
           // the accessible name, the glyph and the tooltip carry the state, hover/focus still tint.
           icon={sideOpen ? 'sidebarClose' : 'sidebarOpen'}
           label={sideOpen ? 'Hide side panel' : 'Show side panel'}
+          className="kb-titlebar__panel-toggle"
           aria-controls="kb-side"
           onClick={() => prefs.getState().set({ sideOpen: !sideOpen })}
         />

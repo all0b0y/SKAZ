@@ -222,9 +222,11 @@ class ImportService:
         removed = 0
         for session_id in self.temp.sessions():
             record = self.store.get(session_id)
-            if record is not None and record.status not in ("completed", "cancelled"):
-                continue
             try:
+                if record is not None and record.status not in ("completed", "cancelled"):
+                    if record.source.url and record.status in ("failed", "interrupted"):
+                        self.temp.discard_link_downloads(session_id)
+                    continue
                 self.temp.remove(session_id)
             except (OSError, ValueError) as error:
                 logger.warning("Temporary import media of %s not removed: %s", session_id, error_note(error))
@@ -419,14 +421,21 @@ class ImportService:
             return Path(record.source.path)
         directory = await disk_call(self.temp.directory, record.session_id)
         ready = directory / "ready.m4a"
+        if record.source.url:
+            await disk_call(self.temp.discard_link_downloads, record.session_id)
         if ready.is_file() and not ready.is_symlink():
             return ready
-        source = Path(record.source.path)
         if record.source.url:
-            await disk_call(self.store.stage, record.session_id, "downloading")
-            source = await media_tools.download_audio(record.source.url, directory)
-        await disk_call(self.store.stage, record.session_id, "preparing")
-        audio = await media_tools.extract_audio(source, directory)
+            try:
+                await disk_call(self.store.stage, record.session_id, "downloading")
+                source = await media_tools.download_audio(record.source.url, directory)
+                await disk_call(self.store.stage, record.session_id, "preparing")
+                audio = await media_tools.extract_audio(source, directory)
+            finally:
+                await disk_call(self.temp.discard_link_downloads, record.session_id)
+        else:
+            await disk_call(self.store.stage, record.session_id, "preparing")
+            audio = await media_tools.extract_audio(Path(record.source.path), directory)
         await disk_call(audio.replace, ready)
         return ready
 

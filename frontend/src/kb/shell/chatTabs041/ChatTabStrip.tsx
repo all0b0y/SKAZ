@@ -97,6 +97,7 @@ export function ChatTabStrip({
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const pendingFocusRef = useRef<{ id: string | null; empty: boolean } | null>(null);
+  const revealed = useRef<{ id: string; left: number } | null>(null);
 
   const [overflow, setOverflow] = useState<TabOverflowState>({
     overflowing: false,
@@ -116,12 +117,20 @@ export function ChatTabStrip({
     );
   }, []);
 
+  const reveal = useCallback((id: string) => {
+    const track = trackRef.current;
+    const item = itemRefs.current.get(id);
+    if (!track || !item) return;
+    ensureTabVisible(track, item);
+    revealed.current = { id, left: track.scrollLeft };
+  }, []);
+
   useLayoutEffect(() => {
-    if (activeId) {
-      ensureTabVisible(trackRef.current, itemRefs.current.get(activeId) ?? null);
-    }
-    syncOverflow();
-  }, [tabs, activeId, syncOverflow]);
+    if (activeId) reveal(activeId);
+    else revealed.current = null;
+  }, [activeId, reveal]);
+
+  useLayoutEffect(syncOverflow, [tabs, activeId, syncOverflow]);
 
   useLayoutEffect(() => {
     const pending = pendingFocusRef.current;
@@ -135,28 +144,34 @@ export function ChatTabStrip({
     if (pending.id) {
       const btn = tabRefs.current.get(pending.id);
       if (btn) {
-        ensureTabVisible(trackRef.current, itemRefs.current.get(pending.id) ?? null);
+        reveal(pending.id);
         btn.focus({ preventScroll: true });
       }
     }
-  }, [tabs, onEmptyFocus]);
+  }, [tabs, menuOpen, onEmptyFocus, reveal]);
 
   useLayoutEffect(() => {
     if (!focusSeq || !focusTabId) return;
     const btn = tabRefs.current.get(focusTabId);
     if (btn) {
-      ensureTabVisible(trackRef.current, itemRefs.current.get(focusTabId) ?? null);
+      reveal(focusTabId);
       btn.focus({ preventScroll: true });
     }
-  }, [focusSeq, focusTabId]);
+  }, [focusSeq, focusTabId, reveal]);
 
   useEffect(() => {
     const track = trackRef.current;
     if (!track) return undefined;
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(syncOverflow);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+      // The header may shrink as its controls mount. Finish revealing the selection only while
+      // the track remains where selection/focus put it; manual browsing owns its new position.
+      const last = revealed.current;
+      if (last && track.scrollLeft === last.left) reveal(last.id);
+      syncOverflow();
+    });
     ro?.observe(track);
     return () => ro?.disconnect();
-  }, [tabs.length, syncOverflow]);
+  }, [tabs.length, syncOverflow, reveal]);
 
   useEffect(() => {
     if (!overflow.overflowing && menuOpen) setMenuOpen(false);
@@ -184,7 +199,7 @@ export function ChatTabStrip({
     const target = tabs[nextIndex];
     if (!target) return;
     onSelect(target.id);
-    ensureTabVisible(trackRef.current, itemRefs.current.get(target.id) ?? null);
+    reveal(target.id);
     tabRefs.current.get(target.id)?.focus({ preventScroll: true });
   };
 
@@ -227,7 +242,10 @@ export function ChatTabStrip({
         className="kb-chattabs__track"
         role="tablist"
         aria-label="Open chats"
-        onScroll={syncOverflow}
+        onScroll={(event) => {
+          if (revealed.current?.left !== event.currentTarget.scrollLeft) revealed.current = null;
+          syncOverflow();
+        }}
       >
         {tabs.map((tab, index) => {
           const isActive = tab.id === activeId;
@@ -243,6 +261,7 @@ export function ChatTabStrip({
               role="presentation"
               data-active={isActive ? 'true' : 'false'}
               data-chat-id={tab.id}
+              onFocus={() => reveal(tab.id)}
             >
               <button
                 ref={(el) => {
@@ -257,6 +276,7 @@ export function ChatTabStrip({
                 tabIndex={tabIndex}
                 title={tab.title}
                 onClick={() => {
+                  reveal(tab.id);
                   onSelect(tab.id);
                   tabRefs.current.get(tab.id)?.focus({ preventScroll: true });
                 }}

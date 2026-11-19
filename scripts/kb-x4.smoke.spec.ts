@@ -111,7 +111,7 @@ for (const theme of THEMES) {
       data.setData('text/plain', value);
       document.querySelector('[data-testid="message-input"]')!.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
     }, text);
-    const chips = page.getByRole('list', { name: 'Attachments' });
+    const chips = page.getByRole('list', { name: 'Draft attachments' });
     const size = text.length.toLocaleString('en-US');
     await expect(chips.getByRole('button', { name: `Show the pasted text (${size} characters)` })).toHaveText(`Pasted text · ${size} characters`);
     await expect(input).toHaveText('');

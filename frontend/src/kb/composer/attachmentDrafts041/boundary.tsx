@@ -32,7 +32,7 @@ function isExternalFileDrag(transfer: DataTransfer | null): boolean {
 /** Spread paneHandlers on the chat pane and call handlePaste before normal editor paste handling. */
 export function useExternalAttachmentBoundary({ chatId, store, intake, inWiki, acceptsTarget }: ExternalAttachmentBoundaryOptions) {
   const [overChat, setOverChat] = useState<string | null>(null);
-  const drag = useRef<{ chatId: string; cancelled: boolean; over: boolean; leftWindow: boolean } | null>(null);
+  const drag = useRef<{ chatId: string; cancelled: boolean; over: boolean } | null>(null);
 
   useLayoutEffect(() => {
     if (drag.current && drag.current.chatId !== chatId) {
@@ -52,41 +52,49 @@ export function useExternalAttachmentBoundary({ chatId, store, intake, inWiki, a
       drag.current.cancelled = true;
       setOverChat(null);
     };
+    const resumePointer = (event: PointerEvent) => {
+      // Normal pointer input resumes after an external drop/cancellation outside the window.
+      // A dragenter with no related target can also be the old gesture coming back.
+      if (event.isTrusted && (event.type === 'pointerdown' || event.buttons === 0)) finish();
+    };
     window.addEventListener('keydown', cancel, true);
     window.addEventListener('drop', finish);
     window.addEventListener('dragend', finish);
+    window.addEventListener('pointerdown', resumePointer, true);
+    window.addEventListener('pointermove', resumePointer, true);
     return () => {
       window.removeEventListener('keydown', cancel, true);
       window.removeEventListener('drop', finish);
       window.removeEventListener('dragend', finish);
+      window.removeEventListener('pointerdown', resumePointer, true);
+      window.removeEventListener('pointermove', resumePointer, true);
     };
   }, []);
 
   const insideZone = (pane: HTMLElement, target: EventTarget | null) =>
     target instanceof Node && pane.contains(target) && (acceptsTarget?.(target) ?? true);
 
+  const track = (event: DragEvent<HTMLElement>) => {
+    if (chatId === null || event.defaultPrevented || !isExternalFileDrag(event.dataTransfer)) return null;
+    if (!insideZone(event.currentTarget, event.target)) return null;
+    const active = drag.current ?? (drag.current = { chatId, cancelled: false, over: true });
+    active.over = true;
+    return active;
+  };
+
   const paneHandlers = {
-    onDragEnter: (event: DragEvent<HTMLElement>) => {
-      // An OS drag can end outside Electron without delivering drop or dragend to this window.
-      // A fresh entry from outside releases the cancelled gesture without accepting a stale drop.
-      if (drag.current?.leftWindow && event.relatedTarget === null && isExternalFileDrag(event.dataTransfer)
-        && insideZone(event.currentTarget, event.target)) drag.current = null;
-    },
+    onDragEnter: track,
     onDragOver: (event: DragEvent<HTMLElement>) => {
-      if (chatId === null || event.defaultPrevented || !isExternalFileDrag(event.dataTransfer)) return;
-      if (!insideZone(event.currentTarget, event.target)) return;
-      const active = drag.current ?? (drag.current = { chatId, cancelled: false, over: true, leftWindow: false });
-      active.over = true;
-      active.leftWindow = false;
+      const active = track(event);
+      if (!active) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = active.cancelled ? 'none' : 'copy';
-      if (!active.cancelled) setOverChat(chatId);
+      if (!active.cancelled) setOverChat(active.chatId);
     },
     onDragLeave: (event: DragEvent<HTMLElement>) => {
       if (!drag.current) return;
       if (insideZone(event.currentTarget, event.relatedTarget)) return;
       drag.current.over = false;
-      drag.current.leftWindow = event.relatedTarget === null;
       setOverChat(null);
     },
     onDrop: (event: DragEvent<HTMLElement>) => {

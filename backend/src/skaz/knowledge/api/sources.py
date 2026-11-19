@@ -61,6 +61,7 @@ async def _added(sources: SourceService, result: IntakeResult) -> KbMaterialAdde
         excluded_count=result.excluded_count,
         hidden_count=result.hidden_count,
         failure_reason=result.failure,
+        saved_pdf_page_count=result.saved_pdf_page_count,
         video=None,
         video_failure_reason=None,
         already_in_library=result.existing,

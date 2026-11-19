@@ -174,6 +174,17 @@ function instance(route: string): { method: string; path: string } {
   return { method: route.slice(0, space), path: route.slice(space + 1).replace(/\{([^}]+)\}/g, (_, name: string) => SAMPLE[name] ?? 'x1') };
 }
 
+it('allows the renderer to list answer frames and pin one frame through their typed routes', () => {
+  const routes = [
+    'GET /kb/chats/{chat_id}/answer-frames',
+    'POST /kb/chats/{chat_id}/messages/{message_id}/frames/{frame_id}/pin',
+  ];
+  for (const route of routes) {
+    expect(backendRoutes.has(route)).toBe(true);
+    expect(validateBridgeRequest(instance(route))).toBeNull();
+  }
+});
+
 describe('Electron IPC policy — /kb rules match the real backend routes (I1)', () => {
   it('reads the backend route list and the routes the interface calls', () => {
     expect(backendRoutes.size).toBeGreaterThan(80);

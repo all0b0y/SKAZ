@@ -27,15 +27,23 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from ...native_io import disk_call
+from ...native_io import disk_call, drain_on_cancel
 from ...visual_transport041.authorization import AuthorizedVisualPayload
 from ...visual_transport041.runtime import (
     VisualPreflightOutcome,
     authorize_visual_turn,
     derive_visual_intent,
     preflight_visual_turn,
+)
+from ...visual_transport041.video_frames import (
+    AnswerFrame,
+    FrameChoice,
+    FramePinCache,
+    frame_citation,
+    require_retainable_frame,
 )
 from ..agents import update_gate
 from ..agents.engine import (
@@ -91,6 +99,7 @@ from ..permissions.web_tool import WEB_TOOL
 from ..service import KnowledgeService
 from ..skills.settings import enabled_skills
 from ..sources.service import SourceService
+from ..sources.visual import VisualSourceUnsupported
 from ..study.scheduling import Mode
 from ..study.store import StudyBlock
 from . import shaping
@@ -142,6 +151,7 @@ from .parsing import (
     BlockStart,
     CiteToken,
     ConnectionOut,
+    FrameToken,
     KnowledgeOut,
     Output,
     PageToken,
@@ -177,6 +187,9 @@ END_SESSIONS_WAIT_S = 20.0
 MENTION_LIMIT = 8
 #: Failure kinds that leave the question open for "Resume" (decision on limits).
 _INTERRUPTING = frozenset({"limit", "network", "auth", "incompatible"})
+
+
+_SaveResult = tuple[str, str, str, str | None]
 
 
 class ChatConflict(KnowledgeError):
@@ -250,6 +263,8 @@ class _Run:
     skaz_web: bool = False
     #: V4: verified visual payloads authorized for this turn's model/transport only.
     visuals: tuple[AuthorizedVisualPayload, ...] = ()
+    visual_library: Path | None = None
+    cited_frames: dict[str, AuthorizedVisualPayload] = field(default_factory=dict)
 
 
 class ChatService:
@@ -285,7 +300,7 @@ class ChatService:
         self._stop_timeout_s = stop_timeout_s
         self._close_stop_s = close_stop_s
         #: One "Save to wiki" per answer at a time: a double click must not write two analysis pages.
-        self._saves: dict[tuple[str, str], asyncio.Task[tuple[str, str, str, str | None]]] = {}
+        self._saves: dict[tuple[str, str], asyncio.Task[_SaveResult]] = {}
         self._committing_saves: set[tuple[str, str]] = set()
         #: One part change of a saved answer at a time (read-modify-write of its parts).
         self._parts = KeyedLocks()
@@ -313,6 +328,7 @@ class ChatService:
         self._feeds: dict[str, ChatFeed] = {}
         self._list = ListFeed()
         self._runs: dict[str, _Run] = {}
+        self._frame_pins = FramePinCache()
         #: Chats between "send accepted" and "run started" (also answer ``ANSWERING``).
         self._reserved: set[str] = set()
         self._closing = False
@@ -721,6 +737,7 @@ class ChatService:
             run.deleted = True
             await self._stop_run(run)
         await disk_call(self.repo.delete, chat_id)  # its live session is queued for deletion (cascade)
+        self._frame_pins.drop_chat(chat_id)
         self._feeds.pop(chat_id, None)
         self._list.touch(chat_id)
         self._kick_deletions()
@@ -739,6 +756,85 @@ class ChatService:
         if self._sources_provider is not None:
             return self._sources_provider
         return SourceService(self.kb)
+
+    def _retain_answer_frames(self, run: _Run) -> None:
+        with self.kb.writing():
+            if run.deleted or self.kb.library_root != run.visual_library:
+                return
+            sources = self._sources()
+            scope = scope_of(SearchRulesStore(self.kb.db, self.kb.settings).chat(run.chat_id))
+            for visual in run.cited_frames.values():
+                material_id = visual.locator.material_id
+                if scope is not None and not scope.allows(material_id):
+                    continue
+                try:
+                    frame = require_retainable_frame(sources, visual)
+                    sources.retain_video_frames(
+                        material_id, [frame], cited_sha256s=[visual.sha256], citation_refs=[run.run_id],
+                    )
+                except VisualSourceUnsupported:
+                    continue  # the answer may cite a visible frame whose source forbids retention
+                except (KnowledgeError, OSError) as error:
+                    log.error("Retaining a cited frame of answer %s failed: %s",
+                              run.run_id, error_note(error))
+
+    async def answer_frames(self, chat_id: str) -> list[AnswerFrame]:
+        await self._chat(chat_id)
+        choices = self._frame_pins.for_chat(chat_id, self.kb.library_root)
+        if not choices:
+            return []
+        return await disk_call(self._available_frames, chat_id, choices)
+
+    def _available_frames(self, chat_id: str, choices: Sequence[FrameChoice]) -> list[AnswerFrame]:
+        with self.kb.writing():
+            result: list[AnswerFrame] = []
+            scope = scope_of(SearchRulesStore(self.kb.db, self.kb.settings).chat(chat_id))
+            for choice in choices:
+                try:
+                    self._checked_pin_frame(chat_id, choice, scope)
+                except (KnowledgeError, OSError):
+                    continue
+                result.append(choice.view())
+            return result
+
+    def _checked_pin_frame(self, chat_id: str, choice: FrameChoice, scope: SourceScope | None) -> None:
+        message = self.repo.message(chat_id, choice.message_id)
+        if (choice.library_root != self.kb.library_root or message is None
+                or message.role != "assistant" or message.state != "done"):
+            raise ChatConflict("This answer no longer has that frame available.", "FRAME_UNAVAILABLE")
+        if scope is not None and not scope.allows(choice.visual.locator.material_id):
+            raise ChatConflict("This chat no longer has access to the frame’s material.", "FRAME_UNAVAILABLE")
+        try:
+            require_retainable_frame(self._sources(), choice.visual)
+        except (KnowledgeError, OSError) as error:
+            raise ChatConflict(
+                "The source no longer permits pinning this frame.", "FRAME_UNAVAILABLE",
+            ) from error
+
+    async def pin_answer_frame(self, chat_id: str, message_id: str, frame_id: str) -> AnswerFrame:
+        await self._chat(chat_id)
+        choice = next((item for item in self._frame_pins.for_chat(chat_id, self.kb.library_root)
+                       if item.message_id == message_id and item.visual.visual_id == frame_id), None)
+        if choice is None:
+            raise ChatConflict("This frame is no longer available to pin.", "FRAME_EXPIRED")
+        await disk_call(self._pin_frame, chat_id, choice)
+        choice.pinned = True
+        return choice.view()
+
+    def _pin_frame(self, chat_id: str, choice: FrameChoice) -> None:
+        with self.kb.writing():
+            scope = scope_of(SearchRulesStore(self.kb.db, self.kb.settings).chat(chat_id))
+            self._checked_pin_frame(chat_id, choice, scope)
+            frame = choice.visual.linked_frame
+            assert frame is not None
+            try:
+                self._sources().pin_video_frame(choice.visual.locator.material_id, frame)
+            except VisualSourceUnsupported as error:
+                raise ChatConflict(error.message, "FRAME_UNAVAILABLE") from error
+            except OSError as error:
+                raise ChatConflict(
+                    "SKAZ couldn’t save this frame. Try again.", "FRAME_WRITE_FAILED",
+                ) from error
 
     async def _authorize_visuals(
         self,
@@ -971,7 +1067,11 @@ class ChatService:
     def _start(self, chat: Chat, engine: AgentEngine, answer: Message, question: Message,
                prior: Sequence[Message], *, visuals: tuple[AuthorizedVisualPayload, ...] = ()) -> None:
         now = time.monotonic()
-        run = _Run(chat.id, answer.id, engine, answer, saved_at=now, started_at=now, visuals=visuals)
+        has_linked_frames = any(item.linked_frame is not None for item in visuals)
+        run = _Run(
+            chat.id, answer.id, engine, answer, saved_at=now, started_at=now, visuals=visuals,
+            visual_library=self.kb.library_root if has_linked_frames else None,
+        )
         self._runs[chat.id] = run
         self._reserved.discard(chat.id)
         run.task = asyncio.create_task(self._drive(run, chat, question, list(prior)),
@@ -1406,6 +1506,12 @@ class ChatService:
                 cite = await disk_call(resolver.cite, output)
                 if cite is not None:
                     self._add_part(run, cite)
+            elif isinstance(output, FrameToken):
+                visual = next((item for item in run.visuals
+                               if item.visual_id == output.visual_id and item.linked_frame is not None), None)
+                if visual is not None:
+                    run.cited_frames[visual.visual_id] = visual
+                    self._append_text(run, frame_citation(visual))
             elif isinstance(output, PageToken):
                 page = await disk_call(resolver.page, output)
                 if page is not None:
@@ -1514,12 +1620,17 @@ class ChatService:
                     if message.parts:
                         updates["last_preview"] = preview(message.parts)
                 await disk_call(self.repo.save_message, message, updates)
+                if state == "done" and run.cited_frames and not run.deleted:
+                    await disk_call(self._retain_answer_frames, run)
                 # A part changed during the awaits above (e.g. Undo of a «Я» edit, ``update_part``): save
                 # the run's latest message — no await between the last check and dropping the run.
                 while run.message is not message:
                     message = replace(run.message, state=state, failure=failure)
                     run.message = message
                     await disk_call(self.repo.save_message, message)
+                if (state == "done" and not self._closing and not run.deleted
+                        and run.visual_library is not None):
+                    self._frame_pins.add(run.visual_library, run.chat_id, message.id, run.visuals)
         except Exception as error:
             log.error("Saving the end of chat answer %s failed: %s", run.run_id, error_note(error))
         finally:
@@ -1566,11 +1677,11 @@ class ChatService:
 
     async def stop(self, chat_id: str, message_id: str) -> Message:
         await self._chat(chat_id)
-        save = self._saves.get((chat_id, message_id))
+        key = (chat_id, message_id)
+        save = self._saves.get(key)
         if save is not None:
-            if (chat_id, message_id) not in self._committing_saves:
-                save.cancel()
-            await asyncio.gather(save, return_exceptions=True)
+            self._cancel_shaping(key, save)
+            await drain_on_cancel(asyncio.gather(save, return_exceptions=True))
         run = self._runs.get(chat_id)
         if run is not None and run.message.id == message_id:
             await self._stop_run(run)
@@ -1594,7 +1705,10 @@ class ChatService:
         """The chat answer an agent run belongs to (tools learn their chat this way)."""
         for run in self._runs.values():
             if run.run_id == run_id:
-                return RunRef(run.run_id, run.chat_id, run.message.id, run.engine.id)
+                return RunRef(
+                    run.run_id, run.chat_id, run.message.id, run.engine.id,
+                    clarification_message_ids=tuple(message.id for message in run.absorbed),
+                )
         return None
 
     async def _stop_run(self, run: _Run) -> None:
@@ -1617,10 +1731,11 @@ class ChatService:
         """App shutdown: every answer ends as interrupted (resumable) with the text it streamed so far,
         within ``close_stop_s`` per answer, before the database closes."""
         self._closing = True
-        saves = list(self._saves.values())
-        for save in saves:
-            save.cancel()
-        await asyncio.gather(*saves, return_exceptions=True)
+        self._frame_pins.close()
+        saves = self._saves.copy()
+        for key, save in saves.items():
+            self._cancel_shaping(key, save)
+        await drain_on_cancel(asyncio.gather(*saves.values(), return_exceptions=True))
         runs = list(self._runs.values())
         for run in runs:
             run.closing = True
@@ -1665,40 +1780,65 @@ class ChatService:
         settings = read_settings(self.kb.settings)
         return AnalysisWriter(self.kb, MaterialReader(self.kb, self._text_layer()), settings.language)
 
-    async def save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str, str | None]:
+    def _cancel_shaping(self, key: tuple[str, str], task: asyncio.Task[_SaveResult]) -> None:
+        # A commit must finish its backlink. A shaping turn already unwinding must finish its interrupt.
+        if key not in self._committing_saves and not task.cancelling():
+            task.cancel()
+
+    async def save_message(self, chat_id: str, message_id: str) -> _SaveResult:
         """The answer as an analysis page; a repeated (also a concurrent) save is 409 ``ALREADY_SAVED``
         naming the page the first one wrote. The notice discloses alternate use and omissions."""
-        key = (chat_id, message_id)
-        pending = self._saves.get(key)
         if self._closing:
             raise ChatConflict("SKAZ is closing. Try again after restart.", "CLOSING")
-        task = pending or asyncio.create_task(self._save_message(chat_id, message_id))
-        self._saves[key] = task
+        key = (chat_id, message_id)
+        task = self._saves.get(key)
+        first = task is None
+        if task is None:
+            task = asyncio.create_task(self._save_message(chat_id, message_id))
+            self._saves[key] = task
+
+            def settled(done: asyncio.Task[_SaveResult]) -> None:
+                self._saves.pop(key)
+                if not done.cancelled():
+                    error = done.exception()  # the caller may already have left
+                    if error is not None and not isinstance(error, KnowledgeError):
+                        log.error("Saving chat answer %s failed: %s", message_id, error_note(error))
+
+            task.add_done_callback(settled)
         try:
-            if pending is None:
-                return await task
-            page_id, *_ = await asyncio.shield(task)
-            raise ChatConflict("This answer is already saved in the wiki.", "ALREADY_SAVED",
-                               saved_page_id=page_id)
+            result = await asyncio.shield(task)
         except asyncio.CancelledError:
             current = asyncio.current_task()
             if current and current.cancelling():
+                if first:
+                    self._cancel_shaping(key, task)
                 raise
             raise ChatConflict("Wiki shaping was cancelled.", "CANCELLED") from None
-        finally:
-            if pending is None:
-                self._saves.pop(key, None)
+        if first:
+            return result
+        raise ChatConflict("This answer is already saved in the wiki.", "ALREADY_SAVED",
+                           saved_page_id=result[0])
 
-    async def _shape_turn(self, engine_id: EngineId, model: str | None, effort: str | None,
+    def _shaping_model(self, engine: EngineId, model: str | None) -> tuple[str | None, str]:
+        """The requested model, or the default reported at the turn's engine check."""
+        if model and not (engine == "claude_code" and model == "default"):
+            return model, f"{ENGINE_NAMES[engine]} ({model})"
+        # A catalog lists choices. Its first entry need not be the engine's current model.
+        view = self.registry.last_view(engine)
+        current = view.current_model if view and view.state == "ready" else None
+        detail = f"reported as {current}" if current else "model not reported"
+        return current, f"{ENGINE_NAMES[engine]} (engine default, {detail})"
+
+    async def _shape_turn(self, engine: AgentEngine, model: str | None, effort: str | None,
                           edit: shaping.AnalysisEdit) -> tuple[str, Failed | None]:
-        engine = await self.registry.require(engine_id)
-        await self._check_model(engine_id, model, effort)
+        await self._check_model(engine.id, model, effort)
         turn = AgentTurn(new_id("shape"), (TurnMessage("user", edit.prompt),), shaping.INSTRUCTIONS,
                          tools=None, model=model, effort=effort, response_schema=shaping.SCHEMA)
         try:
             result = await collect(engine.run(turn))
         except asyncio.CancelledError:
-            await engine.interrupt(turn.run_id)
+            with contextlib.suppress(Exception):
+                await engine.interrupt(turn.run_id)
             raise
         except Exception as error:
             raise AnalysisRefused("The agent stopped while shaping the wiki page. Try again.") from error
@@ -1709,7 +1849,9 @@ class ChatService:
         primary = message.engine or chat.engine
         model = message.model if message.engine else chat.model
         effort = message.effort if message.engine else chat.effort
-        text, failure = await self._shape_turn(primary, model, effort, edit)
+        engine = await self.registry.require(primary)
+        chat_model, _ = self._shaping_model(primary, model)
+        text, failure = await self._shape_turn(engine, model, effort, edit)
         if failure is None:
             return text, None
         if failure.kind != "limit" or failure.transient:
@@ -1717,18 +1859,17 @@ class ChatService:
         settings = await disk_call(read_settings, self.kb.settings)
         alternate = cast(EngineId, settings.engine or self.registry.default())
         limit = f"Chat model reached its limit. {failure.message}"
-        if alternate == primary:
-            view = await self.registry.known_view(primary)
-            default = view.current_model or (view.models[0].id if view.models else None)
-            chat_model = model or default
-            wiki_model = settings.model or default
-            if not chat_model or not wiki_model or chat_model == wiki_model:
-                raise ChatConflict(limit + " No distinct wiki model is available.", "ENGINE_LIMIT")
         if alternate in await disk_call(read_engine_pauses, self.kb.settings):
             raise ChatConflict(limit + " The wiki agent is paused on a quota limit.", "ENGINE_LIMIT")
-        label = ENGINE_NAMES[alternate] + (f" ({settings.model})" if settings.model else "")
+        label = f"{ENGINE_NAMES[alternate]} ({settings.model or 'engine default'})"
         try:
-            text, failure = await self._shape_turn(alternate, settings.model, settings.effort, edit)
+            wiki_engine = await self.registry.require(alternate)
+            wiki_model, label = self._shaping_model(alternate, settings.model)
+            if alternate == primary and (not chat_model or not wiki_model or chat_model == wiki_model):
+                raise ChatConflict(limit + " No distinct wiki model is available.", "ENGINE_LIMIT")
+            text, failure = await self._shape_turn(wiki_engine, settings.model, settings.effort, edit)
+        except ChatConflict:
+            raise
         except KnowledgeError as error:
             raise ChatConflict(f"{limit} Wiki LLM {label}: {error.message}", "WIKI_UNAVAILABLE") from error
         if failure is not None:
@@ -1736,7 +1877,7 @@ class ChatService:
             raise ChatConflict(f"{limit} Wiki LLM {label}: {failure.message}", code)
         return text, label
 
-    async def _save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str, str | None]:
+    async def _save_message(self, chat_id: str, message_id: str) -> _SaveResult:
         chat = await self._chat(chat_id)
         message = await self._message(chat_id, message_id)
         if message.role != "assistant" or message.state != "done":

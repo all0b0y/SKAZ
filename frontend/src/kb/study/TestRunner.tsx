@@ -278,7 +278,12 @@ function TestResult({ part, busy, onRetake, onReview }: {
           return (
             <li key={row.id} className={`kb-st-sr kb-st-sr--${kind}`}>
               <Icon name={icon} size={15} label={said} />
-              <span>{hit?.q.question ?? 'Question removed'}</span>
+              <div className="kb-st-sr__question">
+                <span>{hit?.q.question ?? 'Question removed'}</span>
+                {hit && isAgentBasis(hit.q) && (
+                  <p className="kb-st-basis" data-basis="agent">{NOT_FROM_MATERIALS}</p>
+                )}
+              </div>
               {hit && <Button size="sm" onClick={() => onReview(hit.i)}>Review</Button>}
             </li>
           );

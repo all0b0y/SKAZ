@@ -5,7 +5,7 @@ import { errorText } from '../api/client';
 import { Icon, IconButton, useIconPlay } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { agentOf, answeringModel, startingChoice } from '../state/agents';
-import { isAnswering, isLocal, type AgentChoice, type ChatsData } from '../state/chats';
+import { backgroundActivity, isLocal, latestStreamingAnswer, type AgentChoice, type ChatsData } from '../state/chats';
 import { partsOf } from '../api/permissions';
 import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
 import { AgentPicker, EffortPicker } from './AgentPicker';
@@ -26,7 +26,7 @@ import { useSelection, useSelectionStore } from '../chat/select/context';
 import { QUICK_TEXT, type QuickAsk } from '../chat/select/SelectionBar';
 import { SelectionPanel } from '../chat/select/WhereFrom';
 import { AttachmentDraftStrip } from './attachmentDrafts041/AttachmentDraftStrip';
-import { attachmentSendBlocker, NEW_CHAT_DRAFT, useAttachmentDraft, type DraftAttachment, type DraftFile } from './attachmentDrafts041/draft';
+import { attachmentSendBlocker, canAddAttachmentToWiki, NEW_CHAT_DRAFT, useAttachmentDraft, type DraftAttachment, type DraftFile } from './attachmentDrafts041/draft';
 import { prepareDraftSelection, prepareSpeechFile } from './attachmentDrafts041/nativeIntake';
 import { VisualFallbackCard } from './visualFallback041/VisualFallbackCard';
 import {
@@ -44,6 +44,8 @@ import type {
   VisualSourceKind,
   VisualSourceLocator,
 } from './visualFallback041/types';
+
+const DISPLAY_PREFLIGHT_DELAY_MS = 300;
 
 function seamFromPreflight(res: KbVisualPreflightResponse): { seam: VisualFallbackSeam; locator: VisualSourceLocator } {
   const decision: VisualCapabilityDecision = {
@@ -74,6 +76,7 @@ function seamFromPreflight(res: KbVisualPreflightResponse): { seam: VisualFallba
       provider: m.provider,
     })),
     reasonCode: (res.reason_code as UnsupportedVisualReason | null) ?? undefined,
+    customTitle: res.title,
     customDetail: res.detail,
   });
   return { seam, locator };
@@ -151,9 +154,11 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
   /** The card of the paste just made: ⌘Z right after it puts the text into the field instead. */
   const lastPaste = useRef<string | null>(null);
 
-  const open = useChats((s) => (chatId ? s.chats[chatId]?.chat ?? null : null));
-  const answering = isAnswering(open);
-  const streaming = [...(open?.messages ?? [])].reverse().find((m) => m.role === 'assistant' && m.state === 'streaming') ?? null;
+  const entry = useChats((s) => chatId ? s.chats[chatId] : undefined);
+  const open = entry?.chat ?? null;
+  const background = backgroundActivity(entry);
+  const streaming = background ? null : latestStreamingAnswer(open);
+  const answering = background ? background.state === 'answering' : !!streaming;
   // An agent question waits (Q-A2): the field stays free — a message of your own answers it instead.
   const questionWaits = !!streaming && partsOf(streaming).some((p) => p.type === 'question' && p.status === 'pending');
   const blocked = answering && !questionWaits;
@@ -351,41 +356,53 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
   const activeFallback = cachedFallback?.requestKey === displayedKey ? cachedFallback : null;
 
   useEffect(() => {
-    if (sending) return;
-    if (!paneActive || !hasVisualCandidate || !choice) {
+    if (sending || !paneActive) return;
+    if (!hasVisualCandidate || !choice) {
       setFallbacksByDraft((prev) => clearDraftFallback(prev, key));
       return;
     }
     let cancelled = false;
-    void client.call('POST /kb/chats/visual-preflight', {
-      body: {
-        chat_id: chatId,
-        engine: choice.engine,
-        model: choice.model,
-        text: draftSnapshot.text,
-        mentions: draftSnapshot.mentions,
-        quotes: draftSnapshot.quotes,
-        attachments: readyAttachmentIds,
-        context: openContext(),
-      },
-    }).then((res) => {
-      if (cancelled) return;
-      if (!res.requires_visual || res.supported) {
-        setFallbacksByDraft((prev) => clearDraftFallback(prev, key));
-        return;
-      }
-      const { seam, locator } = seamFromPreflight(res);
-      setFallbacksByDraft((prev) => setDraftFallback(prev, key, {
-        seam,
-        draftText: draftSnapshot.text,
-        attachmentKeys: readyAttachmentKeys,
-        locator,
-        requestKey: displayedKey,
-      }));
-    }).catch(() => {
-      // Send revalidates visual requests on the server.
-    });
-    return () => { cancelled = true; };
+    // Display can wait for a typing pause. Submit checks its own snapshot immediately.
+    const timer = window.setTimeout(() => {
+      if (draftState().getDraft(key).sending) return;
+      void client.call('POST /kb/chats/visual-preflight', {
+        body: {
+          chat_id: chatId,
+          engine: choice.engine,
+          model: choice.model,
+          text: draftSnapshot.text,
+          mentions: draftSnapshot.mentions,
+          quotes: draftSnapshot.quotes,
+          attachments: readyAttachmentIds,
+          context: openContext(),
+        },
+      }).then((res) => {
+        if (cancelled) return;
+        if (!res.requires_visual || res.supported) {
+          setFallbacksByDraft((prev) => {
+            const refusal = prev[key];
+            // Discovery can still succeed after the renderer failed on this exact draft.
+            return res.requires_visual && refusal?.fromSend && refusal.requestKey === displayedKey
+              ? prev : clearDraftFallback(prev, key);
+          });
+          return;
+        }
+        const { seam, locator } = seamFromPreflight(res);
+        setFallbacksByDraft((prev) => setDraftFallback(prev, key, {
+          seam,
+          draftText: draftSnapshot.text,
+          attachmentKeys: readyAttachmentKeys,
+          locator,
+          requestKey: displayedKey,
+        }));
+      }).catch(() => {
+        // Send revalidates visual requests on the server.
+      });
+    }, DISPLAY_PREFLIGHT_DELAY_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [
     paneActive,
     sending,
@@ -393,6 +410,7 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
     key,
     chatId,
     choice,
+    draftState,
     draftSnapshot,
     readyAttachmentIds,
     readyAttachmentKeys,
@@ -477,7 +495,7 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
     if (textOnly && (!mayNeedVisual || !fallback?.seam.textOnlyAvailable || resolveComposerSubmitGate({
       requiresVisual: true, seam: fallback.seam, explicitTextOnlyChoice: true,
     }).action !== 'send_text_only')) return;
-    if (!textOnly && fallback?.seam.unsupported) {
+    if (!textOnly && fallback?.seam.unsupported && !fallback.fromSend) {
       chooseModelRef.current?.focus();
       return;
     }
@@ -581,13 +599,23 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
         draftChatId: chatId,
         initialAgent: choice,
         expectedTarget: mayNeedVisual && choice ? choice : undefined,
-        onDraftChatActivated: (createdId) => {
+        onDraftChatCreated: (createdId) => {
           draftState().move(key, createdId);
           owner = createdId;
         },
       });
       if (!result.ok) {
-        draftState().setError(owner, result.error);
+        const refusal = result.visualRefusal;
+        if (refusal && refusal.engine === choice?.engine && refusal.model_id === choice.model) {
+          const { seam, locator } = seamFromPreflight(refusal);
+          const attachmentKeys = ready.map((item) => item.key);
+          setFallbacksByDraft((prev) => setDraftFallback(prev, owner, {
+            seam, locator, draftText: text, attachmentKeys, fromSend: true,
+            requestKey: admissionKey(text, value, input.attachments, attachmentKeys),
+          }));
+        } else {
+          draftState().setError(owner, result.error);
+        }
         return;
       }
       submittedNodes = [];
@@ -598,7 +626,7 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
       draftState().update(owner, (items) => items.filter((item) => !sentKeys.has(item.key)));
       // New materials are held out of the wiki until the successful send.
       for (const a of ready) {
-        if (a.source !== 'existing' && !a.alreadyInLibrary && a.inWiki) {
+        if (a.inWiki && canAddAttachmentToWiki(a)) {
           ingestWhenReady(client, a.materialId!, a.materialReady, (detail) => {
             draftState().setError(owner, `“${a.name}” is saved to Materials but couldn’t go to the wiki yet: ${detail} You can add it from Materials later.`);
           });
@@ -732,7 +760,9 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
   const focusEditor = useCallback(() => editorRef.current?.focus({ preventScroll: true }), []);
   const toggleWiki = (itemKey: string) => {
     if (canChangeDraft()) {
-      setAttachments((list) => list.map((a) => (a.key === itemKey ? { ...a, inWiki: !a.inWiki } : a)));
+      setAttachments((list) => list.map((a) => a.key === itemKey && canAddAttachmentToWiki(a)
+        ? { ...a, inWiki: !a.inWiki }
+        : a));
     }
   };
   const removeAttachment = (itemKey: string) => {

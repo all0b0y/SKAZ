@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { kbBridgeHandlers } from '../../../../../electron/kbBridge';
 import type { NativeIntakeApi, TrustedMaterialSelection } from '../../../api/bridge';
+import type { KbVisualPreflightRequest, KbVisualPreflightResponse } from '../../../api/kb/types.gen';
 import { LOCAL_VIDEO_AUDIO_ONLY_NOTICE } from '../../materials/addItems';
+import { fragment } from '../../test/fakeKb';
 import { chatWorld } from '../../test/fixtures';
 import { renderKb } from '../../test/renderKb';
 import { ITEMS_MIME } from '../../ui/listSelection/dnd';
@@ -70,6 +74,271 @@ const videoPrompt = (name: string) => screen.findByRole('group', { name: `Import
 const speechAdded = (id: string) => ({ ok: true, status: 201, data: { material_id: id, status: 'ready' } }) as const;
 
 describe('attachments in the production chat', () => {
+  it.each([
+    { source: 'clipboard', hasText: false, document: 'none' },
+    { source: 'picker', hasText: false, document: 'default' },
+    { source: 'drop', hasText: false, document: 'opt-out' },
+    { source: 'picker', hasText: true, document: 'none' },
+  ] as const)('sends the saved image from $source (text: $hasText, document: $document) with the intended wiki choices', async ({
+    source, hasText, document,
+  }) => {
+    const user = userEvent.setup();
+    const nativeIntake = nativeBridge();
+    const imageName = source === 'clipboard' ? 'Screenshot.png' : 'chart.png';
+    const imageId = 'saved-chart';
+    const documentName = 'notes.docx';
+    const documentId = 'saved-notes';
+    const caption = 'Describe this chart';
+    const imageSelection: TrustedMaterialSelection = {
+      ...diskSelection(imageName), ext: 'png', formatId: 'png', category: 'image', route: 'image',
+      mimeType: 'image/png', source: source === 'picker' ? 'picker' : 'drop', nativePreviewable: true,
+    };
+    const documentSelection = { ...diskSelection(documentName), source: imageSelection.source };
+    const selections = document === 'none' ? [imageSelection] : [imageSelection, documentSelection];
+    const choose = deferred<Awaited<ReturnType<NativeIntakeApi['chooseMaterialFiles']>>>();
+    const finishImage = deferred<void>();
+    nativeIntake.chooseMaterialFiles.mockReturnValue(choose.promise);
+    nativeIntake.droppedMaterialFiles.mockImplementation(async ([file]) => ({
+      accepted: selections.filter((selection) => selection.name === file?.name), rejected: [],
+    }));
+    const { fake, services } = renderKb({ world: chatWorld(), bridge: { nativeIntake } });
+    const chat = fake.world.chats.find(({ id }) => id === 'c1')!;
+    const priorMessages = chat.messages.length;
+    const material = fake.world.materials[0]!;
+    nativeIntake.importSelection.mockImplementation(async ({ selectionId }) => {
+      const isImage = selectionId !== documentName;
+      if (isImage) await finishImage.promise;
+      const id = isImage ? imageId : documentId;
+      const fragments = !isImage || hasText ? [fragment(id, 1, 'A fixture paragraph.')] : [];
+      const saved = {
+        ...material, id, title: isImage ? imageName : documentName, kind: isImage ? 'image' : 'docx',
+        fragment_count: fragments.length, fragments,
+      } as const;
+      fake.world.materials.push(saved);
+      return { ok: true, status: 201, data: { material: saved, already_in_library: false } };
+    });
+    const originalRequest = fake.requestMock.getMockImplementation()!;
+    const preflights: KbVisualPreflightRequest[] = [];
+    fake.requestMock.mockImplementation((request) => {
+      if (request.method === 'POST' && request.path === '/kb/chats/visual-preflight') {
+        const body = request.body as KbVisualPreflightRequest;
+        preflights.push(body);
+        const response: KbVisualPreflightResponse = {
+          requires_visual: true, supported: true, engine: body.engine!, model_id: body.model!, state: 'supported',
+          reason_code: null, title: null, detail: null, text_only_available: hasText,
+          draft_preserved: true, locator: null, compatible_models: [],
+        };
+        return Promise.resolve({ ok: true, status: 200, data: response });
+      }
+      if (hasText && request.method === 'POST' && request.path === `/kb/materials/${imageId}/ingest`) {
+        fake.calls.push(request);
+        return Promise.resolve({ ok: false, status: 503, detail: 'Fixture wiki service unavailable.' });
+      }
+      return originalRequest(request);
+    });
+    const draft = () => services.composer.getState().attachmentDrafts.getState();
+    const wikiCalls = () => fake.calls.filter(({ method, path }) => method === 'POST' && path.endsWith('/ingest'))
+      .map(({ path }) => path);
+    const send = () => screen.getByRole('button', { name: 'Send' });
+
+    await openA(user);
+    if (source === 'clipboard') {
+      const image = new File(['fixture'], imageName, { type: 'image/png' });
+      Object.defineProperty(image, 'arrayBuffer', { value: async () => new ArrayBuffer(4) });
+      expect(nativeIntake.importSelection).not.toHaveBeenCalled();
+      fireEvent.paste(editor(), { clipboardData: { getData: () => caption, items: [], files: [image] } });
+    } else {
+      fireEvent.input(editor(), { target: { innerHTML: caption } });
+      if (source === 'picker') {
+        await pickFiles(user);
+        expect(nativeIntake.importSelection).not.toHaveBeenCalled();
+        await act(async () => choose.resolve({ accepted: selections, rejected: [] }));
+      } else {
+        const dataTransfer = dropData(...selections.map(({ name }) => name));
+        fireEvent.dragEnter(conversation(), { dataTransfer });
+        expect(nativeIntake.importSelection).not.toHaveBeenCalled();
+        fireEvent.drop(conversation(), { dataTransfer });
+      }
+    }
+    const imageButton = await within(row()).findByRole('button', { name: `View ${imageName}` });
+    expect(imageButton.closest('li')).toHaveAttribute('data-state', 'adding');
+    await user.click(imageButton);
+    const details = () => within(screen.getByRole('dialog', { name: imageName }));
+    expect.soft(details().queryByRole('checkbox', { name: 'In wiki' })).toBeNull();
+    await act(async () => finishImage.resolve());
+    await waitFor(() => expect(imageButton.closest('li')).toHaveAttribute('data-state', 'ready'));
+    const savedImage = draft().getDraft('c1').attachments[0];
+    expect(savedImage).toMatchObject({ materialId: imageId, thumbnail: { type: 'image/png' } });
+    expect.soft(savedImage?.inWiki).toBe(hasText);
+    if (hasText) expect(details().getByRole('checkbox', { name: 'In wiki' })).toBeChecked();
+    else expect.soft(details().queryByRole('checkbox', { name: 'In wiki' })).toBeNull();
+    await user.keyboard('{Escape}');
+    if (document !== 'none') {
+      await user.click(within(row()).getByRole('button', { name: `View ${documentName}` }));
+      const wiki = within(screen.getByRole('dialog', { name: documentName })).getByRole('checkbox', { name: 'In wiki' });
+      expect(wiki).toBeChecked();
+      if (document === 'opt-out') {
+        await user.click(wiki);
+        expect(wiki).not.toBeChecked();
+      }
+      await user.keyboard('{Escape}');
+    }
+    if (source === 'drop') {
+      // Simulate a stale checked value arriving after eligibility was resolved.
+      act(() => draft().update('c1', (items) => items.map((item) => item.materialId === imageId ? { ...item, inWiki: true } : item)));
+    }
+
+    const attachments = document === 'none' ? [imageId] : [imageId, documentId];
+    expect(nativeIntake.importSelection.mock.calls.map(([input]) => input)).toEqual(
+      (source === 'clipboard' ? ['clip'] : selections.map(({ selectionId }) => selectionId))
+        .map((selectionId) => ({ selectionId, folderId: expect.any(String), toWiki: false })),
+    );
+    expect(outbound(fake.calls)).toEqual([]);
+    expect(wikiCalls()).toEqual([]);
+    expect(chat.messages).toHaveLength(priorMessages);
+
+    await user.click(send());
+    await waitFor(() => expect(draft().getDraft('c1').attachments).toEqual([]));
+    expect(preflights).toContainEqual(expect.objectContaining({ chat_id: 'c1', text: caption, attachments }));
+    expect(outbound(fake.calls)).toEqual([expect.objectContaining({
+      path: '/kb/chats/c1/messages', body: expect.objectContaining({ text: caption, attachments }),
+    })]);
+    expect(chat.messages.slice(priorMessages).filter(({ role }) => role === 'user')).toEqual([
+      expect.objectContaining({ input: expect.objectContaining({ text: caption, attachments }) }),
+    ]);
+    expect.soft(wikiCalls()).toEqual([
+      ...(hasText ? [`/kb/materials/${imageId}/ingest`] : []),
+      ...(document === 'default' ? [`/kb/materials/${documentId}/ingest`] : []),
+    ]);
+    expect(fake.world.jobs.filter(({ material_id }) => material_id === documentId))
+      .toHaveLength(document === 'default' ? 1 : 0);
+    if (hasText) expect(await screen.findByText(/Fixture wiki service unavailable/)).toBeVisible();
+    else expect.soft(screen.queryByText(/is saved to Materials but couldn’t go to the wiki yet/)).toBeNull();
+  });
+
+  it('bounds overlapping drops and keeps same-name and unresolved files attributable to their own rows', async () => {
+    const user = userEvent.setup();
+    const nativeIntake = nativeBridge();
+    const files = ['same.docx', 'missing.docx', 'same.docx', 'notes.docx', 'other.docx', 'last.docx']
+      .map((name, i) => new File([String(i)], name));
+    const admissions = files.map(() => deferred<void>());
+    const imports = deferred<void>();
+    let pending = 0;
+    let peak = 0;
+    nativeIntake.droppedMaterialFiles.mockImplementation(async ([file]) => {
+      const index = files.indexOf(file!);
+      peak = Math.max(peak, ++pending);
+      await admissions[index]!.promise;
+      if (index === 1) {
+        pending--;
+        return { accepted: [], rejected: [] };
+      }
+      return { accepted: [{ ...diskSelection(file!.name), selectionId: `file-${index}` }], rejected: [] };
+    });
+    const importSelection = nativeIntake.importSelection.getMockImplementation()!;
+    nativeIntake.importSelection.mockImplementation(async (request) => {
+      await imports.promise;
+      pending--;
+      return importSelection(request);
+    });
+    const { fake, services } = renderKb({ world: chatWorld(), bridge: { nativeIntake } });
+    await openA(user);
+    for (const batch of [files.slice(0, 3), files.slice(3)]) {
+      fireEvent.drop(conversation(), { dataTransfer: { types: ['Files'], files: batch } });
+    }
+    const observedAtAdmission = pending;
+    await act(async () => {
+      admissions[0]!.resolve();
+      admissions[2]!.resolve();
+      admissions[3]!.resolve();
+    });
+    const observedDuringImport = nativeIntake.droppedMaterialFiles.mock.calls.length;
+    await act(async () => {
+      for (const admission of admissions) admission.resolve();
+      imports.resolve();
+    });
+    await waitFor(() => expect(row()).not.toHaveTextContent('Preparing'));
+    expect(observedAtAdmission).toBe(4);
+    expect(observedDuringImport).toBe(4);
+    expect(peak).toBe(4);
+    expect(pending).toBe(0);
+    const draft = services.composer.getState().attachmentDrafts.getState().getDraft('c1');
+    expect(draft.attachments.map(({ name, materialId, state }) => [name, materialId, state])).toEqual([
+      ['same.docx', 'file-0', 'ready'],
+      ['missing.docx', null, 'failed'],
+      ['same.docx', 'file-2', 'ready'],
+      ['notes.docx', 'file-3', 'ready'],
+      ['other.docx', 'file-4', 'ready'],
+      ['last.docx', 'file-5', 'ready'],
+    ]);
+    expect(screen.getByRole('alert')).toHaveTextContent('missing.docx: SKAZ couldn’t read');
+    expect(outbound(fake.calls)).toEqual([]);
+  });
+
+  it.each([true, false])('keeps a clipboard HEIC ready and reports the preview result (available: %s)', async (available) => {
+    const user = userEvent.setup();
+    const bytes = Uint8Array.from(readFileSync('electron/nativeIntake041/fixtures/sample-chart.heic'));
+    const png = Uint8Array.from(readFileSync('electron/nativeIntake041/fixtures/sample-chart.png'));
+    const fetchFixture = vi.fn<typeof fetch>(async (url) => {
+      if (String(url).includes('/kb/materials/clipboard-image?')) {
+        return Response.json({ material: { id: 'pasted-chart', status: 'ready' } }, { status: 201 });
+      }
+      if (String(url).endsWith('/kb/materials/image-preview')) {
+        return available
+          ? new Response(png, { headers: { 'Content-Type': 'image/png' } })
+          : Response.json({ detail: 'Fixture preview is unavailable' }, { status: 422 });
+      }
+      throw new Error(`Unexpected fixture request: ${String(url)}`);
+    });
+    const nativeIntake = kbBridgeHandlers({
+      handle: () => ({ port: 5432, token: 'fixture' }),
+      fetch: fetchFixture,
+      showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
+      showSaveDialog: async () => ({ canceled: true }),
+      writeTextFile: () => {},
+      fileSize: () => null,
+      realPath: () => null,
+      readHeader: () => null,
+      documentsDir: '/fixture/documents',
+      downloadsDir: '/fixture/downloads',
+      materialExtensions: [],
+      newId: () => 'clipboard-selection',
+    });
+    const { fake, services } = renderKb({ world: chatWorld(), bridge: {
+      nativeIntake: {
+        chooseMaterialFiles: nativeIntake.chooseMaterialBatch,
+        droppedMaterialFiles: async () => ({ accepted: [], rejected: [] }),
+        validateClipboardImage: async (input) => nativeIntake.validateClipboardImage(input),
+        importSelection: nativeIntake.importSelection,
+        imagePreview: nativeIntake.imagePreview,
+      },
+    } });
+    await openA(user);
+    const image = new File([bytes], 'sample-chart.heic', { type: 'image/heic' });
+    Object.defineProperty(image, 'arrayBuffer', { value: async () => bytes.buffer });
+    fireEvent.paste(editor(), { clipboardData: { getData: () => '', items: [], files: [image] } });
+    const card = await within(row()).findByRole('button', { name: 'View sample-chart.heic' });
+    await waitFor(() => expect(card.closest('li')).toHaveAttribute('data-state', 'ready'));
+    const [item] = services.composer.getState().attachmentDrafts.getState().getDraft('c1').attachments;
+    expect(item).toMatchObject({ materialId: 'pasted-chart', state: 'ready' });
+    expect(Buffer.compare(fetchFixture.mock.calls[0]![1]!.body as Buffer, Buffer.from(bytes))).toBe(0);
+    if (available) {
+      expect(item?.thumbnail).toMatchObject({ type: 'image/png', size: png.byteLength });
+    } else {
+      await user.click(card);
+      const detail = within(screen.getByRole('dialog', { name: image.name }));
+      await waitFor(() => expect(detail.getByText('Preview unavailable.')).toBeVisible());
+    }
+    expect(fetchFixture).toHaveBeenCalledTimes(2);
+    expect(fetchFixture).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:5432/kb/materials/image-preview',
+      expect.objectContaining({ body: JSON.stringify({ material_id: 'pasted-chart' }) }),
+    );
+    expect(await nativeIntake.imagePreview('pasted-chart')).toMatchObject({ ok: false, status: 403 });
+    expect(fetchFixture).toHaveBeenCalledTimes(2);
+    expect(outbound(fake.calls)).toEqual([]);
+  });
+
   it('drops over history, settles in the original draft after A → B, and retains it through close and reopen', async () => {
     const user = userEvent.setup();
     const nativeIntake = nativeBridge();
@@ -425,5 +694,65 @@ describe('attachments in the production chat', () => {
     act(() => fresh.services.chats.getState().open('c6'));
     expect(editor()).toBeEmptyDOMElement();
     expect(screen.queryByRole('list', { name: 'Draft attachments' })).toBeNull();
+  });
+
+  it('restores a refused first send to the created chat after a tab switch and retries on that same ID', async () => {
+    const user = userEvent.setup();
+    const nativeIntake = nativeBridge();
+    const { fake, services } = renderKb({ world: chatWorld(), bridge: { nativeIntake } });
+    const side = await openA(user);
+    const creation = deferred<void>();
+    const original = fake.bridge.request;
+    let creates = 0;
+    const attempts: Array<{ path: string; body: unknown }> = [];
+    fake.bridge.request = async (req) => {
+      if (req.method === 'POST' && req.path === '/kb/chats') {
+        creates++;
+        await creation.promise;
+      }
+      if (req.method === 'POST' && /\/messages$/.test(req.path)) {
+        attempts.push({ path: req.path, body: req.body });
+        if (attempts.length < 3) return { ok: false, status: 409, detail: 'Fixture refused the first message' };
+      }
+      return original(req);
+    };
+
+    act(() => services.chats.getState().open(null));
+    fireEvent.drop(conversation(), { dataTransfer: dropData('new-chat.docx') });
+    await waitFor(() => expect(row()).not.toHaveTextContent('Preparing'));
+    await user.click(editor());
+    await user.keyboard('Keep the first question{Enter}');
+    await waitFor(() => expect(creates).toBe(1));
+    await user.click(within(side).getByRole('button', { name: /Transformer paper review/ }));
+    await user.click(editor());
+    await user.keyboard('Keep this other draft');
+    await act(async () => creation.resolve());
+
+    expect(services.chats.getState().currentId).toBe('c6');
+    expect(editor()).toHaveTextContent('Keep this other draft');
+    expect(screen.queryByText('Fixture refused the first message')).toBeNull();
+    expect(attempts).toHaveLength(1);
+    const createdId = attempts[0]!.path.split('/')[3]!;
+    expect(createdId).not.toBe('c6');
+    const created = services.chats.getState().chats[createdId]!.chat!;
+    await user.click(screen.getByRole('tab', { name: created.title }));
+    expect(editor()).toHaveTextContent('Keep the first question');
+    expect(row()).toHaveTextContent('new-chat.docx');
+    expect(screen.getByText('Fixture refused the first message')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(attempts).toHaveLength(2));
+    expect(editor()).toHaveTextContent('Keep the first question');
+    expect(row()).toHaveTextContent('new-chat.docx');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(outbound(fake.calls)).toHaveLength(1));
+    expect(creates).toBe(1);
+    expect(attempts).toEqual(Array.from({ length: 3 }, () => ({
+      path: `/kb/chats/${createdId}/messages`,
+      body: expect.objectContaining({ text: 'Keep the first question', attachments: ['new-chat.docx'] }),
+    })));
+    expect(screen.queryByRole('list', { name: 'Draft attachments' })).toBeNull();
+    await user.click(screen.getByRole('tab', { name: /Transformer paper review/ }));
+    expect(editor()).toHaveTextContent('Keep this other draft');
   });
 });

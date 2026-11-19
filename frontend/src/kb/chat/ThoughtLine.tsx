@@ -204,9 +204,39 @@ function EarlierCallsGroup({
       hoveredRef.current = false;
       if (!focusedRef.current) onOpenChange(false);
     };
+    const release = () => { pointerDownRef.current = false; };
     el.addEventListener('mouseleave', onLeave);
-    return () => el.removeEventListener('mouseleave', onLeave);
+    el.ownerDocument.addEventListener('mouseup', release, true);
+    el.ownerDocument.addEventListener('pointercancel', release, true);
+    return () => {
+      el.removeEventListener('mouseleave', onLeave);
+      el.ownerDocument.removeEventListener('mouseup', release, true);
+      el.ownerDocument.removeEventListener('pointercancel', release, true);
+    };
   }, [onOpenChange]);
+
+  useEffect(() => {
+    const el = familyRef.current;
+    if (!el || !open) return;
+    const doc = el.ownerDocument;
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (el.closest('[hidden], [inert]')) return;
+      // Focus inside owns the key locally. Hover alone gets the unclaimed key after
+      // focused controls and the chat's Find handler have had their turn.
+      if (event.currentTarget === doc && !hoveredRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      focusedRef.current = false;
+      onOpenChange(false);
+    };
+    el.addEventListener('keydown', dismiss);
+    doc.addEventListener('keydown', dismiss);
+    return () => {
+      el.removeEventListener('keydown', dismiss);
+      doc.removeEventListener('keydown', dismiss);
+    };
+  }, [open, onOpenChange]);
 
   return (
     <div
@@ -218,13 +248,6 @@ function EarlierCallsGroup({
         focusedRef.current = false;
         if (!hoveredRef.current) onOpenChange(false);
       }}
-      onKeyDown={(e) => {
-        if (e.key !== 'Escape' || !open) return;
-        e.preventDefault();
-        e.stopPropagation();
-        focusedRef.current = false;
-        onOpenChange(false);
-      }}
     >
       <div className="kb-thought__visible">
         <button
@@ -232,16 +255,14 @@ function EarlierCallsGroup({
           className="kb-thought__earlier-trigger"
           aria-expanded={open}
           aria-controls={earlierId}
-          aria-label={`Show ${earlier.length} earlier tool ${earlier.length === 1 ? 'call' : 'calls'}`}
           onMouseEnter={() => {
             hoveredRef.current = true;
             onOpenChange(true);
           }}
-          onMouseDown={() => {
+          onMouseDown={(event) => {
+            if (event.button !== 0) return;
             pointerDownRef.current = true;
-          }}
-          onMouseUp={() => {
-            pointerDownRef.current = false;
+            focusedRef.current = false;
           }}
           onFocus={() => {
             const fromPointer = pointerDownRef.current;

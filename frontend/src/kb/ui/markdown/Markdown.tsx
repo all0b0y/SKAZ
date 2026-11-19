@@ -24,11 +24,9 @@ export interface MarkdownOptions {
   linkClassName?: string;
   theadClassName?: string;
   /**
-   * G1 heading accents (SKAZ 0.4.1): the decorative mark a host puts before the main (`#`)
-   * headings of this text — currently the chat answer's `//`. Only a host that passes the option
-   * is decorated; deeper headings and every other consumer (wiki blocks, wiki files) keep their
-   * plain headings. The mark must be ink, never text (HeadingMark: aria-hidden, no text node), so
-   * the heading's accessible name, selection text and copies keep exactly its own words.
+   * Decorative mark for populated, document-level level-one headings. The chat answer opts in
+   * with `//`. The mark is aria-hidden and has no text, so names, selections and copies keep
+   * the heading's own words.
    */
   mainHeadingMark?: ReactNode;
 }
@@ -54,6 +52,10 @@ const SKIP = new Set(['EmphasisMark', 'HeaderMark', 'ListMark', 'QuoteMark', 'Co
 
 /** Inline nodes closed by their own marks (`**`, `~~`, `](url)`). */
 const MARKED = new Set(['Emphasis', 'StrongEmphasis', 'Strikethrough', 'Link']);
+
+function isContentChild(parent: SyntaxNode, child: SyntaxNode): boolean {
+  return !SKIP.has(child.name) && !(parent.name === 'Link' && child.name === 'URL');
+}
 
 /** The slots at offsets `from`…`to` (both ends included) that aren't placed yet, marked placed. */
 function take(ctx: Ctx, from: number, to: number): Slot[] {
@@ -91,7 +93,7 @@ function children(node: SyntaxNode, ctx: Ctx, inline: boolean): ReactNode[] {
   while (child) {
     if (inline && child.from >= pos) out.push(text(ctx, pos, child.from, `t${pos}`));
     else if (!inline && child.from > pos) out.push(between(ctx, pos, child.from - 1, `g${pos}`));
-    if (!SKIP.has(child.name) && !(node.name === 'Link' && child.name === 'URL')) out.push(render(child, ctx));
+    if (isContentChild(node, child)) out.push(render(child, ctx));
     pos = child.to;
     child = child.nextSibling;
   }
@@ -126,6 +128,32 @@ function ExternalLink({ href, label, className }: { href: string | null; label: 
     onClick={(e) => { e.preventDefault(); window.open(href, '_blank', 'noopener'); }}>{label}</a>;
 }
 
+function inlineCodeText(raw: string): string {
+  return raw.replace(/^`+|`+$/g, '');
+}
+
+function imageDescription(raw: string): string {
+  return raw.replace(/^!\[|\]\([^)]*\)$/g, '');
+}
+
+/** Look for visible title content in the parse tree before placing any inline slots. */
+function hasHeadingTitle(node: SyntaxNode, src: string): boolean {
+  switch (node.name) {
+    case 'InlineCode': return inlineCodeText(src.slice(node.from, node.to)).trim().length > 0;
+    case 'Image': return imageDescription(src.slice(node.from, node.to)).trim().length > 0;
+    case 'InlineMath': case 'DisplayMath': return mathSource(src.slice(node.from, node.to)).length > 0;
+  }
+  if (!INLINE.has(node.name)) return true;
+
+  let pos = node.from;
+  for (let child = node.firstChild; child; child = child.nextSibling) {
+    if (src.slice(pos, child.from).trim()) return true;
+    if (isContentChild(node, child) && hasHeadingTitle(child, src)) return true;
+    pos = child.to;
+  }
+  return src.slice(pos, node.to).trim().length > 0;
+}
+
 function render(node: SyntaxNode, ctx: Ctx): ReactNode {
   const key = `${node.name}-${node.from}`;
   const slice = ctx.src.slice(node.from, node.to);
@@ -133,18 +161,19 @@ function render(node: SyntaxNode, ctx: Ctx): ReactNode {
   switch (node.name) {
     case 'Document': return inner();
     case 'Paragraph': return <p key={key}>{inner()}</p>;
-    // G1: a host that opted in opens its main heading with the decorative mark; the heading text
-    // stays the only text — the mark is aria-hidden ink — on the one-line baseline layout.
-    case 'ATXHeading1': case 'SetextHeading1': return ctx.mainHeadingMark != null
-      ? <h3 key={key} className={headingLineClass}>{ctx.mainHeadingMark}<span>{inner()}</span></h3>
-      : <h3 key={key}>{inner()}</h3>;
+    case 'ATXHeading1': case 'SetextHeading1': {
+      if (ctx.mainHeadingMark == null || node.parent?.name !== 'Document') return <h3 key={key}>{inner()}</h3>;
+      // Preserve source chips at a bare opener as a standalone block, like chips between paragraphs.
+      if (!hasHeadingTitle(node, ctx.src)) return between(ctx, node.from, node.to, key);
+      return <h3 key={key} className={headingLineClass}>{ctx.mainHeadingMark}<span>{inner()}</span></h3>;
+    }
     case 'ATXHeading2': case 'SetextHeading2': return <h4 key={key}>{inner()}</h4>;
     case 'ATXHeading3': return <h5 key={key}>{inner()}</h5>;
     case 'ATXHeading4': case 'ATXHeading5': case 'ATXHeading6': return <h6 key={key}>{inner()}</h6>;
     case 'Emphasis': return <em key={key}>{inner()}</em>;
     case 'StrongEmphasis': return <strong key={key}>{inner()}</strong>;
     case 'Strikethrough': return <del key={key}>{inner()}</del>;
-    case 'InlineCode': return <code key={key}>{slice.replace(/^`+|`+$/g, '')}</code>;
+    case 'InlineCode': return <code key={key}>{inlineCodeText(slice)}</code>;
     case 'InlineMath': return <MathView key={key} tex={mathSource(slice)} display={false} />;
     case 'DisplayMath': case 'BlockMath': return <MathView key={key} tex={mathSource(slice)} display />;
     case 'BulletList': return <ul key={key}>{inner()}</ul>;
@@ -175,7 +204,7 @@ function render(node: SyntaxNode, ctx: Ctx): ReactNode {
     }
     // Images are not loaded: the model paraphrases untrusted text, and a remote image is a request
     // the user never made. Its description stays as text.
-    case 'Image': return slice.replace(/^!\[|\]\([^)]*\)$/g, '');
+    case 'Image': return imageDescription(slice);
     case 'Table': return <div key={key} className="md__table"><table><tbody>{inner()}</tbody></table></div>;
     case 'TableHeader': return <tr key={key} className={ctx.theadClassName}>{node.getChildren('TableCell').map((c) =>
       <th key={c.from}>{children(c, ctx, true)}</th>)}</tr>;

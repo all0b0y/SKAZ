@@ -37,7 +37,7 @@ function longThread(third: { streaming?: boolean } = {}): KbMessageList {
 }
 type KbMessageList = Array<ReturnType<typeof chatMessage>>;
 
-function mount(opts: { messages?: KbMessageList; streaming?: boolean; secondChat?: boolean } = {}) {
+function mount(opts: { messages?: KbMessageList; streaming?: boolean; secondChat?: boolean; motion?: 'full' | 'off' } = {}) {
   const frames: FrameRequestCallback[] = [];
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { frames.push(cb); return frames.length; });
   vi.stubGlobal('cancelAnimationFrame', vi.fn());
@@ -52,7 +52,7 @@ function mount(opts: { messages?: KbMessageList; streaming?: boolean; secondChat
       chatMessage('sa1', 2, 'assistant', second.created_at, [{ type: 'text', text: 'Единственный ответ с подробностями.' }]),
     ];
   }
-  const rendered = renderKb({ world, prefs: { motion: 'off' } });
+  const rendered = renderKb({ world, prefs: { motion: opts.motion ?? 'off' } });
   return {
     ...rendered,
     frames,
@@ -171,6 +171,89 @@ describe('the production ChatView with the B1 reply-anchor mount', () => {
     expect(activeDotIndex()).toBe(2);
     expect(screen.queryByRole('button', { name: 'Return to the latest message' })).toBeNull();
   }, 20000); // two long-poll delivery cycles (fake events arrive on the ~3 s poll)
+
+  it('captures a smooth ArrowUp flight through the bottom zone without following a streamed update', async () => {
+    const view = mount({ streaming: true, motion: 'full' });
+    const geo = await open([{ id: A1, top: 140 }, { id: A2, top: 560 }, { id: A3, top: 980 }]);
+    land(1000);
+    view.flush();
+    // An actual animation moves on later frames. Deliver its first scroll while still 10px from bottom.
+    geo.scrollTo.mockImplementation(() => {});
+    fireEvent.keyDown(log(), { key: 'ArrowUp' });
+    expect(geo.scrollTo).toHaveBeenLastCalledWith({ top: 485, behavior: 'smooth' });
+    land(990);
+    expect(view.services.chats.getState().getReadingAnchor('c1')).toMatchObject({ scrollTop: 990, stickToBottom: false });
+    expect(log().scrollTop).toBe(990);
+    geo.growTo(1400);
+    view.stream(A3, ' Growth during the flight.');
+    await waitFor(() => expect(log()).toHaveTextContent('Growth during the flight.'), { timeout: 5000 });
+    expect(log().scrollTop).toBe(990);
+
+    land(485);
+    expect(activeDotIndex()).toBe(1);
+    fireEvent.click(returnButton());
+    expect(geo.scrollTo).toHaveBeenLastCalledWith({ top: 1400, behavior: 'smooth' });
+    land(1200);
+    expect(view.services.chats.getState().getReadingAnchor('c1')?.stickToBottom).toBe(true);
+    geo.growTo(1500);
+    view.stream(A3, ' Growth after returning.');
+    await waitFor(() => expect(log()).toHaveTextContent('Growth after returning.'), { timeout: 5000 });
+    expect(log().scrollTop).toBe(1300);
+  }, 20000);
+
+  it('keeps following when the chosen reply already lands at the clamped bottom', async () => {
+    const view = mount({ streaming: true });
+    const geo = await open([{ id: A1, top: 140 }, { id: A2, top: 560 }, { id: A3, top: 1090, height: 80 }]);
+    land(1000);
+    view.flush();
+    fireEvent.click(dots()[2]!);
+    expect(geo.scrollTo).toHaveBeenLastCalledWith({ top: 1015, behavior: 'instant' });
+    // A no-op scroll at the clamped bottom produces no native scroll event.
+    geo.growTo(1400);
+    view.stream(A3, ' Longer newest reply.');
+    await waitFor(() => expect(log()).toHaveTextContent('Longer newest reply.'), { timeout: 5000 });
+    expect(log().scrollTop).toBe(1200);
+  });
+
+  it('follows the new bottom when a smooth Return lands at the pre-stream bottom', async () => {
+    const view = mount({ streaming: true, motion: 'full' });
+    const geo = await open([{ id: A1, top: 140 }, { id: A2, top: 560 }, { id: A3, top: 980 }]);
+    land(485);
+    view.flush();
+    geo.scrollTo.mockImplementation(() => {});
+    fireEvent.click(returnButton());
+    expect(geo.scrollTo).toHaveBeenLastCalledWith({ top: 1200, behavior: 'smooth' });
+    land(750);
+
+    geo.growTo(1400);
+    view.stream(A3, ' Growth during Return.');
+    await waitFor(() => expect(log()).toHaveTextContent('Growth during Return.'), { timeout: 5000 });
+    expect(log().scrollTop).toBe(750);
+
+    // The smooth scroll still targets the original bottom (1200 - 200).
+    land(1000);
+    fireEvent(log(), new Event('scrollend'));
+    expect(log().scrollTop).toBe(1200);
+    expect(view.services.chats.getState().getReadingAnchor('c1')).toMatchObject({ scrollTop: 1200, stickToBottom: true });
+  });
+
+  it('keeps the reader in history when a smooth Return is interrupted', async () => {
+    const view = mount({ motion: 'full' });
+    const geo = await open([{ id: A1, top: 140 }, { id: A2, top: 560 }, { id: A3, top: 980 }]);
+    land(485);
+    view.flush();
+    geo.scrollTo.mockImplementation(() => {});
+    fireEvent.click(returnButton());
+    expect(geo.scrollTo).toHaveBeenLastCalledWith({ top: 1200, behavior: 'smooth' });
+    geo.growTo(1400);
+    land(750);
+    fireEvent(log(), new Event('scrollend'));
+    expect(log().scrollTop).toBe(750);
+    land(1000);
+    fireEvent(log(), new Event('scrollend'));
+    expect(log().scrollTop).toBe(1000);
+    expect(view.services.chats.getState().getReadingAnchor('c1')).toMatchObject({ scrollTop: 1000, stickToBottom: false });
+  });
 
   it('bare ↑/↓ outside fields navigate; the composer, Shift+Arrow and a hidden chat keep their keys', async () => {
     const view = mount();

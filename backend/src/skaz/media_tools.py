@@ -261,15 +261,21 @@ async def local_metadata(path: Path) -> dict[str, Any]:
         raise MediaError("The media information could not be read.") from error
 
 
+def _explain_audio_download(stderr: str) -> str | None:
+    if "requested format is not available" in stderr.lower():
+        return "No audio-only stream is available for this video."
+    return explain_video_failure(stderr)
+
+
 async def download_audio(url: str, directory: Path) -> Path:
     """The best audio track of one video on a supported host (``--no-playlist``, at most 2 GiB)."""
     source = video_source(url)
     await video_metadata(source.url)
     await run_tool([
-        *_ytdlp_args(source.platform), "--max-filesize", str(MAX_MEDIA_BYTES), "-f", "bestaudio/best",
+        *_ytdlp_args(source.platform), "--max-filesize", str(MAX_MEDIA_BYTES), "-f", "bestaudio",
         "--match-filter", "!is_live & !is_upcoming & duration <= 18000",
         "--output", str(directory / "download.%(ext)s"), "--", source.url,
-    ], timeout=3600, explain=explain_video_failure)
+    ], timeout=3600, explain=_explain_audio_download)
     files = [p for p in directory.glob("download.*") if p.suffix not in (".part", ".ytdl")]
     if len(files) != 1 or files[0].stat().st_size > MAX_MEDIA_BYTES:
         raise MediaError("No usable audio track was downloaded.")

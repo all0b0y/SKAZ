@@ -25,6 +25,8 @@ export interface AnchorCaptureOptions {
   messageSelector?: string;
   messageIdAttr?: string;
   bottomThreshold?: number;
+  /** The host can suspend bottom following during explicit reply navigation. */
+  shouldFollow?: (container: HTMLElement) => boolean;
   readingLinePx?: number;
   now?: () => number;
 }
@@ -107,7 +109,7 @@ export function captureReadingAnchor(
   const now = options.now ?? (() => Date.now());
 
   const scrollTop = Math.max(0, container.scrollTop);
-  const stick = isAtBottom(container, bottomThreshold);
+  const stick = options.shouldFollow?.(container) ?? isAtBottom(container, bottomThreshold);
   const candidates = Array.from(container.querySelectorAll<HTMLElement>(selector));
 
   let chosen: HTMLElement | null = null;

@@ -21,14 +21,40 @@ export interface DocTarget {
   quote?: string | null;
 }
 
+export interface WikiLinkFocus {
+  href: string;
+  label: string;
+  occurrence: number;
+}
+
+export type ReaderFocusTarget = 'heading' | 'target' | 'notes' | 'transcript'
+  | { blockId: string | null; materialId: string }
+  | { wikiLink: WikiLinkFocus };
+
+interface ChatCitationFocus {
+  chatId: string;
+  trigger: HTMLButtonElement;
+}
+
+interface ReaderFocusRequest {
+  destination: ReaderFocusTarget;
+  /** The initiating control may survive a same-document jump or a chat popup's exit. */
+  origin?: Element | null;
+}
+
+interface ReaderNavigation extends ReaderFocusRequest {
+  returnFocus?: ReaderFocusTarget;
+  closeFocus?: ChatCitationFocus;
+}
+
 /** The two code-written wiki files shown read-only (B20). */
 export type WikiFileName = 'index' | 'log';
 
 export type RightView =
-  | { kind: 'doc'; target: DocTarget; nonce: number }
+  | { kind: 'doc'; target: DocTarget; nonce: number; focus?: ReaderFocusRequest; closeFocus?: ChatCitationFocus }
   | { kind: 'graph'; focus?: string }
   | { kind: 'live'; materialId: string }
-  | { kind: 'wikifile'; name: WikiFileName }
+  | { kind: 'wikifile'; name: WikiFileName; nonce: number; focus?: ReaderFocusRequest }
   /** 0.3.1 P: an agent's permission request reviewed beside the chat (the part lives in the chat). */
   | { kind: 'review'; chatId: string; partId: string }
   /** 0.3.1 S (W2): a deck or test block beside the chat (the block is a part of its chat's message). */
@@ -42,6 +68,7 @@ export type CenterView = 'chat' | 'allChats' | 'materials';
 interface ReaderHistoryEntry {
   view: RightView;
   expanded: boolean;
+  returnFocus?: ReaderFocusTarget;
 }
 
 function isReader(view: RightView): boolean {
@@ -65,7 +92,7 @@ export interface NavState {
 }
 
 export interface NavActions {
-  openDocument: (target: DocTarget) => void;
+  openDocument: (target: DocTarget, navigation?: ReaderNavigation) => void;
   /** U1 entry point: open one material. */
   openDoc: (materialId: string) => void;
   /** `focus`: the page to select in the graph ("Show the graph" from a page). */
@@ -104,9 +131,11 @@ function samePlace(a: RightView, b: RightView): boolean {
 }
 
 /** The history after leaving `from` for `to`: the live view and a study block are not places to come back to. */
-function pushed({ docHistory, right, docExpanded }: NavState, to: RightView): ReaderHistoryEntry[] {
+function pushed({ docHistory, right, docExpanded }: NavState, to: RightView, returnFocus?: ReaderFocusTarget): ReaderHistoryEntry[] {
   if (!right || right.kind === 'live' || right.kind === 'study' || samePlace(right, to)) return docHistory;
-  return [...docHistory, { view: right, expanded: docExpanded }].slice(-HISTORY);
+  // Clear the old entry-focus request. Back supplies a new logical destination.
+  const view = right.kind === 'doc' || right.kind === 'wikifile' ? { ...right, focus: undefined } : right;
+  return [...docHistory, { view, expanded: docExpanded, returnFocus }].slice(-HISTORY);
 }
 
 function materialOf(right: RightView | null): string | null {
@@ -126,12 +155,12 @@ type SetNav = (partial: Partial<NavState> | ((s: NavState) => Partial<NavState>)
 
 /** The navigation part of the UI store (spread into `createUiStore`). */
 export function createNavSlice(set: SetNav): NavState & NavActions {
-  const show = (right: RightView) => (s: NavState): Partial<NavState> => ({
+  const show = (right: RightView, returnFocus?: ReaderFocusTarget) => (s: NavState): Partial<NavState> => ({
     right,
     docMaterialId: materialOf(right),
     // Every reader open starts beside the chat. Other panels keep their own expansion behavior.
     docExpanded: !isReader(right) && s.right?.kind === right.kind && s.docExpanded,
-    docHistory: pushed(s, right),
+    docHistory: pushed(s, right, returnFocus),
   });
   return {
     right: null,
@@ -140,8 +169,12 @@ export function createNavSlice(set: SetNav): NavState & NavActions {
     docMaterialId: null,
     recentPages: [],
     docHistory: [],
-    openDocument: (target) => set((s) => ({
-      ...show({ kind: 'doc', target: normalizeTarget(target), nonce: ++nonce })(s),
+    openDocument: (target, navigation) => set((s) => ({
+      ...show({
+        kind: 'doc', target: normalizeTarget(target), nonce: ++nonce,
+        focus: navigation && { destination: navigation.destination, origin: navigation.origin },
+        closeFocus: navigation?.closeFocus,
+      }, navigation?.returnFocus)(s),
       ...(target.type === 'page' ? { recentPages: [target.id, ...s.recentPages.filter((id) => id !== target.id)].slice(0, RECENT_PAGES) } : {}),
     })),
     openDoc: (materialId) => set(show({ kind: 'doc', target: { type: 'material', id: materialId }, nonce: ++nonce })),
@@ -149,8 +182,9 @@ export function createNavSlice(set: SetNav): NavState & NavActions {
     goBack: () => set((s) => {
       const back = s.docHistory.at(-1);
       if (!back) return {};
-      const { view, expanded } = back;
-      const right = view.kind === 'doc' ? { ...view, nonce: ++nonce } : view;
+      const { view, expanded, returnFocus } = back;
+      const right = view.kind === 'doc' || view.kind === 'wikifile'
+        ? { ...view, nonce: ++nonce, focus: { destination: returnFocus ?? 'heading' } } : view;
       return {
         right,
         docMaterialId: materialOf(right),
@@ -159,7 +193,7 @@ export function createNavSlice(set: SetNav): NavState & NavActions {
       };
     }),
     openLive: (materialId) => set(show({ kind: 'live', materialId })),
-    openWikiFile: (name) => set(show({ kind: 'wikifile', name })),
+    openWikiFile: (name) => set(show({ kind: 'wikifile', name, nonce: ++nonce })),
     openReview: (chatId, partId) => set(show({ kind: 'review', chatId, partId })),
     openStudy: (chatId, studyId) => set(show({ kind: 'study', chatId, studyId })),
     openOverview: (chatId) => set(show({ kind: 'overview', chatId })),
@@ -182,7 +216,7 @@ export const pageRef = (p: KbPageRef, blockId?: string | null): DocTarget => ({ 
 export const subjectRef = (s: KbSubjectRef): DocTarget | null =>
   s.type === 'chat' ? null : { type: s.type, id: s.id, block_id: s.block_id ?? null, seg: s.seg ?? null };
 
-export function useOpenDocument(): (ref: DocTarget) => void {
+export function useOpenDocument(): NavActions['openDocument'] {
   const { ui } = useServices();
-  return useCallback((ref: DocTarget) => ui.getState().openDocument(ref), [ui]);
+  return useCallback<NavActions['openDocument']>((ref, navigation) => ui.getState().openDocument(ref, navigation), [ui]);
 }

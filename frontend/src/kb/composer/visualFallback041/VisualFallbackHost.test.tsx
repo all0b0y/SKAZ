@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { readRequestFailure } from '../../../../../electron/requestFailure';
 import { KbApp } from '../../KbApp';
 import { createServices } from '../../state/context';
 import { PREFS_KEY } from '../../state/prefs';
@@ -131,10 +132,11 @@ function visualTestWorld(): FakeWorld {
   return base;
 }
 
-function renderVisualHost({ rejectNextSend, beforePreflight, beforeSend }: {
+function renderVisualHost({ rejectNextSend, beforePreflight, beforeSend, rendererFailure }: {
   rejectNextSend?: boolean;
   beforePreflight?: (body: KbVisualPreflightRequest) => Promise<void> | undefined;
   beforeSend?: (path: string) => Promise<void> | undefined;
+  rendererFailure?: 'known' | 'late';
 } = {}) {
   localStorage.clear();
   localStorage.setItem(PREFS_KEY, JSON.stringify({ onboardingDone: true }));
@@ -142,6 +144,7 @@ function renderVisualHost({ rejectNextSend, beforePreflight, beforeSend }: {
   const fake = createFakeBridge(world);
   const preflightCalls: KbVisualPreflightRequest[] = [];
   const sentBodies: Array<Record<string, unknown>> = [];
+  const attemptedBodies: Array<Record<string, unknown>> = [];
   let shouldRejectOnce = Boolean(rejectNextSend);
   let raceBlockedAfterReject = false;
 
@@ -169,10 +172,10 @@ function renderVisualHost({ rejectNextSend, beforePreflight, beforeSend }: {
       if (!requiresVisual) {
         const res: KbVisualPreflightResponse = {
           requires_visual: false,
-          supported: true,
+          supported: false,
           engine,
           model_id: modelId,
-          state: 'supported',
+          state: 'unverified',
           reason_code: null,
           title: null,
           detail: null,
@@ -184,7 +187,8 @@ function renderVisualHost({ rejectNextSend, beforePreflight, beforeSend }: {
         return { ok: true, status: 200, data: res as T };
       }
 
-      if (supportsImage) {
+      const pageOutOfRange = hasPdf && text.includes('page 99');
+      if (supportsImage && !pageOutOfRange && rendererFailure !== 'known') {
         const res: KbVisualPreflightResponse = {
           requires_visual: true,
           supported: true,
@@ -214,9 +218,12 @@ function renderVisualHost({ rejectNextSend, beforePreflight, beforeSend }: {
         engine,
         model_id: modelId,
         state: 'unsupported',
-        reason_code: 'model_no_image_input',
-        title: 'This model can’t read images',
-        detail: hasPdf ? 'The PDF text is still available.' : 'This attachment has no text to use instead.',
+        reason_code: pageOutOfRange || rendererFailure === 'known' ? 'missing_payload' : 'model_no_image_input',
+        title: rendererFailure === 'known' ? 'PDF pages are unavailable'
+          : pageOutOfRange ? 'PDF page is out of range' : 'This model can’t read images',
+        detail: pageOutOfRange
+          ? 'Page 99 is out of range. This PDF has 2 pages (1–2).'
+          : hasPdf ? 'The PDF text is still available.' : 'This attachment has no text to use instead.',
         text_only_available: hasPdf && !hasImg,
         draft_preserved: true,
         locator: {
@@ -235,8 +242,22 @@ function renderVisualHost({ rejectNextSend, beforePreflight, beforeSend }: {
 
     if (req.method === 'POST' && /^\/kb\/chats\/[^/]+\/messages$/.test(req.path)) {
       const body = (req.body ?? {}) as Record<string, unknown>;
+      attemptedBodies.push(body);
       const held = beforeSend?.(req.path);
       if (held) await held;
+      if (rendererFailure === 'late' && !body.text_only) {
+        const refusal = {
+          detail: 'The page renderer stopped.', code: 'VISUAL_UNSUPPORTED',
+          engine: 'claude_code', model_id: 'claude-sonnet-5-5',
+          reason_code: 'missing_payload', title: 'PDF pages are unavailable',
+          locator: { material_id: 'm-pdf-text', source_kind: 'pdf', label: 'Inflation Report · Page 2',
+            page: 2, timestamp_ms: null },
+          text_only_available: !(body.attachments as string[]).includes('m-photo-notext'),
+          compatible_models: [], draft_preserved: true,
+        };
+        const response = new Response(JSON.stringify(refusal), { status: 422 });
+        return { ok: false, status: response.status, ...(await readRequestFailure(response)) };
+      }
       if (shouldRejectOnce && !body.text_only) {
         shouldRejectOnce = false;
         raceBlockedAfterReject = true;
@@ -276,7 +297,7 @@ function renderVisualHost({ rejectNextSend, beforePreflight, beforeSend }: {
 
   const services = createServices(fake.bridge, localStorage, { capture: null });
   const view = render(<KbApp services={services} />);
-  return { ...view, fake, services, world, preflightCalls, sentBodies };
+  return { ...view, fake, services, world, preflightCalls, sentBodies, attemptedBodies };
 }
 
 async function openChat(user: ReturnType<typeof userEvent.setup>, titlePattern: RegExp) {
@@ -285,6 +306,80 @@ async function openChat(user: ReturnType<typeof userEvent.setup>, titlePattern: 
 }
 
 describe('VisualFallbackHost production wiring', () => {
+  it.each([
+    ['known', false],
+    ['late', false],
+    ['late', true],
+  ] as const)('recovers from a %s renderer failure (mixed with image: %s)', async (rendererFailure, mixed) => {
+    const user = userEvent.setup();
+    const pause = pauseOnce();
+    const { services, attemptedBodies, preflightCalls } = renderVisualHost({
+      rendererFailure, beforeSend: () => pause.wait(),
+    });
+    await openChat(user, /Transformer paper review/);
+    attachReport(services, 'c6');
+    if (mixed) {
+      act(() => services.composer.getState().attachmentDrafts.getState().update('c6', (items) => [...items, {
+        key: 'image', name: 'Chart Screenshot.png', kind: 'image', source: 'existing', state: 'ready',
+        materialId: 'm-photo-notext', materialReady: true, inWiki: false, error: null,
+      }]));
+    }
+    setDraftText('Inspect the chart on page 2');
+    await user.click(sendButton());
+    if (rendererFailure === 'late') {
+      await waitFor(() => expect(pause.entered()).toBe(true));
+      await openChat(user, /Why is there a logarithm/);
+      await pause.release();
+      expect(editor()).toHaveTextContent('');
+      expect(screen.queryByRole('group', { name: 'Image unavailable' })).toBeNull();
+      await user.click(screen.getByRole('tab', { name: /Transformer paper review/ }));
+    }
+
+    const card = await screen.findByRole('group', { name: 'Image unavailable' });
+    expect(within(card).getByText('PDF pages are unavailable')).toBeVisible();
+    expect(editor()).toHaveTextContent('Inspect the chart on page 2');
+    expect(screen.getByRole('list', { name: 'Draft attachments' })).toHaveTextContent('Inflation Report');
+    expect(within(conversation()).queryByRole('group', { name: 'Image unavailable' })).toBeNull();
+    expect(attemptedBodies).toHaveLength(rendererFailure === 'known' ? 0 : 1);
+    expect(attemptedBodies.some((body) => body.text_only)).toBe(false);
+
+    if (rendererFailure === 'late') {
+      const previousCalls = preflightCalls.length;
+      await waitFor(() => expect(preflightCalls.length).toBeGreaterThan(previousCalls));
+      expect(card).toBeVisible();
+    } else {
+      // The expected next send is the user's explicit text-only request.
+      await pause.release();
+    }
+    const retry = within(card).queryByRole('button', { name: 'Continue with text only' });
+    if (mixed) {
+      expect(retry).toBeNull();
+      expect(screen.getByRole('list', { name: 'Draft attachments' })).toHaveTextContent('Chart Screenshot.png');
+    } else {
+      expect(retry).toBeVisible();
+      await user.click(retry!);
+      expect(attemptedBodies.at(-1)).toMatchObject({
+        text: 'Inspect the chart on page 2', attachments: ['m-pdf-text'], text_only: true,
+      });
+      expect(await within(conversation()).findByRole('note', { name: 'Text only · Image not analysed' })).toBeVisible();
+    }
+  });
+
+  it('shows the server’s source-specific refusal title and preserves the available text-only action', async () => {
+    const user = userEvent.setup();
+    const { services, sentBodies } = renderVisualHost();
+    await openChat(user, /Why is there a logarithm/);
+    attachReport(services, 'c1');
+    setDraftText('Explain the chart on page 99');
+
+    const card = await screen.findByRole('group', { name: 'Image unavailable' });
+    expect(within(card).getByText('PDF page is out of range')).toBeVisible();
+    expect(within(card).getByText('Page 99 is out of range. This PDF has 2 pages (1–2).')).toBeVisible();
+    expect(within(card).getByRole('button', { name: 'Continue with text only' })).toBeVisible();
+    expect(editor()).toHaveTextContent('Explain the chart on page 99');
+    expect(sentBodies).toHaveLength(0);
+  });
+
   it('mounts UI-B above composer on unsupported PDF, preserves draft across model switch without auto-send, and sends images after switch', async () => {
     const user = userEvent.setup();
     const { services, sentBodies } = renderVisualHost();
@@ -475,6 +570,91 @@ function pauseOnce() {
     release: () => act(async () => { release(); }),
   };
 }
+
+function attachReport(services: ReturnType<typeof createServices>, chatId: string) {
+  act(() => services.composer.getState().attachmentDrafts.getState().update(chatId, () => [{
+    key: 'report', name: 'Inflation Report', source: 'existing', kind: 'pdf', state: 'ready',
+    materialId: 'm-pdf-text', materialReady: true, inWiki: false, error: null,
+  }]));
+}
+
+function setDraftText(text: string) {
+  const input = editor();
+  input.textContent = text;
+  fireEvent.input(input);
+}
+
+describe('Display visual preflight scheduling', () => {
+  it('coalesces a burst into one display request and verifies Send immediately with the latest draft', async () => {
+    const user = userEvent.setup();
+    const { services, preflightCalls, sentBodies } = renderVisualHost();
+    await openChat(user, /Transformer paper review/);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      attachReport(services, 'c6');
+      const updates = Array.from({ length: 12 }, (_, index) =>
+        `Explain the chart on page 2${'x'.repeat(index)}`);
+      for (const text of updates) {
+        setDraftText(text);
+        await act(() => vi.advanceTimersByTimeAsync(35));
+      }
+      const duringTyping = preflightCalls.length;
+      await act(() => vi.advanceTimersByTimeAsync(350));
+      expect({ duringTyping, afterIdle: preflightCalls.length }).toEqual({ duringTyping: 0, afterIdle: 1 });
+      expect(preflightCalls[0]?.text).toBe(updates.at(-1));
+
+      setDraftText('Verify the chart on page 2');
+      await act(async () => {
+        fireEvent.keyDown(editor(), { key: 'Enter' });
+        fireEvent.click(sendButton());
+      });
+      expect(preflightCalls.map((request) => request.text)).toEqual([
+        updates.at(-1), 'Verify the chart on page 2',
+      ]);
+      expect(sentBodies).toHaveLength(1);
+      expect(sentBodies[0]).toMatchObject({ text: 'Verify the chart on page 2', attachments: ['m-pdf-text'] });
+      await act(() => vi.advanceTimersByTimeAsync(350));
+      expect(preflightCalls).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops a scheduled request on tab switch and ignores an older in-flight result after reactivation', async () => {
+    const user = userEvent.setup();
+    const pause = pauseOnce();
+    const { services, preflightCalls, sentBodies } = renderVisualHost({
+      beforePreflight: (body) => body.text === 'Old chart' ? pause.wait() : undefined,
+    });
+    await openChat(user, /Why is there a logarithm/);
+    const side = screen.getByRole('region', { name: 'Chats' });
+    const otherChat = within(side).getByRole('button', { name: /Transformer paper review/ });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      attachReport(services, 'c1');
+      setDraftText('Old chart');
+      await act(() => vi.advanceTimersByTimeAsync(350));
+      expect(pause.entered()).toBe(true);
+
+      setDraftText('Intermediate chart');
+      fireEvent.click(otherChat);
+      await act(() => vi.advanceTimersByTimeAsync(350));
+      expect(preflightCalls.map((request) => request.text)).toEqual(['Old chart']);
+      expect(screen.queryByRole('group', { name: 'Image unavailable' })).toBeNull();
+
+      fireEvent.click(screen.getByRole('tab', { name: /Why is there a logarithm/ }));
+      setDraftText('Latest chart');
+      await act(() => vi.advanceTimersByTimeAsync(350));
+      await pause.release();
+      expect(preflightCalls.map((request) => request.text)).toEqual(['Old chart', 'Latest chart']);
+      expect(screen.getByRole('group', { name: 'Image unavailable' })).toBeVisible();
+      expect(editor()).toHaveTextContent('Latest chart');
+      expect(sentBodies).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 async function prepareVisualDraft(user: ReturnType<typeof userEvent.setup>, services: ReturnType<typeof createServices>) {
   await openChat(user, /Transformer paper review/);

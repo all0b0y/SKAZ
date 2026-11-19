@@ -1,8 +1,8 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { KbChat, KbChatEvent, KbChatSummary, KbMessage, KbMessageInput, KbOpenContext, KbSavedAnalysis } from '../../api/kb/types.gen';
+import type { KbChat, KbChatEvent, KbChatSummary, KbMessage, KbMessageInput, KbOpenContext, KbSavedAnalysis, KbVisualPreflightResponse } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import type { KbChatSearchRules } from '../api/searchRules';
-import { errorText, type KbClient } from '../api/client';
+import { errorText, KbApiError, type KbClient } from '../api/client';
 import type { ActionResult, Load } from './library';
 import { longPoll } from './poll';
 import { adjacentSelection, type CloseResult, type ReadingAnchor } from '../shell/chatTabs041';
@@ -16,6 +16,8 @@ export interface OpenChat {
   chat: KbChat | null;
   load: Load;
   error: string | null;
+  /** List activity observed while detail was unfollowed, until its event feed catches up. */
+  backgroundActivity?: Pick<KbChatSummary, 'state' | 'waiting_for_user'>;
 }
 
 export interface AgentChoice {
@@ -69,10 +71,10 @@ export interface ChatsActions {
   send: (input: KbMessageInput, context: KbOpenContext, options?: {
     newChat?: boolean;
     draftChatId?: string | null;
-    onDraftChatActivated?: (chatId: string) => void;
+    onDraftChatCreated?: (chatId: string) => void;
     initialAgent?: AgentChoice | null;
     expectedTarget?: AgentChoice;
-  }) => Promise<ActionResult<string>>;
+  }) => Promise<ActionResult<string> & { visualRefusal?: KbVisualPreflightResponse }>;
   stop: (chatId: string, messageId: string) => Promise<ActionResult>;
   regenerate: (chatId: string, messageId: string) => Promise<ActionResult>;
   /** Your question changed in place: the messages after it go and it is answered again (409 while answering). */
@@ -112,9 +114,18 @@ function summaryOf(chat: KbChat): KbChatSummary {
   return rest;
 }
 
+export function latestStreamingAnswer(chat: Pick<KbChat, 'messages'> | null) {
+  if (!chat) return null;
+  for (let i = chat.messages.length - 1; i >= 0; i--) {
+    const message = chat.messages[i]!;
+    if (message.role === 'assistant' && message.state === 'streaming') return message;
+  }
+  return null;
+}
+
 /** True while an answer in this chat is still being written. */
 export function isAnswering(chat: Pick<KbChat, 'messages'> | null): boolean {
-  return !!chat && chat.messages.some((m) => m.role === 'assistant' && m.state === 'streaming');
+  return latestStreamingAnswer(chat) !== null;
 }
 
 /**
@@ -210,6 +221,23 @@ export function chatWaits(chat: Pick<KbChat, 'messages'>): boolean {
   return chat.messages.some((m) => partsOf(m).some(isWaitingPart));
 }
 
+function unmatchedActivity(chat: KbChat | null, summary: NonNullable<OpenChat['backgroundActivity']>) {
+  if (chat && isAnswering(chat) === (summary.state === 'answering') && chatWaits(chat) === !!summary.waiting_for_user) {
+    return undefined;
+  }
+  return { state: summary.state, waiting_for_user: summary.waiting_for_user };
+}
+
+function detailActivityChanged(before: KbChat, after: KbChat) {
+  return latestStreamingAnswer(before)?.id !== latestStreamingAnswer(after)?.id || chatWaits(before) !== chatWaits(after);
+}
+
+/** A pending send is newer than the background report. Keep the report for rollback if it fails. */
+export function backgroundActivity(open: OpenChat | undefined) {
+  return open?.backgroundActivity && !open.chat?.messages.some((m) => isLocal(m.id))
+    ? open.backgroundActivity : undefined;
+}
+
 /**
  * Apply long-poll events to a chat. A `message` event is a full snapshot; `delta` appends text;
  * `part_update` (0.3.1 P) replaces the part with the same id.
@@ -290,7 +318,9 @@ export function createChatsStore(client: KbClient): ChatsStore {
       for (const m of messages) next = upsertMessage(next, m);
       if (created && !next.some((m) => m.id === created.id)) next = upsertMessage(next, created);
       const chat = { ...open.chat, messages: next, state: isAnswering({ messages: next }) ? 'answering' as const : 'idle' as const };
-      set((s) => ({ chats: { ...s.chats, [id]: { ...open, chat } }, list: s.list.map((c) => (c.id === id ? { ...c, state: chat.state } : c)) }));
+      const activity = created ? undefined : open.backgroundActivity;
+      set((s) => ({ chats: { ...s.chats, [id]: { ...open, chat, backgroundActivity: activity } },
+        list: s.list.map((c) => (c.id === id ? { ...c, state: activity?.state ?? chat.state } : c)) }));
     };
     /** A part the backend answered with: in place in its chat; the list's waiting mark follows. */
     const putPart = (chatId: string, part: AnyMessagePart) => {
@@ -345,8 +375,9 @@ export function createChatsStore(client: KbClient): ChatsStore {
         }
       },
 
-      startListPoll: () => longPoll(async (cursor, wait) => {
+      startListPoll: () => longPoll(async (cursor, wait, signal) => {
         const res = await client.call('GET /kb/chats/events', { query: { after: cursor, wait } });
+        if (signal.aborted) return { cursor, changed: false };
         if (res.chats.length) {
           set((s) => {
             const byId = new Map(s.list.map((c) => [c.id, c]));
@@ -360,16 +391,17 @@ export function createChatsStore(client: KbClient): ChatsStore {
               } else {
                 byId.set(c.id, c);
               }
-              if (open?.chat) {
-                const inactive = c.id !== s.currentId;
+              if (open) {
+                const useSummary = c.id !== s.currentId && !hasLocal;
                 chats[c.id] = {
                   ...open,
-                  chat: {
+                  backgroundActivity: useSummary ? unmatchedActivity(open.chat, c) : open.backgroundActivity,
+                  chat: open.chat && {
                     ...open.chat,
                     title: c.title,
                     pinned: c.pinned,
                     unread: c.unread,
-                    ...(inactive && !hasLocal
+                    ...(useSummary
                       ? { state: c.state, waiting_for_user: (c as KbChatSummaryP).waiting_for_user }
                       : {}),
                   },
@@ -476,28 +508,40 @@ export function createChatsStore(client: KbClient): ChatsStore {
       },
 
       load: async (id) => {
-        set((s) => ({ chats: { ...s.chats, [id]: { chat: s.chats[id]?.chat ?? null, load: 'loading', error: null } } }));
+        set((s) => ({ chats: { ...s.chats, [id]: { ...s.chats[id], chat: s.chats[id]?.chat ?? null, load: 'loading', error: null } } }));
         try {
           const chat = await client.call('GET /kb/chats/{chat_id}', { path: { chat_id: id } });
-          set((s) => ({ chats: { ...s.chats, [id]: { chat, load: 'ready', error: null } } }));
+          set((s) => {
+            const activity = s.chats[id]?.backgroundActivity;
+            return { chats: { ...s.chats, [id]: { chat, load: 'ready', error: null,
+              backgroundActivity: activity && unmatchedActivity(chat, activity) } } };
+          });
         } catch (error) {
-          set((s) => ({ chats: { ...s.chats, [id]: { chat: s.chats[id]?.chat ?? null, load: 'error', error: errorText(error) } } }));
+          set((s) => ({ chats: { ...s.chats, [id]: { ...s.chats[id], chat: s.chats[id]?.chat ?? null, load: 'error', error: errorText(error) } } }));
         }
       },
 
-      follow: (id) => longPoll(async (_cursor, wait) => {
+      follow: (id) => longPoll(async (_cursor, wait, signal) => {
         const open = get().chats[id];
         if (!open?.chat) return { cursor: 0, changed: false };
         const after = open.chat.cursor;
         const res = await client.call('GET /kb/chats/{chat_id}/events', { path: { chat_id: id }, query: { after, wait } });
+        if (signal.aborted) return { cursor: after, changed: false };
         const now = get().chats[id];
         if (!now?.chat) return { cursor: res.cursor, changed: false };
         const fresh = res.events.filter((e) => e.seq > now.chat!.cursor);
         if (fresh.length) {
           const chat = applyEvents(now.chat, fresh);
+          // A replay of the same streaming answer can update its text without advancing activity.
+          // Only a matching state or an actual transition on the resumed feed releases the summary.
+          const prior = now.backgroundActivity;
+          const resumed = get().currentId === id && prior === open.backgroundActivity;
+          const activity = prior && !(resumed && detailActivityChanged(now.chat, chat))
+            ? unmatchedActivity(chat, prior) : undefined;
           set((s) => ({
-            chats: { ...s.chats, [id]: { ...now, chat } },
-            list: s.list.map((c) => (c.id === id ? { ...c, title: chat.title, state: chat.state, ...waitingOf(chat) } : c)),
+            chats: { ...s.chats, [id]: { ...now, chat, backgroundActivity: activity } },
+            list: s.currentId !== id ? s.list : s.list.map((c) => (c.id === id
+              ? { ...c, title: chat.title, state: chat.state, ...waitingOf(chat), ...activity } : c)),
           }));
         }
         return { cursor: res.cursor, changed: fresh.length > 0 };
@@ -524,7 +568,8 @@ export function createChatsStore(client: KbClient): ChatsStore {
             id = chat.id;
             const prevId = get().currentId;
             if (activate && prevId && prevId !== id) beforeSwitch?.(prevId);
-            if (activate) options.onDraftChatActivated?.(id);
+            // Creation commits before message admission. Move draft ownership even when its tab stays inactive.
+            options.onDraftChatCreated?.(id);
             // A chat asked from ⌘K leaves New chat's own agent choice alone.
             set((s) => {
               if (!activate) {
@@ -584,7 +629,10 @@ export function createChatsStore(client: KbClient): ChatsStore {
         } catch (error) {
           settled = true;
           dropLocal(); // the field gets the text back (Composer)
-          return { ok: false, error: errorText(error) };
+          return {
+            ok: false, error: errorText(error),
+            ...(error instanceof KbApiError && error.visualRefusal ? { visualRefusal: error.visualRefusal } : {}),
+          };
         }
       },
 
@@ -657,7 +705,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
             openTabIds: nextOpenIds,
             closedTabHistory: nextHistory,
             lastClosedTabId: nextHistory.at(-1) ?? null,
-            allTabsClosed: nextOpenIds.length === 0 ? false : s.allTabsClosed,
+            allTabsClosed: s.allTabsClosed && nextHistory.length > 0,
             readingAnchors: nextAnchors,
           };
         });

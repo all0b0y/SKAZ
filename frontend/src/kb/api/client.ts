@@ -4,16 +4,57 @@
 
 import type { BridgeApi, HttpMethod } from '../../api/bridge';
 import type {
-  KbEndpoints, KbFolder, KbLibrary, KbMaterial, KbMaterialSummary, KbNotificationFeed,
+  KbCompatibleModel, KbEndpoints, KbFolder, KbLibrary, KbMaterial, KbMaterialSummary, KbNotificationFeed,
+  KbVisualPreflightResponse,
 } from '../../api/kb/types.gen';
 
 /** A failed /kb request: HTTP status and the backend's plain-English reason, shown to the user as is. */
 export class KbApiError extends Error {
   /** `code`: the backend's `error_code` when it sends one (W-3: `web_page_unavailable`). */
-  constructor(public readonly status: number, public readonly detail: string, public readonly code?: string) {
+  constructor(
+    public readonly status: number,
+    public readonly detail: string,
+    public readonly code?: string,
+    public readonly visualRefusal?: KbVisualPreflightResponse,
+  ) {
     super(detail);
     this.name = 'KbApiError';
   }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+const isEngine = (value: unknown): value is KbVisualPreflightResponse['engine'] =>
+  value === 'codex' || value === 'claude_code' || value === 'hermes' || value === 'opencode';
+const isNullableNumber = (value: unknown): value is number | null =>
+  value === null || (typeof value === 'number' && Number.isSafeInteger(value));
+
+function isCompatibleModel(value: unknown): value is KbCompatibleModel {
+  return isRecord(value) && isEngine(value.engine) && typeof value.model_id === 'string'
+    && typeof value.label === 'string' && typeof value.provider === 'string';
+}
+
+function visualRefusal(
+  status: number, code: string | undefined, detail: string, data: unknown,
+): KbVisualPreflightResponse | undefined {
+  if (status !== 422 || (code !== 'VISUAL_UNSUPPORTED' && code !== 'VISUAL_TEXT_ONLY_UNAVAILABLE')
+    || !isRecord(data)) return;
+  const { engine, model_id, reason_code, title, locator, text_only_available, compatible_models } = data;
+  if (!isEngine(engine) || !(typeof model_id === 'string' || model_id === null)
+    || typeof reason_code !== 'string' || typeof title !== 'string' || !isRecord(locator)
+    || typeof locator.material_id !== 'string' || typeof locator.label !== 'string'
+    || typeof locator.source_kind !== 'string' || !isNullableNumber(locator.page)
+    || !isNullableNumber(locator.timestamp_ms) || typeof text_only_available !== 'boolean'
+    || !Array.isArray(compatible_models) || !compatible_models.every(isCompatibleModel)) return;
+  return {
+    engine, model_id, reason_code, title, detail, compatible_models,
+    text_only_available: code === 'VISUAL_UNSUPPORTED' && text_only_available,
+    requires_visual: true, supported: false, state: 'unsupported', draft_preserved: true,
+    locator: {
+      material_id: locator.material_id, source_kind: locator.source_kind, label: locator.label,
+      page: locator.page, timestamp_ms: locator.timestamp_ms,
+    },
+  };
 }
 
 export type AnyRoute = keyof KbEndpoints;
@@ -60,7 +101,10 @@ export class KbClient {
       query: cleanQuery(options.query as Record<string, unknown> | undefined),
       body: options.body,
     });
-    if (!res.ok) throw new KbApiError(res.status, res.detail || `Request failed (${res.status}).`, res.code);
+    if (!res.ok) {
+      const detail = res.detail || `Request failed (${res.status}).`;
+      throw new KbApiError(res.status, detail, res.code, visualRefusal(res.status, res.code, detail, res.errorData));
+    }
     return res.data;
   }
 

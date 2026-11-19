@@ -32,13 +32,14 @@ export function DocPanel({ view, expanded, width }: { view: RightView; expanded:
       data-state={expanded ? 'expanded' : 'open'}
       data-view={view.kind === 'doc' ? view.target.type : view.kind}
       aria-label={LABEL[view.kind]}
+      tabIndex={view.kind === 'doc' || view.kind === 'wikifile' ? -1 : undefined}
       style={expanded ? undefined : { width }}
     >
       {view.kind === 'doc' && view.target.type === 'page' && <PageView key={view.target.id} target={view.target} nonce={view.nonce} />}
       {view.kind === 'doc' && view.target.type === 'material' && <MaterialView key={view.target.id} target={view.target} nonce={view.nonce} />}
       {view.kind === 'graph' && <GraphPanel />}
       {view.kind === 'live' && <LivePanel materialId={view.materialId} />}
-      {view.kind === 'wikifile' && <WikiFileView key={view.name} name={view.name} />}
+      {view.kind === 'wikifile' && <WikiFileView key={view.name} name={view.name} nonce={view.nonce} />}
       {view.kind === 'review' && <PermissionReview key={view.partId} chatId={view.chatId} partId={view.partId} />}
       {view.kind === 'study' && <StudyPanel key={view.studyId} chatId={view.chatId} studyId={view.studyId} />}
       {view.kind === 'overview' && <ChatOverview key={view.chatId} chatId={view.chatId} />}

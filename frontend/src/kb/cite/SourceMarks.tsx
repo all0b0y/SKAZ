@@ -3,7 +3,7 @@ import type { KbCitation } from '../../api/kb/types.gen';
 import { Icon, Popover } from '../ui';
 import { clock } from '../ui/time';
 import { citationRef, useOpenDocument } from '../state/document';
-import { useFold } from '../state/context';
+import { useFold, useServices } from '../state/context';
 import { ChipStipple } from '../fx/stipple';
 import { useFragmentText } from './fragments';
 import { claimSources, indexSources, type SourceEntry, type SourceIndex } from './sources';
@@ -82,6 +82,7 @@ function SourcePopup({ entry, quotes, titleId, onOpen }: {
  */
 function SourceTrigger({ entry, quotes, row = false }: { entry: SourceEntry; quotes: KbCitation[]; row?: boolean }) {
   const open = useOpenDocument();
+  const { chats } = useServices();
   const ref = useRef<HTMLButtonElement | null>(null);
   const popRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
@@ -116,7 +117,10 @@ function SourceTrigger({ entry, quotes, row = false }: { entry: SourceEntry; quo
         data-source={entry.n}
         onMouseEnter={peek}
         onMouseLeave={leave}
-        onFocus={() => { if (!quiet.current) peek(); }}
+        data-reader-citation={entry.key}
+        onFocus={(event) => {
+          if (!quiet.current && !event.currentTarget.hasAttribute('data-reader-restoring-focus')) peek();
+        }}
         onBlur={(e) => { if (state === 'peek' && !inside(e.relatedTarget)) close(); }}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && state !== 'closed') { e.preventDefault(); e.stopPropagation(); close(); }
@@ -141,8 +145,21 @@ function SourceTrigger({ entry, quotes, row = false }: { entry: SourceEntry; quo
           onMouseLeave={() => { if (state === 'peek') leave(); }}
           onBlur={(e) => { if (state === 'pinned' && !inside(e.relatedTarget) && e.relatedTarget !== ref.current && e.relatedTarget) close(); }}
         >
-          <SourcePopup entry={entry} quotes={quotes} titleId={titleId}
-            onOpen={(c) => { close(); open(citationRef(c)); }} />
+          <SourcePopup entry={entry} quotes={quotes} titleId={titleId} onOpen={(c) => {
+            const trigger = ref.current;
+            const blockId = row ? null : trigger?.closest<HTMLElement>('[data-block-id]')?.dataset.blockId;
+            const fromPage = trigger?.closest('#kb-doc[data-view="page"]');
+            const fromChat = trigger?.closest('[data-pane="center"][aria-label="Chat"]');
+            const chatId = fromChat ? chats.getState().currentId : null;
+            const origin = document.activeElement;
+            close();
+            open(citationRef(c), {
+              destination: 'target',
+              returnFocus: fromPage && blockId !== undefined ? { blockId, materialId: entry.key } : undefined,
+              closeFocus: trigger && chatId ? { trigger, chatId } : undefined,
+              origin,
+            });
+          }} />
         </div>
       </Popover>
     </>
@@ -166,7 +183,7 @@ export function SourceMarks({ citations }: { citations: ReadonlyArray<KbCitation
 export function SourcesRow({ index }: { index: SourceIndex }) {
   if (index.list.length === 0) return null;
   return (
-    <div className="kb-srcs" role="group" aria-label="Sources">
+    <div className="kb-srcs" role="group" aria-label="Sources" data-reader-sources="">
       <span className="kb-srcs__head" aria-hidden="true">Sources</span>
       {index.list.map((entry) => <SourceTrigger key={entry.key} entry={entry} quotes={entry.quotes} row />)}
     </div>

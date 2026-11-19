@@ -44,16 +44,29 @@ async function importDraftSelection(
   }
 
   const item = response.data as KbMaterialAdded;
-  if (item.material.status === 'failed') throw new Error('SKAZ could not read this file. Check the file in Materials.');
+  if (item.material.status === 'failed') {
+    const pageCount = item.saved_pdf_page_count;
+    if ('category' in selection && selection.category === 'pdf'
+      && (item.material.kind === 'pdf' || item.material.kind === 'book')
+      && typeof pageCount === 'number' && Number.isSafeInteger(pageCount) && pageCount > 0) {
+      return { id: item.material.id, ready: false, existing: item.already_in_library, wikiIneligible: true, name };
+    }
+    throw new Error('SKAZ could not read this file. Check the file in Materials.');
+  }
+  const image = !('category' in selection) || selection.category === 'image';
   let thumbnail: Blob | undefined;
-  if (!('category' in selection) || selection.category === 'image') {
-    // The trusted boundary prepares previews for disk images, including HEIC, and validated clipboard bytes.
+  if (image) {
     const preview = await bridge.imagePreview(selection.selectionId).catch(() => null);
-    if (preview?.ok) {
+    if (preview?.ok && preview.data.bytes.length > 0 && preview.data.mimeType.startsWith('image/')) {
       thumbnail = new Blob([new Uint8Array(preview.data.bytes)], { type: preview.data.mimeType });
     }
   }
-  return { id: item.material.id, ready: item.material.status === 'ready', existing: item.already_in_library, thumbnail, name };
+  return {
+    id: item.material.id, ready: item.material.status === 'ready', existing: item.already_in_library,
+    // Match ingest admission using the saved material's fragments, independent of its file format.
+    wikiIneligible: item.material.status === 'ready' && item.material.fragment_count === 0,
+    thumbnail, previewUnavailable: image && !thumbnail, name,
+  };
 }
 
 export function nativeAttachmentIntake(

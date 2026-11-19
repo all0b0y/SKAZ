@@ -210,6 +210,7 @@ class _Paint:
 class _StreamReport:
     hidden: set[int] = field(default_factory=set)
     shows: int = 0
+    needs_raster_comparison: bool = False
     reasons: dict[str, int] = field(default_factory=dict)
 
 
@@ -498,6 +499,8 @@ class _Analyzer:
                 reason = self._hidden_reason(state, tm, any(marked))
                 if reason is not None:
                     report.hidden.add(position)
+                    # Mode 7 does not paint itself but its glyphs can clip later marks.
+                    report.needs_raster_comparison |= state.render != 3
                     report.reasons[reason] = report.reasons.get(reason, 0) + 1
             elif operator == b"Do" and operands:
                 self._do(resources, operands[0], state, key, depth, any(marked))
@@ -593,8 +596,8 @@ def _variant_text(
     return page_text(page)
 
 
-def single_page_pdf(reader: PdfReader, page_number: int) -> bytes:
-    """One 1-based page as standalone PDF bytes, with non-OCR hidden text stripped before rendering."""
+def _page_pdf_copies(reader: PdfReader, page_number: int, *, for_raster: bool) -> tuple[bytes, ...]:
+    """Build the display copy and any required guard comparison, or just the text-inspection copy."""
     index = page_number - 1
     if index < 0 or index >= len(reader.pages):
         raise PdfRejected(f"Page {page_number} is out of range (1–{len(reader.pages)}).")
@@ -616,16 +619,40 @@ def single_page_pdf(reader: PdfReader, page_number: int) -> bytes:
             and analysis.image_coverage >= OCR_IMAGE_COVERAGE
             and set(analysis.reasons()) == {"invisible render mode (Tr 3)"}
         )
-        if analysis.hidden_count and not ocr_layer:
-            writer, _page = _variant_writer(reader, index, analysis, keep_hidden=False)
-        else:
-            writer = PdfWriter()
-            writer.add_page(page)
-        buffer = BytesIO()
-        writer.write(buffer)
-        return buffer.getvalue()
+
+        def serialize(writer: PdfWriter) -> bytes:
+            properties = reader.root_object.get("/OCProperties")
+            if properties is not None:
+                writer.root_object[NameObject("/OCProperties")] = properties.clone(writer)
+            buffer = BytesIO()
+            writer.write(buffer)
+            return buffer.getvalue()
+
+        copies: list[bytes] = []
+        if for_raster or not analysis.hidden_count or ocr_layer:
+            display = PdfWriter()
+            display.add_page(page)
+            copies.append(serialize(display))
+        # The original text operators preserve advances even in nonpainting mode 3.
+        # For clipping or heuristic exclusions (e.g. near-white ink), require the
+        # filtered copy to render identically before releasing the display pixels.
+        needs_comparison = any(s.needs_raster_comparison for s in analysis.streams.values())
+        if (for_raster and needs_comparison) or (not for_raster and analysis.hidden_count and not ocr_layer):
+            filtered, _ = _variant_writer(reader, index, analysis, keep_hidden=False)
+            copies.append(serialize(filtered))
+        return tuple(copies)
     except (PyPdfError, KeyError, ValueError, TypeError, AttributeError, RecursionError) as error:
         raise PdfRejected(f"SKAZ can't read page {page_number} of this PDF.") from error
+
+
+def single_page_pdf(reader: PdfReader, page_number: int) -> bytes:
+    """One selected page with non-OCR hidden operands stripped, for text inspection."""
+    return _page_pdf_copies(reader, page_number, for_raster=False)[0]
+
+
+def pdf_raster_inputs(reader: PdfReader, page_number: int) -> tuple[bytes, ...]:
+    """The original display page, followed by a filtered comparison page only when required."""
+    return _page_pdf_copies(reader, page_number, for_raster=True)
 
 
 @dataclass(frozen=True)

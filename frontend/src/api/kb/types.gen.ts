@@ -225,6 +225,15 @@ export interface KbAnswerBlockPart {
   markdown: string | null;
 }
 
+export interface KbAnswerFrame {
+  message_id: string;
+  frame_id: string;
+  material_id: string;
+  label: string;
+  timestamp_ms: number;
+  pinned: boolean;
+}
+
 export interface KbArea {
   id: string;
   parent_id: string | null;
@@ -1451,6 +1460,7 @@ export interface KbMaterialAdded {
   excluded_count: number;
   hidden_count: number;
   failure_reason: string | null;
+  saved_pdf_page_count?: number | null;
   video: KbMaterialSummary | null;
   video_failure_reason: string | null;
   already_in_library?: boolean;
@@ -3221,6 +3231,13 @@ export interface KbEndpoints {
     response: void;
     status: 204;
   };
+  "GET /kb/chats/{chat_id}/answer-frames": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbAnswerFrame[];
+    status: 200;
+  };
   "GET /kb/chats/{chat_id}/events": {
     path: { chat_id: string };
     query: { after?: number; wait?: number };
@@ -3248,6 +3265,13 @@ export interface KbEndpoints {
     body: KbMessageEdit;
     response: KbSendResult;
     status: 202;
+  };
+  "POST /kb/chats/{chat_id}/messages/{message_id}/frames/{frame_id}/pin": {
+    path: { chat_id: string; message_id: string; frame_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbAnswerFrame;
+    status: 200;
   };
   "POST /kb/chats/{chat_id}/messages/{message_id}/regenerate": {
     path: { chat_id: string; message_id: string };

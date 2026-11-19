@@ -3,7 +3,7 @@ import { LOCAL_VIDEO_AUDIO_ONLY_NOTICE } from '../../materials/addItems';
 import { Button } from '../../ui/Button';
 import { Icon } from '../../ui/Icon';
 import { Modal } from '../../ui/Modal';
-import { attachmentSendBlocker, type DraftAttachment } from './draft';
+import { attachmentSendBlocker, canAddAttachmentToWiki, type DraftAttachment } from './draft';
 import './attachmentDrafts.css';
 
 export interface AttachmentDraftStripProps {
@@ -19,6 +19,7 @@ export interface AttachmentDraftStripProps {
 
 function AttachmentThumbnail({ item, large = false }: { item: DraftAttachment; large?: boolean }) {
   const blob = item.state === 'ready' && item.thumbnail?.type.startsWith('image/') ? item.thumbnail : undefined;
+  const previewUnavailable = item.state === 'ready' && item.previewUnavailable;
   const [url, setUrl] = useState<{ blob: Blob; src: string } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => {
@@ -34,8 +35,8 @@ function AttachmentThumbnail({ item, large = false }: { item: DraftAttachment; l
       alt={large ? `Preview of ${item.name}` : ''} onError={() => setFailed(src)} />
   );
   if (large) {
-    if (!blob) return null;
-    const unavailable = failed === url?.src || typeof URL.createObjectURL !== 'function';
+    if (!blob && !previewUnavailable) return null;
+    const unavailable = previewUnavailable || failed === url?.src || typeof URL.createObjectURL !== 'function';
     return <p className="kb-attachment041-meta">{unavailable ? 'Preview unavailable.' : 'Loading preview…'}</p>;
   }
   return <Icon name={item.source === 'link' ? 'link' : item.source === 'text' ? 'text' : 'materials'} size={16} />;
@@ -178,7 +179,7 @@ export function AttachmentDraftStrip({ items, onRemove, onToggleWiki, renderName
               <div className="kb-attachment041-detail-text">
                 {!selected && (renderName?.(item) ?? <strong>{item.name}</strong>)}
                 {status && <p className="kb-attachment041-meta">{status}</p>}
-                {item.source !== 'existing' && !item.alreadyInLibrary && item.state !== 'failed' && (
+                {canAddAttachmentToWiki(item) && (
                   <label className="kb-attachment__wiki">
                     <input type="checkbox" checked={item.inWiki} disabled={readOnly} onChange={() => onToggleWiki(item.key)} />
                     In wiki

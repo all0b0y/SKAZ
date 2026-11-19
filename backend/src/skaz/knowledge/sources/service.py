@@ -25,7 +25,7 @@ import stat
 import threading
 import weakref
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, cast
 from uuid import uuid4
@@ -83,8 +83,10 @@ from .native_intake041 import (
     prepare_image_selection,
     read_bounded_bytes,
     validate_trusted_selection,
+    verify_handle_version,
 )
 from .paths import given_path
+from .pdf import open_pdf
 from .visual import (
     DEFAULT_FRAME_POLICY,
     DEFAULT_SEARCH_PDF_PAGES,
@@ -144,6 +146,8 @@ class IntakeResult:
     #: N2: the same DOI, address or file was already in the library — this is that material, nothing
     #: new was stored and no ingest was started.
     existing: bool = False
+    #: A saved local PDF can supply visual pages even though text extraction found no fragments.
+    saved_pdf_page_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -187,6 +191,14 @@ def location_label(location: FragmentLocation) -> str:
     if location.index is not None:
         return f"paragraph {location.index + 1}"
     return "unknown place"
+
+
+def _scan_page_count(pages: object, findings: Sequence[Finding]) -> int | None:
+    if type(pages) is not int or pages <= 0:
+        return None
+    if any(finding.kind in ("hidden_pdf_text", "unreadable_pdf_text") for finding in findings):
+        return None
+    return pages
 
 
 def _copy_into(directory: Path, original: Original) -> None:
@@ -321,7 +333,11 @@ class SourceService:
                     raise SourceRejected(FILE_CHANGED_MESSAGE)
                 duplicate = find_duplicate(self.kb, content=data)
                 if duplicate is not None:
-                    return self._existing(duplicate)
+                    result = self._existing(duplicate)
+                    if category == "pdf" and result.status == "failed":
+                        pages = self._duplicate_pdf_pages(result.material_id, data)
+                        return replace(result, saved_pdf_page_count=pages)
+                    return result
                 origin = Origin.model_validate(
                     {
                         "type": "file",
@@ -345,7 +361,12 @@ class SourceService:
                     prepared = prepare_text_file(data, validated.selection.display_name, origin=origin)
                     if prepared.failure:
                         raise SourceRejected("This file has no text.")
-                return self._publish(prepared, folder_id, title, to_wiki)
+                result = self._publish(prepared, folder_id, title, to_wiki)
+                if category == "pdf" and result.status == "failed":
+                    # Publishing has copied and verified the same PDF bytes whose pages were parsed.
+                    parsed_pages = _scan_page_count(prepared.extra.get("pages"), prepared.findings)
+                    return replace(result, saved_pdf_page_count=parsed_pages)
+                return result
 
             duplicate = find_duplicate(self.kb, digest=validated.sha256)
             if duplicate is not None:
@@ -576,6 +597,31 @@ class SourceService:
         record = self.kb.material_repo.get(duplicate.material_id)
         status = record.status if record is not None else "ready"
         return IntakeResult(duplicate.material_id, duplicate.title, status, 0, 0, None, existing=True)
+
+    def _duplicate_pdf_pages(self, material_id: str, selected_bytes: bytes) -> int | None:
+        """A dedup match alone does not verify that the saved PDF original is still usable."""
+        try:
+            files = self._material_files(material_id)
+            if files.manifest.kind not in ("pdf", "book") or files.fragments:
+                return None
+            intake = self._intake(files.directory)
+            if (
+                intake is None or intake.extractor != "pdf" or not intake.failure
+                or intake.original != "original.pdf"
+            ):
+                return None
+            pages = _scan_page_count((intake.model_extra or {}).get("pages"), intake.hidden)
+            if pages is None:
+                return None
+            original = self.visual._authorized_service_file(files, intake.original)
+            descriptor = os.open(original, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+            with os.fdopen(descriptor, "rb") as handle:
+                verify_handle_version(
+                    handle, expected_size=len(selected_bytes), expected_sha256=content_hash(selected_bytes),
+                )
+            return pages if len(open_pdf(selected_bytes).pages) == pages else None
+        except (KnowledgeError, OSError, RuntimeError):
+            return None
 
     def _saved_page(self, folder_id: str, key: str) -> str | None:
         for record in self.kb.materials(folder_id=folder_id, kind="web"):

@@ -34,6 +34,12 @@ class ImportTemp:
             return []
         return sorted(name for name in names if _IDENTITY.fullmatch(name))
 
+    def discard_link_downloads(self, session_id: str) -> None:
+        """Discard raw downloader output, including partials left by an interrupted version."""
+        for path in self._path(session_id).glob("download.*"):
+            if path.is_symlink() or path.is_file():
+                path.unlink(missing_ok=True)
+
     def remove(self, session_id: str) -> None:
         path = self._path(session_id)
         if path.exists():

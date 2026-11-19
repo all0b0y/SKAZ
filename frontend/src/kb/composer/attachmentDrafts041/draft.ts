@@ -5,6 +5,8 @@ import type { Attachment } from '../Attach';
 
 export type DraftAttachment = Attachment & {
   thumbnail?: Blob;
+  previewUnavailable?: boolean;
+  wikiIneligible?: boolean;
   importVideo?: () => Promise<AttachmentIntakeResult>;
   replaceKey?: string;
 };
@@ -22,7 +24,9 @@ export interface AttachmentIntakeResult {
   id: string;
   ready: boolean;
   existing?: boolean;
+  wikiIneligible?: boolean;
   thumbnail?: Blob;
+  previewUnavailable?: boolean;
   name?: string;
 }
 
@@ -58,12 +62,15 @@ interface AttachmentDraftState {
 }
 
 const EMPTY_DRAFT: Draft = { attachments: [], sending: false, error: null };
+const MAX_ACTIVE_FILE_LOADS = 4;
 export const NEW_CHAT_DRAFT = 'new';
 
 /** Create once per renderer session. All mutations, including async completions, take a chat key. */
 export function createAttachmentDraftStore() {
   let nextKey = 0;
   return createStore<AttachmentDraftState>()((set, get) => {
+    let activeLoads = 0;
+    const waiting: Array<() => void> = [];
     const changeDraft = (chatId: string, change: (draft: Draft) => Draft) => set((state) => {
       const previous = state.getDraft(chatId);
       const draft = change(previous);
@@ -87,6 +94,8 @@ export function createAttachmentDraftStore() {
             materialReady: added.ready,
             alreadyInLibrary: added.existing,
             thumbnail: added.thumbnail,
+            previewUnavailable: added.previewUnavailable,
+            ...(added.wikiIneligible ? { wikiIneligible: true, inWiki: false } : {}),
             ...(added.name ? { name: added.name } : {}),
           };
         }
@@ -102,6 +111,20 @@ export function createAttachmentDraftStore() {
             ? { ...entry, ...outcome, replaceKey: confirming ? item.replaceKey : undefined }
             : entry);
       });
+    };
+    const scheduleLoad = async (chatId: string, item: DraftAttachment, load: DraftFile['load']) => {
+      // Share the limit across drafts and batches, including a video after explicit confirmation.
+      if (activeLoads >= MAX_ACTIVE_FILE_LOADS) await new Promise<void>((resolve) => { waiting.push(resolve); });
+      else activeLoads++;
+      try {
+        if (get().getDraft(chatId).attachments.some((entry) => entry.key === item.key && entry.state === 'adding')) {
+          await loadFile(chatId, item, load);
+        }
+      } finally {
+        const next = waiting.shift();
+        if (next) next(); // Transfer the slot to the oldest queued file.
+        else activeLoads--;
+      }
     };
     const addFiles: AttachmentDraftState['addFiles'] = async (chatId, files, inWiki, replaceKey) => {
       if (!files.length || get().getDraft(chatId).sending) return;
@@ -124,7 +147,7 @@ export function createAttachmentDraftStore() {
       });
       // Keep the failed file until a replacement proceeds, so cancelling a video leaves it actionable.
       get().update(chatId, (items) => [...items, ...pending.map(({ item }) => item)]);
-      await Promise.all(pending.map(({ load, item }) => loadFile(chatId, item, load)));
+      await Promise.all(pending.map(({ load, item }) => scheduleLoad(chatId, item, load)));
     };
     return {
       drafts: new Map(),
@@ -160,7 +183,7 @@ export function createAttachmentDraftStore() {
             .map((entry) => entry.key === itemKey
               ? { ...entry, state: 'adding', importVideo: undefined, replaceKey: undefined }
               : entry));
-          void loadFile(chatId, item, load);
+          void scheduleLoad(chatId, item, load);
         }
         return true;
       },
@@ -177,6 +200,11 @@ export type AttachmentDraftStore = ReturnType<typeof createAttachmentDraftStore>
 
 export function useAttachmentDraft(store: AttachmentDraftStore, chatId: string | null): Draft {
   return useStore(store, (state) => chatId === null ? EMPTY_DRAFT : state.drafts.get(chatId) ?? EMPTY_DRAFT);
+}
+
+export function canAddAttachmentToWiki(item: DraftAttachment): boolean {
+  return item.source !== 'existing' && !item.alreadyInLibrary && !item.wikiIneligible
+    && item.state !== 'failed' && (item.source !== 'file' || item.state === 'ready');
 }
 
 /** Check both in the send handler and when presenting the send control. */

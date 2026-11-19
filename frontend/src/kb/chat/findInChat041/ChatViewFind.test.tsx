@@ -24,7 +24,9 @@ function conversationBounds(scroll: HTMLElement) {
   Object.defineProperties(scroll, {
     clientHeight: { value: 200 },
     scrollHeight: { value: 1200 },
-    scrollTo: { value: vi.fn(({ top = scroll.scrollTop }: ScrollToOptions) => { scroll.scrollTop = top; }) },
+    scrollTo: { value: vi.fn(({ top = scroll.scrollTop }: ScrollToOptions) => {
+      scroll.scrollTop = Math.min(top, scroll.scrollHeight - scroll.clientHeight);
+    }) },
   });
   vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 200));
   scroll.scrollTop = 1000;
@@ -97,6 +99,100 @@ describe('find in the open ChatView', () => {
     expect(selection.toString()).toBe('тако');
     expect(scroll.scrollTop).toBe(1000);
     expect(highlights.size).toBe(0);
+  });
+
+  it('gives find the viewport until close, then lets Return to latest jump to the bottom', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    const chat = world.chats.find(({ id }) => id === 'c1')!;
+    chat.messages = [chatMessage('answer', 1, 'assistant', chat.created_at, [
+      { type: 'text', text: `CACHE starts here. ${'More conversation text. '.repeat(120)}` },
+    ])];
+    renderKb({ world, prefs: { motion: 'off' } });
+    await user.click(await screen.findByRole('button', { name: /Why is there a logarithm/ }));
+    const scroll = screen.getByRole('log', { name: 'Conversation' });
+    await waitFor(() => expect(scroll).toHaveTextContent('CACHE starts here.'));
+    conversationBounds(scroll);
+
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() => {
+      const range = createRange();
+      range.getClientRects = () => {
+        const rect = new DOMRect(20, 300 - scroll.scrollTop, 50, 20);
+        return Object.assign([rect], { item: (index: number) => index === 0 ? rect : null });
+      };
+      return range;
+    });
+
+    const latest = () => screen.queryByRole('button', { name: 'Return to the latest message' });
+    scroll.scrollTop = 560;
+    fireEvent.scroll(scroll);
+    expect(latest()).toBeVisible();
+
+    fireEvent.change(findFrom(scroll), { target: { value: 'cache' } });
+    expect(activeRange().toString()).toBe('CACHE');
+    expect(scroll.scrollTop).toBe(210);
+    fireEvent.scroll(scroll);
+    const competingControl = latest();
+    if (competingControl) await user.click(competingControl);
+    expect(scroll.scrollTop).toBe(210);
+    expect(latest()).toBeNull();
+
+    await user.click(within(panel()).getByRole('button', { name: 'Close chat search' }));
+    expect(scroll.scrollTop).toBe(560);
+    fireEvent.scroll(scroll);
+    const returnButton = await screen.findByRole('button', { name: 'Return to the latest message' });
+    await user.click(returnButton);
+    expect(scroll.scrollTop).toBe(1000);
+    expect(latest()).toBeNull();
+  });
+
+  it('closes find on Escape from a focused control outside the chat', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld(), prefs: { motion: 'off' } });
+    await user.click(await screen.findByRole('button', { name: /Why is there a logarithm/ }));
+    const scroll = screen.getByRole('log', { name: 'Conversation' });
+    conversationBounds(scroll);
+    const sidebarChat = screen.getByRole('button', { name: /Seminar questions/ });
+
+    findFrom(scroll);
+    act(() => sidebarChat.focus());
+    expect(sidebarChat).toHaveFocus();
+    expect(fireEvent.keyDown(sidebarChat, shortcut)).toBe(true);
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('search', { name: 'Find in this chat' })).toBeNull();
+    expect(scroll).toHaveFocus();
+    expect(scroll.scrollTop).toBe(1000);
+  });
+
+  it('lets the global search modal consume Escape with focus inside or lost to the body', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld(), prefs: { motion: 'off' } });
+    await user.click(await screen.findByRole('button', { name: /Why is there a logarithm/ }));
+    const scroll = screen.getByRole('log', { name: 'Conversation' });
+    conversationBounds(scroll);
+    const input = findFrom(scroll);
+    const search = screen.getByRole('button', { name: 'Search' });
+    const globalInput = () => screen.findByRole('combobox', { name: 'Search the wiki, materials and chats' });
+    const globalDialog = () => screen.queryByRole('dialog', { name: 'Search' });
+
+    await user.click(search);
+    expect(await globalInput()).toHaveFocus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(globalDialog()).toBeNull());
+    expect(input).toBeInTheDocument();
+
+    await user.click(search);
+    (await globalInput()).blur();
+    expect(document.body).toHaveFocus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(globalDialog()).toBeNull());
+    expect(input).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(input).not.toBeInTheDocument();
+    expect(scroll).toHaveFocus();
   });
 
   it('updates through the chat event stream and clears on switch without taking shortcuts from global search', async () => {

@@ -13,6 +13,8 @@ import {
 import { blockMarkdown, inAppTarget, plural, readableBlockText, relativeTime } from '../document/text';
 import { useInterval, useLoad } from '../document/useLoad';
 import { ReaderPanelHeader } from '../document/readerSurface041/ReaderPanelHeader';
+import { useNotesTranscript } from '../document/readerSurface041/useNotesTranscript';
+import { useReaderFocus } from '../document/readerSurface041/useReaderFocus';
 import { useScrollTarget } from '../document/useScrollTarget';
 import {
   canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, isNavigation, isSkazConnection, namesItsKind,
@@ -347,19 +349,9 @@ function pageContent(page: KbPage): string {
   return JSON.stringify([page.title, page.blocks.map((b) => [b.id, b.kind, b.text])]);
 }
 
-/** Wiki page in the right panel (v7–v8, decisions 20–22). */
-/** A Notes page can link directly to its transcript when it has one available timed source. */
-function notesTranscriptId(page: KbPage | null): string | undefined {
-  if (page?.kind !== 'note' || page.sources.length !== 1) return undefined;
-  const id = page.sources[0];
-  const hasTranscript = page.blocks.some((block) => block.citations.some(
-    (citation) => citation.material_id === id && citation.available && citation.start_ms !== null,
-  ));
-  return hasTranscript ? id : undefined;
-}
-
 const FINDER_FAILED = 'Finder couldn’t show this page. It may have been moved or deleted.';
 
+/** Wiki page in the right panel (v7–v8, decisions 20–22). */
 export function PageView({ target, nonce }: { target: DocTarget; nonce: number }) {
   const { client, chats, bridge } = useServices();
   const askAbout = useAskAbout();
@@ -388,7 +380,6 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
       throw e;
     }));
   const page = state.value;
-  useScrollTarget(bodyRef.current, target.block_id ?? null, nonce, state.load === 'ready');
 
   /*
    * Stage 6 B6 PixelTransition: only when the agent changed THIS open page — a re-check the user asked
@@ -450,7 +441,10 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   };
 
   const kind = shown?.kind ?? 'concept';
-  const transcriptId = notesTranscriptId(shown);
+  const { id: transcriptId, checking: checkingTranscript } = useNotesTranscript(shown);
+  const targetKey = target.block_id ?? null;
+  const focus = useReaderFocus(bodyRef, nonce, shown !== null || state.load === 'error', targetKey, checkingTranscript);
+  useScrollTarget(bodyRef.current, targetKey, nonce, state.load === 'ready', typeof focus === 'object');
   return (
     <>
       <ReaderPanelHeader
@@ -459,8 +453,10 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
         actions={(
           <>
             {transcriptId && (
-              <Button size="sm" variant="quiet"
-                onClick={() => openDocument({ type: 'material', id: transcriptId })}>Transcript</Button>
+              <Button size="sm" variant="quiet" data-reader-action="transcript"
+                onClick={() => openDocument({ type: 'material', id: transcriptId }, {
+                  destination: 'notes', returnFocus: 'transcript', origin: document.activeElement,
+                })}>Transcript</Button>
             )}
             <WikiTermsButton />
             <IconButton icon="chats" label="Ask about page" disabled={!page}

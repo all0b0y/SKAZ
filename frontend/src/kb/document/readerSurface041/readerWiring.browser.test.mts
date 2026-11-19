@@ -18,6 +18,8 @@ before(async () => {
   if (artifacts) await mkdir(artifacts, { recursive: true });
   server = await createServer({
     configFile: false,
+    envFile: false,
+    cacheDir: resolve('.dev/vite-cache/reader-wiring'),
     resolve: { alias: { '@': resolve('frontend/src') } },
     server: { host: '127.0.0.1', port: 0, hmr: false, watch: null },
   });
@@ -101,7 +103,7 @@ for (const theme of ['light', 'dark']) {
         else { errors.push('External request: ' + url.origin); await route.abort(); }
       });
 
-      await page.goto(origin + fixture + '?theme=' + theme);
+      await page.goto(origin + fixture + '?theme=' + theme + (width === 768 ? '&withoutNotesCitations' : ''));
       await page.getByRole('button', { name: /Why is there a logarithm/ }).click();
       const chat = page.getByRole('region', { name: 'Chat' });
       const draft = chat.getByRole('textbox', { name: 'Message' });
@@ -164,20 +166,33 @@ for (const theme of ['light', 'dark']) {
       if (artifacts) await page.screenshot({ path: resolve(artifacts, theme + '-' + width + '-citation.png') });
       await page.keyboard.press('Escape');
       await expect(source).toBeFocused();
-      await source.click();
-      await quote.click();
+      await page.mouse.move(0, 0);
+      await source.press('Enter');
+      await expect(quote).toBeFocused();
+      await page.keyboard.press('Enter');
 
-      await expect(panel.locator('mark.kb-quote')).toHaveText('S equals k times the log of W');
+      const targetQuote = panel.locator('mark.kb-quote');
+      await expect(targetQuote).toHaveText('S equals k times the log of W');
+      await expect(targetQuote).toBeFocused();
       await expect(panel).toHaveAttribute('data-state', 'open');
       const materialLayout = await checkHeaderActions(panel);
       assert.equal(materialLayout.count, 7);
-      await panel.getByRole('button', { name: 'Open the notes' }).click();
+      const notes = panel.getByRole('button', { name: 'Open the notes' });
+      const transcript = panel.getByRole('button', { name: 'Transcript' });
+      const back = panel.getByRole('button', { name: 'Back', exact: true });
+      await notes.press('Enter');
       await expect(panel.getByRole('heading', { name: 'Notes: Lecture 8 — entropy' })).toBeVisible();
+      await expect(transcript).toBeFocused();
       const notesLayout = await checkHeaderActions(panel);
       assert.equal(notesLayout.count, 8);
       if (artifacts) await page.screenshot({ path: resolve(artifacts, theme + '-' + width + '-notes.png') });
-      await panel.getByRole('button', { name: 'Back', exact: true }).click();
-      await expect(panel.locator('mark.kb-quote')).toHaveText('S equals k times the log of W');
+      await page.keyboard.press('Enter');
+      await expect(notes).toBeFocused();
+      await back.press('Enter');
+      await expect(transcript).toBeFocused();
+      await page.keyboard.press('Control+[');
+      await expect(targetQuote).toHaveText('S equals k times the log of W');
+      await expect(notes).toBeFocused();
       const expand = panel.getByRole('button', { name: 'Expand to the centre' });
       await expand.press('Enter');
       await expect(panel).toHaveAttribute('data-state', 'expanded');
@@ -185,6 +200,9 @@ for (const theme of ['light', 'dark']) {
       const collapse = panel.getByRole('button', { name: 'Back to side panel' });
       await expect(collapse).toBeFocused();
       await collapse.press('Enter');
+      await back.press('Enter');
+      await expect(source).toBeFocused();
+      await expect(source).toHaveAttribute('aria-expanded', 'false');
       await expect(draft).toHaveText('Retain this draft');
       await expect(chat.getByTestId('composer')).toHaveCount(1);
       assert.deepEqual(errors, []);
@@ -194,3 +212,43 @@ for (const theme of ['light', 'dark']) {
     });
   }
 }
+
+test('keyboard Close returns to the chat citation and Back returns to the remounted Wiki index link', async (t) => {
+  const page = await browser.newPage({ viewport: { width: 1040, height: 780 }, reducedMotion: 'reduce' });
+  t.after(() => page.close());
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.route('**/*', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin === origin) await route.continue();
+    else { errors.push('External request: ' + url.origin); await route.abort(); }
+  });
+  await page.goto(origin + fixture);
+  await page.getByRole('button', { name: /Why is there a logarithm/ }).click();
+  const chat = page.getByRole('region', { name: 'Chat', exact: true });
+  const draft = chat.getByRole('textbox', { name: 'Message' });
+  await draft.fill('Retain this keyboard draft');
+  const source = chat.getByRole('button', { name: 'Source 1: Lecture 5', exact: true }).first();
+  await source.press('Enter');
+  const jump = page.getByRole('button', { name: /^Open at fragment/ });
+  await expect(jump).toBeFocused();
+  await page.keyboard.press('Enter');
+  const panel = page.getByRole('complementary', { name: 'Document' });
+  await expect(panel.getByRole('heading', { name: 'Lecture 5 — classifiers' })).toBeVisible();
+  await panel.getByRole('button', { name: 'Expand to the centre' }).press('Enter');
+  await expect(chat).toBeHidden();
+  await panel.getByRole('button', { name: 'Close document' }).press('Enter');
+  await expect(panel).toHaveCount(0);
+  await expect(source).toBeFocused();
+  await expect(source).toHaveAttribute('aria-expanded', 'false');
+  await expect(draft).toHaveText('Retain this keyboard draft');
+
+  await page.getByRole('button', { name: 'Wiki', exact: true }).click();
+  await page.getByRole('button', { name: 'Index', exact: true }).click();
+  const indexLink = panel.getByRole('button', { name: 'Open entropy from the index' });
+  await indexLink.press('Enter');
+  await expect(panel.getByRole('heading', { name: 'Entropy', exact: true })).toBeFocused();
+  await panel.getByRole('button', { name: 'Back', exact: true }).press('Enter');
+  await expect(indexLink).toBeFocused();
+  assert.deepEqual(errors, []);
+});

@@ -26,6 +26,8 @@ class RunRef:
     chat_id: str
     message_id: str
     engine: EngineId
+    #: User-authored chat messages delivered inside this live run while it waited for clarification.
+    clarification_message_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

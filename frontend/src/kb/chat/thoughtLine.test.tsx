@@ -336,6 +336,7 @@ describe('Earlier tool-calls collapse (A3 / item 07)', () => {
     rerender(<ThoughtLine message={m6} head={head(m6)} />);
     const trigger = screen.getByRole('button', { name: /1 earlier/i });
     expect(trigger).toHaveTextContent('1 earlier call');
+    expect(trigger).toHaveAccessibleName('1 earlier call');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(trigger.querySelectorAll('svg')).toHaveLength(0);
 
@@ -377,6 +378,7 @@ describe('Earlier tool-calls collapse (A3 / item 07)', () => {
     await user.click(sumToggle);
     const trigger = screen.getByRole('button', { name: /13 earlier/i });
     expect(trigger).toHaveTextContent('13 earlier calls');
+    expect(trigger).toHaveAccessibleName('13 earlier calls');
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(trigger.querySelectorAll('svg')).toHaveLength(0);
 
@@ -543,7 +545,7 @@ describe('Earlier tool-calls collapse (A3 / item 07)', () => {
 
     const css = readFileSync(resolve(__dirname, './thoughtLine.css'), 'utf8');
     expect(css).toMatch(/prefers-reduced-motion:\s*reduce/);
-    expect(css).toMatch(/data-level=['"]calm['"]/);
-    expect(css).toMatch(/data-level=['"]off['"]/);
+    expect(css).toMatch(/data-motion=['"]calm['"]/);
+    expect(css).toMatch(/data-motion=['"]off['"]/);
   });
 });

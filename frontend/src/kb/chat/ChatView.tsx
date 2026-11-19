@@ -23,7 +23,7 @@ import { WebSearchChip } from './webSearch';
 import { ChatOverviewButton } from '../overview/ChatOverviewButton';
 import { savedText } from './saved';
 import type { KbChat } from '../../api/kb/types.gen';
-import { chatWaits, isAnswering, isLocal, type ChatsData, type ChatsStore } from '../state/chats';
+import { backgroundActivity, chatWaits, isAnswering, isLocal, type ChatsData, type ChatsStore } from '../state/chats';
 import { DitherStage } from '../fx/dither/DitherStage';
 import { ChatBackdrop } from '../fx/backdrop/ChatBackdrop';
 import { SelectionProvider } from './select/context';
@@ -32,7 +32,8 @@ import { ScrollEdges } from './ScrollEdges';
 import { ReplyAnchorRail, ReturnToLatest, useReplyAnchors } from './replyAnchors041';
 import { FindInChatPanel } from './findInChat041/FindInChatPanel';
 import { useFindInChat } from './findInChat041/useFindInChat';
-import { ChatTabStrip, ChatTabsEmptyState, useScopedReadingAnchor, type ChatTabItem } from '../shell/chatTabs041';
+import { useAnswerFrames } from './videoFrames041/AnswerFrames';
+import { ChatTabStrip, ChatTabsEmptyState, maxScrollTop, useScopedReadingAnchor, type ChatTabItem } from '../shell/chatTabs041';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
@@ -56,7 +57,7 @@ function useNotice(): [string | null, (text: string | null, ms?: number) => void
 const acceptsAttachmentDrop = (target: EventTarget | null) =>
   target instanceof Element && !!target.closest('.kb-chat__workspace, .kb-composer');
 
-const nearBottom = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+const nearBottom = (el: HTMLElement, top = el.scrollTop) => el.scrollHeight - top - el.clientHeight < 40;
 
 /** The burn-out of the empty view when the first message goes (FX-EFFECTS-SPEC Batch A §6). */
 export const LEAVE_MS = 700;
@@ -145,8 +146,9 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const reopenBtnRef = useRef<HTMLButtonElement | null>(null);
   const [reopenFocus, setReopenFocus] = useState<{ id: string | null; seq: number }>({ id: null, seq: 0 });
   const stick = useRef(true);
-  /** B1 (decision 04): an explicit jump to a reply is still flying; see the onScroll guard. */
+  /** A reply jump leaving the bottom zone must not resume streaming follow on its first frames. */
   const anchorFlight = useRef(false);
+  const returnLanding = useRef<number | null>(null);
   const reduced = useReducedMotion() ?? false;
   const effectiveHidden = hidden || allTabsClosed;
   const { attachmentDrafts } = composer.getState();
@@ -171,10 +173,15 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const leavingHere = !!currentId && leaving === currentId;
 
   const chat = open?.chat ?? null;
+  const lastCompletedId = chat?.messages.filter((message) => message.role === 'assistant' && message.state === 'done').at(-1)?.id;
+  const answerFrames = useAnswerFrames(effectiveHidden ? null : chat?.id ?? null, lastCompletedId);
+  const background = backgroundActivity(open);
+  const activeWorking = background ? background.state === 'answering' : isAnswering(chat);
+  const activeWaiting = background ? !!background.waiting_for_user : !!chat && chatWaits(chat);
   // B1 (decision 04): one stable anchor per assistant reply — the ordered ids the rail mirrors;
-  // streaming grows an answer's text, never its id.
+  // expose the action once the server admits the reply so focus survives settlement and deltas.
   const replyIds = useMemo(
-    () => chat?.messages.flatMap((m) => (m.role === 'assistant' ? [m.id] : [])) ?? [],
+    () => chat?.messages.flatMap((m) => (m.role === 'assistant' && !isLocal(m.id) ? [m.id] : [])) ?? [],
     [chat?.messages],
   );
   // B1 (decision 04): the marker follows the reading position; only explicit navigation ever moves
@@ -198,10 +205,10 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       id,
       title: (isActive ? itemChat?.title : itemSummary?.title) ?? itemSummary?.title ?? itemChat?.title ?? 'New chat',
       working: isActive && itemChat
-        ? isAnswering(itemChat)
+        ? activeWorking
         : hasLocalStream || (itemSummary ? itemSummary.state === 'answering' : isAnswering(itemChat)),
       waiting: isActive && itemChat
-        ? chatWaits(itemChat)
+        ? activeWaiting
         : itemSummary
           ? isWaitingForUser(itemSummary)
           : itemChat
@@ -210,7 +217,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       unread: itemSummary?.unread ?? itemChat?.unread ?? false,
       pinned: (isActive ? itemChat?.pinned : itemSummary?.pinned) ?? itemSummary?.pinned ?? itemChat?.pinned ?? false,
     };
-  }), [openTabIds, list, openChats, currentId, allTabsClosed]);
+  }), [openTabIds, list, openChats, currentId, allTabsClosed, activeWorking, activeWaiting]);
   const lastClosedTitle = useMemo(() => {
     if (!lastClosedTabId) return null;
     return list.find((c) => c.id === lastClosedTabId)?.title ?? openChats[lastClosedTabId]?.chat?.title ?? null;
@@ -225,6 +232,14 @@ export function ChatView({ hidden }: { hidden: boolean }) {
     hidden: effectiveHidden,
     pauseCapture: find.isOpen,
     stickRef: stick,
+    captureOptions: {
+      // Tab persistence and streaming follow use the same decision for each captured position.
+      shouldFollow: (el) => {
+        const near = nearBottom(el);
+        if (!near) anchorFlight.current = false;
+        return near && !anchorFlight.current;
+      },
+    },
     defaultBottom: true,
     getAnchor: (id) => chats.getState().getReadingAnchor(id),
     setAnchor: (id, anchor) => chats.getState().setReadingAnchor(id, anchor),
@@ -256,24 +271,62 @@ export function ChatView({ hidden }: { hidden: boolean }) {
     setActionError(null);
   }, [currentId]);
 
-  // B1 (decision 04): explicit navigation owns the reading position — a jump to a reply takes the
-  // thread off the streaming bottom (the user is reading history). The return-to-latest button
-  // queues no intent here: its landing's own scroll event re-sticks the thread.
+  // A reply jump takes the thread off the streaming bottom. Return to Latest follows again
+  // when it lands, including when the bottom grows while native smooth scrolling is in progress.
   useLayoutEffect(() => {
-    if (anchors.state.intent.kind === 'jumpToReply') { anchorFlight.current = true; stick.current = false; }
-  }, [anchors.state.intent]);
+    const intent = anchors.state.intent;
+    const el = scrollRef.current;
+    if (!el || intent.kind === 'none') return;
+    if (intent.kind === 'jumpToReply') {
+      returnLanding.current = null;
+      anchorFlight.current = !nearBottom(el, intent.top);
+      stick.current = !anchorFlight.current && nearBottom(el);
+    } else {
+      anchorFlight.current = false;
+      returnLanding.current = reduced ? null : maxScrollTop(el);
+    }
+  }, [anchors.state.intent, reduced]);
 
+  const captureReadingPosition = readingAnchor.captureNow;
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !currentId || effectiveHidden || find.isOpen) return;
+    const onScrollEnd = () => {
+      const landing = returnLanding.current;
+      returnLanding.current = null;
+      // A manual interruption ends elsewhere. Only a completed return follows the grown bottom.
+      if (landing === null || Math.abs(el.scrollTop - landing) > 1) return;
+      const bottom = maxScrollTop(el);
+      if (bottom <= landing) return;
+      el.scrollTop = bottom;
+      captureReadingPosition(currentId);
+    };
+    el.addEventListener('scrollend', onScrollEnd);
+    return () => {
+      returnLanding.current = null;
+      el.removeEventListener('scrollend', onScrollEnd);
+    };
+  }, [captureReadingPosition, currentId, effectiveHidden, find.isOpen]);
+
+  // A newly opened transcript can receive its first layout after its messages commit.
+  const lastReply = replyIds.at(-1);
+  const replyLayoutReady = lastReply !== undefined && (anchors.state.measurements[lastReply]?.height ?? 0) > 0;
+  const viewportHeight = anchors.state.view?.viewportHeight;
   // Find controls the viewport until it restores the starting position on close.
   useLayoutEffect(() => {
     const closedFindHere = !effectiveHidden && findingChat.current !== null && findingChat.current === currentId && !find.isOpen;
     findingChat.current = find.isOpen ? currentId : null;
     const el = scrollRef.current;
-    if (!el || find.isOpen) return;
+    if (!el || effectiveHidden || find.isOpen) return;
     // B1: find gave the viewport back — any anchor flight from before it opened is over, and the
     // position A4 restored decides the stick again (A4 owns the restore; B1 clears only its guard).
     if (closedFindHere) { anchorFlight.current = false; stick.current = nearBottom(el); }
-    else if (stick.current) el.scrollTop = el.scrollHeight;
-  });
+    // Follow transcript updates and viewport resizes. Growing a tool-history fold
+    // alone leaves the reader in place, including while new tool events arrive.
+    else if (stick.current && !el.querySelector('.kb-thought__earlier-trigger[aria-expanded="true"]')) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [chat?.messages, replyLayoutReady, viewportHeight, leavingHere, currentId, effectiveHidden, find.isOpen]);
 
   const act = async (message: KbMessage, what: 'regenerate' | 'resume' | 'save') => {
     if (!currentId || busy[message.id]) return;
@@ -364,20 +417,9 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       {notice && <p className="kb-notice" role="status">{notice}</p>}
       <div className="kb-chat__workspace" hidden={allTabsClosed}>
       <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!effectiveHidden} reduced={fieldStill} calm={fieldCalm}>
-      {showBackdrop && <ChatBackdrop working={isAnswering(chat)} active={!effectiveHidden} reduced={reduced} />}
+      {showBackdrop && <ChatBackdrop working={activeWorking} active={!effectiveHidden} reduced={reduced} />}
       <div className="kb-chat__scroll" ref={scrollRef} role="log" aria-label="Conversation" aria-live="off"
-        data-anchors="true" tabIndex={currentId ? 0 : undefined}
-        onScroll={(e) => {
-          if (find.isOpen) return; // A4 owns the viewport while its panel is open.
-          // B1 (decision 04 §7): the native scrollbar is gone (replyAnchors.css hooks this
-          // attribute), scrolling itself is untouched. A reply jump that starts at the bottom
-          // flies through the stick zone; its own events must not re-stick the thread mid-flight,
-          // or the next streamed delta would snap the flight back to the bottom.
-          const el = e.currentTarget;
-          const near = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-          if (anchorFlight.current) { if (near) return; anchorFlight.current = false; }
-          stick.current = near;
-        }}>
+        data-anchors="true" tabIndex={currentId ? 0 : undefined}>
         {currentId && open?.load === 'loading' && !chat && <div className="kb-chat__wait"><Spinner label="Opening the chat" /></div>}
         {currentId && open?.load === 'error' && !chat && (
           <Banner tone="error" title="Couldn’t open this chat."
@@ -390,7 +432,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
             {messages.map((m) => (m.role === 'user' ? <UserMessage key={m.id} message={m} actions={questionActions(m)} />
               : m.role === 'system' ? <SystemMessage key={m.id} chatId={chat.id} message={m} />
                 : (
-                  <AssistantMessage key={m.id} chatId={chat.id} message={m} actions={{
+                  <AssistantMessage key={m.id} chatId={chat.id} message={m}
+                    frames={answerFrames.filter((frame) => frame.message_id === m.id)} actions={{
                     busy: busy[m.id] ?? null,
                     error: actionError?.id === m.id ? actionError.text : null,
                     fix,
@@ -412,10 +455,10 @@ export function ChatView({ hidden }: { hidden: boolean }) {
           dash; a click jumps to that answer and takes the thread off the streaming bottom. While
           the find panel is open A4 owns the viewport, so the click does nothing until it closes. */}
       <ReplyAnchorRail ids={anchors.state.ids} activeId={anchors.state.activeId}
-        onGoToReply={(id) => { if (find.isOpen) return; anchorFlight.current = true; stick.current = false; anchors.goToReply(id); }} />
+        onGoToReply={(id) => { if (!find.isOpen) anchors.goToReply(id); }} />
       {/* B1 (decision 04 §4): back to the newest message — only once the user left the bottom;
           its landing's scroll event re-sticks streaming (the explicit return, not a forced pull). */}
-      <ReturnToLatest visible={anchors.state.showReturn} onReturn={anchors.returnToLatest} />
+      <ReturnToLatest visible={!find.isOpen && anchors.state.showReturn} onReturn={anchors.returnToLatest} />
       <FindInChatPanel find={find} />
       </DitherStage>
       {showField && (

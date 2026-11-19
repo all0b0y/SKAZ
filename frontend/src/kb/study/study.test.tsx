@@ -797,6 +797,11 @@ describe('Mixed study sets with agent-knowledge provenance (#12)', () => {
     await user.click(within(testEl).getByRole('button', { name: 'See result' }));
     expect(await within(testEl).findByText('2 of 4')).toBeInTheDocument();
     const summaryRows = within(testEl).getAllByRole('listitem');
+    expect(summaryRows).toHaveLength(4);
+    for (const i of [0, 1, 3]) {
+      expect(within(summaryRows[i]!).getByText('Not based on your materials')).toBeVisible();
+    }
+    expect(within(summaryRows[2]!).queryByText('Not based on your materials')).toBeNull();
     await user.click(within(summaryRows[0]!).getByRole('button', { name: 'Review' }));
     expect(await within(testEl).findByText('Which anomaly is possible under snapshot isolation?')).toBeInTheDocument();
     expect(within(testEl).getByText('Not based on your materials')).toBeInTheDocument();

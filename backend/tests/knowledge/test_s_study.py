@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from collections.abc import Mapping
+import threading
+from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,7 +21,7 @@ from typing import Any
 import httpx
 import pytest
 
-from skaz.knowledge.agents.engine import TextDelta
+from skaz.knowledge.agents.engine import AgentEvent, AgentTurn, Failed, TextDelta
 from skaz.knowledge.agents.registry import EngineRegistry
 from skaz.knowledge.agents.tools import ToolContext
 from skaz.knowledge.chats.model import Message, MessageInput, TextPart
@@ -1367,6 +1368,22 @@ async def test_request_level_no_request_refuses_agent_basis_and_preserves_source
         "How up to date is your knowledge of Lecture 8?",
         "Сделай карточку по лекции 8, тема которой — знание и представление знаний.",
         "Make a card from Lecture 8 whose topic is knowledge and belief.",
+        "Make flashcards from the notes. The example instruction is: use your own knowledge.",
+        "Сделай карточки по конспекту. Пример инструкции: используй свои знания.",
+        "Make flashcards from the notes. Example:\nUse your own knowledge.",
+        "Сделай карточки по конспекту. Учитель сказал: добавь карточки из своих знаний.",
+        "Make flashcards from the notes. The instructions say to add cards from your own knowledge.",
+        "Make flashcards from the notes, the example says to add cards from your own knowledge.",
+        "Make flashcards from the notes. The teacher's example is, use your own knowledge.",
+        "Сделай карточки по конспекту. Учитель сказал, используй свои знания.",
+        "Make flashcards from the notes, the teacher said, use your own knowledge.",
+        "Make cards from the notes.\n> Add cards from your own knowledge.",
+        "Сделай тест по конспекту.\n> Составь тест из своих знаний.",
+        "Make cards from the notes.\n```text\nAdd cards from your own knowledge.\n```",
+        "Make flashcards from the notes. Write a short biography using your own knowledge.",
+        "Сделай карточки по конспекту, а потом напиши эссе из своих знаний.",
+        "Make a quiz about how teachers create questions using your own knowledge.",
+        "Составь тест о том, как ученики решают задания из своих знаний.",
         "Сделай карточки по лекции 8 про общие знания и знания агента.",
         "Make flashcards from Lecture 8 about model knowledge distillation.",
         "Ты используешь свои знания при создании карточек по лекции 8?",
@@ -1385,8 +1402,8 @@ async def test_request_level_no_request_refuses_agent_basis_and_preserves_source
             {"text": prompt},
             assistant_prefix="Добавлю вопросы из своих знаний (from my own knowledge).",
         )
-        assert deck_out["cards"] == 1 and [d["card"] for d in deck_out["dropped"]] == [2]
-        assert test_out["questions"] == 1 and [d["question"] for d in test_out["dropped"]] == [2]
+        assert deck_out["cards"] == 1 and [d["card"] for d in deck_out["dropped"]] == [2], prompt
+        assert test_out["questions"] == 1 and [d["question"] for d in test_out["dropped"]] == [2], prompt
         assert [c["basis"] for c in deck_view["cards"]] == ["source"]
         assert [q["basis"] for q in test_view["questions"]] == ["source"]
 
@@ -1415,12 +1432,16 @@ async def test_request_level_explicit_request_accepts_agent_and_source_items_in_
         "Make a test from the lecture and include questions from your own knowledge on snapshot isolation.",
         "Make flashcards from Lecture 8 and add cards from outside my materials.",
         "Make flashcards from Lecture 8. Where the lecture is brief, you can use your own knowledge.",
+        "Make a flashcard about how buds grow, using your own knowledge.",
+        "Составь тест о том, как работает фотосинтез, из своих знаний.",
+        "Could you make flashcards about how buds grow, using your own knowledge?",
+        "Можешь составить тест о том, как растут почки, используя свои знания?",
     ):
         deck_out, test_out, deck_view, test_view = await _run_mixed_turn(
             runtime, kb_client, engine, chat_id, library, {"text": prompt}
         )
-        assert deck_out["cards"] == 2 and deck_out["dropped"] == []
-        assert test_out["questions"] == 2 and test_out["dropped"] == []
+        assert deck_out["cards"] == 2 and deck_out["dropped"] == [], prompt
+        assert test_out["questions"] == 2 and test_out["dropped"] == [], prompt
         assert [c["basis"] for c in deck_view["cards"]] == ["source", "agent"]
         assert [q["basis"] for q in test_view["questions"]] == ["source", "agent"]
 
@@ -1460,6 +1481,33 @@ async def test_request_level_explicit_request_accepts_agent_and_source_items_in_
     assert follow_deck["cards"] == 2 and follow_deck["dropped"] == []
 
     await runtime.kb_chats.close()
+
+
+@pytest.mark.parametrize(("prompt", "allowed"), [
+    ("Make flashcards from the notes. Use your own knowledge to write a biography.", False),
+    ("Make flashcards from the notes and use your own knowledge to write a biography.", False),
+    ("Сделай карточки по конспекту. Используй свои знания, чтобы написать биографию.", False),
+    ("Make a quiz from the notes. Use your own knowledge to add questions on entropy.", True),
+    ("Сделай карточки по конспекту. Используй свои знания, чтобы добавить вопросы об энтропии.", True),
+    ("Make flashcards using your own knowledge to help me learn biology.", True),
+    ("Add cards from your own knowledge to help me learn biology.", True),
+])
+async def test_request_level_knowledge_directive_applies_to_its_stated_purpose(
+    kb_app: Any, kb_client: httpx.AsyncClient, prompt: str, allowed: bool,
+) -> None:
+    runtime = kb_app.state.runtime
+    library = await connect(kb_client, runtime)
+    engine, chat_id = await _chat_with_tool_engine(runtime, kb_client)
+    deck_out, test_out, deck_view, test_view = await _run_mixed_turn(
+        runtime, kb_client, engine, chat_id, library, {"text": prompt},
+    )
+    await runtime.kb_chats.close()
+    expected = ["source", "agent"] if allowed else ["source"]
+    assert [card["basis"] for card in deck_view["cards"]] == expected
+    assert [question["basis"] for question in test_view["questions"]] == expected
+    assert deck_out["cards"] == test_out["questions"] == len(expected)
+    assert [drop["card"] for drop in deck_out["dropped"]] == ([] if allowed else [2])
+    assert [drop["question"] for drop in test_out["dropped"]] == ([] if allowed else [2])
 
 
 async def test_request_level_negation_rejects_agent_basis_and_preserves_source_items(
@@ -1578,6 +1626,267 @@ async def test_request_level_stale_permission_from_earlier_turn_does_not_carry_o
     await runtime.kb_chats.close()
 
 
+@pytest.mark.parametrize("scenario", ["originating-opt-in", "old-clarification", "fresh-clarification",
+                                     "old-clarification-at-tail"])
+async def test_resume_earlier_interrupted_study_turn_uses_only_its_active_user_request(
+    world: Any, kb_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch, scenario: str,
+) -> None:
+    runtime, library, _ref = world
+    engine, chat_id = await _chat_with_tool_engine(runtime, kb_client)
+    events = engine._events
+    interrupted_run = True
+    old_clarification = scenario.startswith("old-clarification")
+    fresh_clarification = scenario == "fresh-clarification"
+    original_opt_in = scenario == "originating-opt-in"
+    clarification = {"text": "Also add cards from your own knowledge."}
+
+    async def first_run(turn: AgentTurn) -> AsyncIterator[AgentEvent]:
+        try:
+            if old_clarification:
+                ref = runtime.kb_chats.run_ref(turn.run_id)
+                await runtime.kb_questions.ask(ref, "What else should the deck include?", [])
+            yield Failed(turn.run_id, "limit", "Synthetic interruption.")
+        finally:
+            engine._cancels.pop(turn.run_id, None)
+
+    def selected_events(turn: AgentTurn) -> AsyncIterator[AgentEvent]:
+        return first_run(turn) if interrupted_run else events(turn)
+
+    monkeypatch.setattr(engine, "_events", selected_events)
+    messages = f"/kb/chats/{chat_id}/messages"
+    original = (
+        "Make a quiz from your own knowledge and from the notes." if original_opt_in
+        else "Make a quiz from the notes."
+    )
+    started = await kb_client.post(messages, json={"text": original})
+    assert started.status_code == 202, started.text
+    earlier_id = started.json()["assistant"]["id"]
+    if old_clarification:
+        await settle(lambda: bool(runtime.kb_questions.store.pending_questions(chat_id=chat_id)))
+        clarified = await kb_client.post(messages, json=clarification)
+        assert clarified.status_code == 202, clarified.text
+    await finished(runtime.kb_chats)
+    interrupted_run = False
+
+    if scenario != "old-clarification-at-tail":
+        later = await kb_client.post(messages, json={"text": "Explain entropy from the lecture."})
+        assert later.status_code == 202, later.text
+        await finished(runtime.kb_chats)
+    previous = (await kb_client.get(f"/kb/chats/{chat_id}")).json()["messages"]
+    assert next(message for message in previous if message["id"] == earlier_id)["state"] == "interrupted"
+    assert previous[-1]["state"] == "done"
+
+    engine.script = lambda _turn: [
+        *([Ask("What else should the quiz include?")] if fresh_clarification else []),
+        Invoke("skaz_study_make_deck", {"title": "Resumed deck", "cards": _mixed_cards_payload(library)}),
+        Invoke("skaz_study_make_test", {
+            "title": "Resumed test", "questions": _mixed_questions_payload(library),
+        }),
+    ]
+    resumed = await kb_client.post(f"{messages}/{earlier_id}/resume")
+    assert resumed.status_code == 202, resumed.text
+    assert resumed.json()["user"]["input"]["text"] == original
+    appended = []
+    if fresh_clarification:
+        await settle(lambda: bool(runtime.kb_questions.store.pending_questions(chat_id=chat_id)))
+        clarified = await kb_client.post(messages, json=clarification)
+        assert clarified.status_code == 202, clarified.text
+        appended.append(clarified.json()["user"]["id"])
+    await finished(runtime.kb_chats)
+    current = (await kb_client.get(f"/kb/chats/{chat_id}")).json()["messages"]
+    fresh_id = resumed.json()["assistant"]["id"]
+    assert [m["id"] for m in current] == [
+        fresh_id if m["id"] == earlier_id else m["id"] for m in previous
+    ] + appended
+    expected = ["source", "agent"] if original_opt_in or fresh_clarification else ["source"]
+    for raw, items in zip(engine.outcomes[int(fresh_clarification):], ("cards", "questions"), strict=True):
+        made = json.loads(raw)
+        shown = (await kb_client.get(f"/kb/study/{made['study_id']}")).json()
+        assert [item["basis"] for item in shown[items]] == expected
+    await runtime.kb_chats.close()
+
+
+@pytest.mark.parametrize("basis", ["agent", "source"])
+async def test_open_check_recheck_and_ask_use_question_basis(
+    world: Any, kb_client: httpx.AsyncClient, basis: str,
+) -> None:
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    engine, chat_id = await _chat_with_tool_engine(runtime, kb_client)
+    path = f"/kb/chats/{chat_id}/messages"
+    reference = "Мера беспорядка системы; она растёт в изолированной системе."
+    grows = "она растёт в изолированной системе"
+    answer = "Беспорядок; она растёт."
+    agent = basis == "agent"
+    question = {
+        "type": "open", "question": "Что такое энтропия и как она меняется?",
+        "answers": [reference], "basis": basis,
+        "citations": [] if agent else [_cite(library, 1, ENTROPY)],
+    }
+    engine.script = lambda _turn: [
+        Invoke("skaz_study_make_test", {"title": "Entropy", "questions": [question]}),
+    ]
+    prompt = "Make a quiz from your own knowledge." if agent else "Make a quiz from the notes."
+    sent = await kb_client.post(path, json={"text": prompt})
+    assert sent.status_code == 202, sent.text
+    await finished(runtime.kb_chats)
+    block_id = json.loads(engine.outcomes[0])["study_id"]
+    block_path = f"/kb/study/{block_id}"
+    item_id = study.questions(study.get(block_id))[0].id
+    assert study.ideas(item_id) is None
+
+    source = 0 if agent else 1
+    review = {
+        "ideas": [
+            {"text": "Мера беспорядка.", "source": source, "quote": "" if agent else ENTROPY},
+            {"text": "Растёт в изолированной системе.", "source": source, "quote": "" if agent else grows},
+        ],
+        "points": [{"idea": 1, "status": "covered"}, {"idea": 2, "status": "partial", "yours": "она растёт"}],
+        "model_answer": [], "also_right": [], "comment": "Почти.",
+    }
+    engine.script = lambda _turn: [TextDelta("", json.dumps(review))]
+    checked = await kb_client.post(f"{block_path}/check-open", json={"item_id": item_id, "text": answer})
+    assert checked.status_code == 200, checked.text
+    await study.settle()
+    check_turn = engine.turns[-1]
+    assert check_turn.tools is None and check_turn.response_schema
+    result = (await kb_client.get(block_path)).json()["questions"][0]["response"]
+    assert result["score"] == 0.75 and result["checked_by"].startswith("Codex")
+    idea = result["review"]["ideas"][1]
+    assert [c["quote"] for c in idea["citations"]] == ([] if agent else [grows])
+
+    engine.script = lambda _turn: [TextDelta("", '{"status":"covered","note":"Да, это сказано."}')]
+    rechecked = await kb_client.post(f"{block_path}/recheck", json={
+        "item_id": item_id, "idea_id": idea["id"], "words": "она растёт",
+    })
+    assert rechecked.status_code == 200, rechecked.text
+    await study.settle()
+    recheck_turn = engine.turns[-1]
+    assert recheck_turn.tools is None and recheck_turn.response_schema
+    result = (await kb_client.get(block_path)).json()["questions"][0]["response"]
+    assert result["score"] == 1.0 and result["review"]["ideas"][1]["recheck"]["status"] == "covered"
+
+    engine.script = lambda _turn: [TextDelta("", "A synthetic explanation.")]
+    asked = await kb_client.post(path, json={
+        "text": "Explain this question",
+        "selection": {
+            "message_id": sent.json()["assistant"]["id"], "block_id": block_id, "kind": "study",
+            "title": "Entropy", "items": [{"id": item_id, "label": "question 1"}], "intent": "ask",
+        },
+    })
+    assert asked.status_code == 202, asked.text
+    await finished(runtime.kb_chats)
+    follow_up = engine.turns[-1].messages[-1].content
+    await runtime.kb_chats.close()
+
+    check = check_turn.instructions or ""
+    recheck = recheck_turn.instructions or ""
+    check_data = check_turn.messages[0].content
+    recheck_data = recheck_turn.messages[0].content
+    assert all("<untrusted-data" in data and answer in data for data in (check_data, recheck_data))
+    if agent:
+        assert "saved reference answer" in check and 'source 0, quote ""' in check
+        assert "saved reference answer" in recheck and reference in recheck_data
+        assert "not based on the user's materials" in follow_up
+        assert "Never invent material citations" in follow_up
+        assert "Reference answer from the source" not in check_data
+        assert "Source fragments:" not in recheck_data
+        assert "read and cite the fragments" not in follow_up
+        assert '"basis": "agent"' in follow_up and '"source": []' in follow_up
+    else:
+        assert "Use only the source fragments" in check and "quote copied verbatim" in check
+        assert ENTROPY in check_data and "Reference answer from the source" in check_data
+        assert "only from the source fragments" in recheck and grows in recheck_data
+        assert "read and cite the fragments" in follow_up and ENTROPY in follow_up
+
+
+async def test_chat_events_and_snapshot_share_live_study_check_state(
+    world: Any, kb_client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    engine, chat_id = await _chat_with_tool_engine(runtime, kb_client)
+    engine.script = lambda _turn: [
+        Invoke("skaz_study_make_test", {"title": "Open check", "questions": [_questions(library)[3]]}),
+    ]
+    chat_path = f"/kb/chats/{chat_id}"
+    sent = await kb_client.post(f"{chat_path}/messages", json={"text": "Make a quiz from the notes."})
+    assert sent.status_code == 202, sent.text
+    await finished(runtime.kb_chats)
+    snapshot = (await kb_client.get(chat_path)).json()
+    initial = next(p for p in snapshot["messages"][-1]["parts"] if p["type"] == "study")
+    check_path = f"/kb/study/{initial['id']}/check-open"
+    payload = {"item_id": initial["questions"][0]["id"], "text": "Беспорядок"}
+    entered, release = asyncio.Event(), asyncio.Event()
+    writing = asyncio.Event()
+    finish_write = threading.Event()
+    loop = asyncio.get_running_loop()
+    put_answer = study._put_answer
+
+    def pause_result_write(
+        block: StudyBlock, item_id: str, entry: dict[str, Any], *, attempt_id: str | None = None,
+    ) -> StudyBlock:
+        if entry["checked"]:
+            loop.call_soon_threadsafe(writing.set)
+            assert finish_write.wait(timeout=10)
+        result: StudyBlock = put_answer(block, item_id, entry, attempt_id=attempt_id)
+        return result
+
+    monkeypatch.setattr(study, "_put_answer", pause_result_write)
+
+    async def judge(_call: Any) -> Mapping[str, Any]:
+        entered.set()
+        await release.wait()
+        return {
+            "ideas": [
+                {"text": "Энтропия — мера беспорядка.", "source": 1, "quote": ENTROPY},
+                {"text": "Она растёт.", "source": 1, "quote": "она растёт в изолированной системе"},
+            ],
+            "points": [{"idea": 1, "status": "covered"}],
+        }
+
+    def response(part: dict[str, Any]) -> dict[str, Any]:
+        return part["questions"][0]["response"]  # type: ignore[no-any-return]
+
+    async def latest_update(cursor: int) -> tuple[dict[str, Any], int]:
+        result = (await kb_client.get(f"{chat_path}/events", params={"after": cursor, "wait": 2})).json()
+        updates = [e for e in result["events"] if e["type"] == "part_update"
+                   and e["part"]["type"] == "study" and e["part"]["id"] == initial["id"]]
+        return response(updates[-1]["part"]), result["cursor"]
+
+    study.judge = judge
+    posted = response((await kb_client.post(check_path, json=payload)).json())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        active, cursor = await latest_update(snapshot["cursor"])
+        current = (await kb_client.get(chat_path)).json()
+        active_snapshot = response(next(p for p in current["messages"][-1]["parts"] if p["type"] == "study"))
+        release.set()
+        await asyncio.wait_for(writing.wait(), timeout=2)
+        current = (await kb_client.get(chat_path)).json()
+        pending_write = response(next(p for p in current["messages"][-1]["parts"] if p["type"] == "study"))
+    finally:
+        release.set()
+        finish_write.set()
+        await study.settle()
+    completed, cursor = await latest_update(cursor)
+    assert completed["checked"] and completed["score"] == 0.5 and not completed["checking"]
+
+    # Leave the stored flag behind by cancelling its suspended task, as happens on interruption.
+    entered.clear()
+    release.clear()
+    await kb_client.post(check_path, json=payload)
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    (task,) = study._tasks
+    task.cancel()
+    await study.settle()
+    stopped, _ = await latest_update(cursor)
+    assert not stopped["checking"] and "check stopped" in stopped["error"]
+    assert posted["checking"] and posted["error"] is None
+    assert active == active_snapshot == pending_write == posted
+    await runtime.kb_chats.close()
+
+
 async def test_study_instructions_and_source_only_sets_preserve_source_basis_across_save_and_reopen(
     world: Any, kb_client: httpx.AsyncClient,
 ) -> None:
@@ -1593,8 +1902,9 @@ async def test_study_instructions_and_source_only_sets_preserve_source_basis_acr
     assert "Only when the user explicitly asks in the current chat turn" in study_paragraph
     assert 'set basis "agent" with no citations on each such item' in study_paragraph
     assert '"Not based on your materials"' in study_paragraph
-    assert "missing attached materials, missing quotes, failed quote checks or search errors never turn this on" in (
-        study_paragraph
+    assert (
+        "missing attached materials, missing quotes, failed quote checks or search errors never turn this on"
+        in study_paragraph
     )
 
     runtime, library, _ref = world

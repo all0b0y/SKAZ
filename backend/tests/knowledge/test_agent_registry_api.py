@@ -178,7 +178,7 @@ async def test_agents_api(agents_client: Any, kb_client: httpx.AsyncClient) -> N
         {"id": "gpt-5.5", "label": "GPT-5.5", "efforts": ["low", "high"], "default_effort": "high",
          # 0.3.1 K2/K4: the picker's section, human name and visibility
          "provider": "codex", "provider_label": "Codex", "name": "GPT-5.5", "tag": None, "visible": True,
-         "default_visible": True, "favorite": False}
+         "default_visible": True, "favorite": False, "supports_image": None, "input_modalities": []}
     ]
     assert by_id["claude_code"] | {"checked_at": "-"} == {
         "id": "claude_code",
@@ -209,6 +209,8 @@ async def test_agents_api(agents_client: Any, kb_client: httpx.AsyncClient) -> N
         # 0.3.1 K2: shown in the picker; no models, so no provider sections
         "visible": True,
         "providers": [],
+        "visual_transport": None,
+        "visual_transport_reason": None,
     }
     assert by_id["hermes"]["action"] == "install" and by_id["hermes"]["min_version"] == "0.21.5"
 

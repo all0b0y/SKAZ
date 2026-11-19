@@ -213,7 +213,9 @@ def _cites(
 
 
 _QUOTED_SPAN = re.compile(
-    r'"[^"\n]*"'
+    r"(?ms:^(?P<fence>`{3,}|~{3,})[^`~\n]*\n.*?(?:^(?P=fence)[`~]*$|\Z))"
+    r"|(?m:^>[^\n]*)"
+    r'|"[^"\n]*"'
     r"|«[^»\n]*»"
     r"|“[^”\n]*”"
     r"|„[^“”\n]*[“”]"
@@ -313,7 +315,7 @@ _RU_INST_KNOWLEDGE = (
 )
 
 _AGENT_KNOWLEDGE_OPT_IN = re.compile(
-    r"(?:"
+    r"(?:(?P<en_directive>"
     + _EN_DIRECTIVE_PREFIX
     + _EN_DIRECTIVE_VERB
     + r"\s+(?:(?:some\s+|a\s+few\s+|more\s+|extra\s+|additional\s+|an?\s+)?"
@@ -321,6 +323,7 @@ _AGENT_KNOWLEDGE_OPT_IN = re.compile(
     + r"(?:cards?|flash\s*cards?|questions?|items?|material|facts?|examples?)\s+"
     + r"(?:from|out\s+of|based\s+on|using)\s+)?"
     + _EN_AGENT_KNOWLEDGE
+    + r")"
     + r"|\b(?:from|out\s+of|based\s+on|using|by\s+using"
     + r"|(?:by\s+)?(?:drawing|relying|leaning)\s+(?:also\s+)?on)\s+(?:also\s+)?"
     + _EN_AGENT_KNOWLEDGE
@@ -329,13 +332,14 @@ _AGENT_KNOWLEDGE_OPT_IN = re.compile(
     + r"(?:outside|beyond)\s+(?:of\s+)?"
     + r"(?:my\s+|the\s+|our\s+|these\s+|attached\s+|provided\s+)"
     + r"(?:materials?|sources?|lectures?|notes|documents?|textbooks?)\b"
-    + r"|\b"
+    + r"|(?P<ru_directive>\b"
     + _RU_DIRECTIVE_VERB
     + r"\s+(?:также\s+|еще\s+|и\s+|смело\s+)?"
     + r"(?:(?:пару\s+|несколько\s+|еще\s+|немного\s+)?"
     + r"(?:открыт\w+\s+|тестов\w+\s+)?(?:карточ\w*|вопрос\w*|задани\w*|пункт\w*)\s+"
     + r"(?:из|на\s+основе|с\s+использованием|с\s+помощью)\s+)?"
     + _RU_AGENT_KNOWLEDGE
+    + r")"
     + r"|\b(?:из|на\s+основе|на\s+базе|с\s+использованием|с\s+помощью|при\s+помощи"
     + r"|используя|привлекая|применяя|задействуя"
     + r"|(?:опираясь|полагаясь)\s+(?:также\s+|еще\s+)?на)\s+(?:также\s+|еще\s+|и\s+)?"
@@ -359,6 +363,8 @@ _AGENT_KNOWLEDGE_OPT_IN = re.compile(
     re.IGNORECASE,
 )
 
+_DIRECTIVE_PURPOSE = re.compile(r"(?:\s+to|\s*,?\s+чтобы)\s+(?P<work>[^,]+)", re.IGNORECASE)
+
 _SENTENCE_DISQUALIFIER = re.compile(
     r"\b(?:"
     r"not\s+sure|unsure|uncertain|hesitant|whether\s+or\s+not|maybe\s+not|or\s+not"
@@ -376,14 +382,21 @@ _POLITE_REQUEST_SENTENCE = re.compile(
     re.IGNORECASE,
 )
 
-_INTERROGATIVE_WORD = re.compile(
-    r"\b(?:"
-    r"how|what|when|where|why|who|whose|which|whether"
-    r"|(?:do|does|did|is|are|was|were|have|has|had|should|must)\s+"
-    r"(?:you|your|(?:the\s+)?(?:agent|assistant|ai|model|llm)|it|they|we|i)"
-    r"|насколько|каков\w*|какой|какая|какое|какие|каким\w*|каких|до\s+какого|с\s+какого"
-    r"|откуда|почему|зачем|когда|где|куда|кто|чей|чья|чье|чьи|что\s+за"
-    r")\b",
+_STUDY_REQUEST_START = re.compile(
+    r"^(?:(?:and|or|then|and\s+then|и|а|затем|потом|а\s+потом|и\s+потом)\s+)?"
+    r"(?:(?:can|could|would|will)\s+you\s+|(?:ты\s+|вы\s+)?(?:можешь|можете)\s+)?"
+    r"(?:(?:please|also)\s+|пожалуйста[, ]+)?"
+    r"\b(?:make|create|generate|build|write|prepare|draft|add|include|give\s+me"
+    r"|сдела\w*|состав\w*|созда\w*|сгенерир\w*|придума\w*|подготов\w*|напиш\w*|написать"
+    r"|добав\w*|включ\w*|дай\w*)\b",
+    re.IGNORECASE,
+)
+
+_ATTRIBUTION = re.compile(
+    r"\b(?:examples?|instance|instructions?|prompts?|quotes?|phrases?|wording"
+    r"|say(?:s|ing)?|said|wrote|reads?"
+    r"|пример\w*|инструкци\w*|промпт\w*|цитат\w*|фраз\w*|формулиров\w*"
+    r"|говор\w*|сказа\w*|написа\w*|глас\w*)\b",
     re.IGNORECASE,
 )
 
@@ -539,20 +552,41 @@ _NOT_STRICTLY_MATERIALS = re.compile(
 def _clause_is_affirmative_opt_in(sentence: str, match: re.Match[str]) -> bool:
     if _SENTENCE_DISQUALIFIER.search(sentence) is not None:
         return False
-    if sentence.rstrip().endswith("?") and (
-        _POLITE_REQUEST_SENTENCE.search(sentence) is None
-        or _INTERROGATIVE_WORD.search(sentence) is not None
-    ):
-        return False
     if _SENTENCE_AFFIRMATIVE_DIRECTIVE.search(sentence) is None:
         return False
-    clause_prefix = sentence[: match.start()]
-    local_prefix = clause_prefix.rsplit(",", 1)[-1]
-    return (
-        _PREFIX_QUESTION_OR_NON_AGENT.search(local_prefix) is None
-        and _TOPIC_IMMEDIATE_PREFIX.search(local_prefix) is None
-        and _TOPIC_CLAUSE_PREFIX.search(clause_prefix) is None
-    )
+    if (match["en_directive"] or match["ru_directive"]) and not _STUDY_WORK_CONTEXT.search(match[0]):
+        # A directive to use knowledge for another task does not grant it for nearby Study work.
+        purpose = _DIRECTIVE_PURPOSE.match(sentence, match.end())
+        if purpose and not _STUDY_WORK_CONTEXT.search(purpose["work"]):
+            return False
+
+    # The directive pattern can consume the delimiter before the words that grant permission.
+    prefix = sentence[: match.end() - len(match[0].lstrip(" ,:\t"))]
+    local_prefix = prefix.rsplit(",", 1)[-1]
+    direct_study_request = bool(_STUDY_REQUEST_START.match(prefix) and _STUDY_WORK_CONTEXT.search(prefix))
+    if ":" in prefix:
+        heading, local_prefix = prefix.rsplit(":", 1)
+        if not direct_study_request or _ATTRIBUTION.search(heading):
+            return False
+    else:
+        # A comma can also introduce reported speech, so inspect its lead-in before a detached match.
+        lead_in = prefix.rstrip(" ,\t").rsplit(",", 1)[-1].lstrip()
+        if _ATTRIBUTION.search(lead_in) and not _STUDY_REQUEST_START.match(lead_in):
+            return False
+    if _STUDY_REQUEST_START.match(local_prefix.lstrip()) and not _STUDY_WORK_CONTEXT.search(local_prefix):
+        return False
+    if sentence.rstrip().endswith("?") and (
+        _POLITE_REQUEST_SENTENCE.match(sentence) is None
+        or (not direct_study_request and match.start() != 0)
+    ):
+        return False
+    if _PREFIX_QUESTION_OR_NON_AGENT.search(local_prefix) or _TOPIC_IMMEDIATE_PREFIX.search(local_prefix):
+        return False
+    # A detached basis phrase can modify the main Study request after an embedded topic clause.
+    # Within the topic itself, the same words could describe how someone else does the work.
+    if not local_prefix.strip() and prefix.rstrip().endswith(",") and direct_study_request:
+        return True
+    return _TOPIC_CLAUSE_PREFIX.search(prefix) is None
 
 
 def allows_agent_knowledge(request_text: str | None) -> bool:
@@ -568,7 +602,7 @@ def allows_agent_knowledge(request_text: str | None) -> bool:
     scrubbed = _NOT_STRICTLY_MATERIALS.sub(" ", cleaned)
     if _AGENT_KNOWLEDGE_NEGATION.search(scrubbed) is not None:
         return False
-    unquoted = _QUOTED_SPAN.sub(" ; ", cleaned)
+    unquoted = re.sub(r":\n+", ": ", _QUOTED_SPAN.sub(" ; ", cleaned))
     unquoted_scrubbed = _NOT_STRICTLY_MATERIALS.sub(" ", unquoted)
     if _AGENT_KNOWLEDGE_NEGATION.search(unquoted_scrubbed) is not None:
         return False

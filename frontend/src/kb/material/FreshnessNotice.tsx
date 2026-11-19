@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { KbFreshnessMark, KbFreshnessMarks, KbLinkCheck, KbLinkObservation } from '../../api/kb/types.gen';
+import type { KbFreshnessMark, KbFreshnessMarks, KbLinkObservation } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Button, Icon } from '../ui';
 import { useUi } from '../state/context';
@@ -122,7 +122,8 @@ function MarkBlock({ mark, onDelete, onChanged }: {
   );
 }
 
-export type Run = { phase: 'idle' } | { phase: 'running'; id: string } | { phase: 'stopped' } | { phase: 'failed'; message: string };
+export type Run = { phase: 'idle' | 'submitting' | 'running' | 'stopped' } | { phase: 'failed'; message: string };
+type LinkCheckAttempt = { timer?: ReturnType<typeof setTimeout> };
 
 /** Everything the material draws from the N1 freshness state: the blocks below the head and the
  *  manual "Check links" entry point that sits in the actions row beside Write notes (11/A). */
@@ -155,6 +156,7 @@ export function useFreshness(materialId: string | null, onReplaced: () => void):
   const [note, setNote] = useState<string | null>(null);
   const [observation, setObservation] = useState<KbLinkObservation | null>(null);
   const live = useRef(true);
+  const activeCheck = useRef<LinkCheckAttempt | null>(null);
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
 
   const load = useCallback(() => {
@@ -163,39 +165,58 @@ export function useFreshness(materialId: string | null, onReplaced: () => void):
     maintenance.marks(materialId).then((d) => { if (live.current) { setData(d); setAsked(true); } },
       () => { if (live.current) setAsked(true); });
   }, [maintenance, materialId]);
-  useEffect(() => { setData(null); setAsked(false); setRun({ phase: 'idle' }); setNote(null); setObservation(null); load(); }, [load]);
-
-  const settle = useCallback((check: KbLinkCheck) => {
-    const mine = check.observations.find((o) => o.material_id === materialId) ?? null;
-    if (check.state === 'done') { setObservation(mine); setRun({ phase: 'idle' }); load(); }
-    else if (check.state === 'paused' || check.state === 'cancelled') setRun({ phase: 'stopped' });
-    else if (check.state === 'error') setRun({ phase: 'failed', message: 'The link check could not finish.' });
-  }, [load, materialId]);
-
-  const runId = run.phase === 'running' ? run.id : null;
   useEffect(() => {
-    if (!runId) return undefined;
-    const timer = setInterval(() => {
-      freshnessClient.link_check(runId).then((check) => { if (live.current) settle(check); }, (e: unknown) => {
-        if (live.current) setRun({ phase: 'failed', message: errorText(e) });
-      });
-    }, POLL_MS);
-    return () => clearInterval(timer);
-  }, [freshnessClient, runId, settle]);
-
-  const check = useCallback(async () => {
-    if (!materialId) return;
+    setData(null);
+    setAsked(false);
+    setRun({ phase: 'idle' });
     setNote(null);
     setObservation(null);
-    try {
-      const linkCheck = await freshnessClient.check_links({ material_ids: [materialId] });
-      if (!live.current) return;
-      if (linkCheck.state === 'running' || linkCheck.state === 'queued') setRun({ phase: 'running', id: linkCheck.id });
-      else settle(linkCheck);
-    } catch (e) {
-      if (live.current) setRun({ phase: 'failed', message: errorText(e) });
-    }
-  }, [freshnessClient, materialId, settle]);
+    load();
+    return () => {
+      clearTimeout(activeCheck.current?.timer);
+      activeCheck.current = null;
+    };
+  }, [freshnessClient, load]);
+
+  const check = useCallback(async () => {
+    if (!materialId || activeCheck.current) return;
+    // Take ownership before React commits the disabled button.
+    const attempt: LinkCheckAttempt = {};
+    activeCheck.current = attempt;
+    setRun({ phase: 'submitting' });
+    setNote(null);
+    setObservation(null);
+
+    const advance = async (jobId?: string): Promise<void> => {
+      try {
+        const result = await (jobId === undefined
+          ? freshnessClient.check_links({ material_ids: [materialId] })
+          : freshnessClient.link_check(jobId));
+        if (activeCheck.current !== attempt) return;
+        if (result.state === 'running' || result.state === 'queued') {
+          setRun((current) => current.phase === 'running' ? current : { phase: 'running' });
+          // Schedule the next read only after the current one answered.
+          attempt.timer = setTimeout(() => void advance(result.id), POLL_MS);
+          return;
+        }
+        activeCheck.current = null;
+        if (result.state === 'done') {
+          setObservation(result.observations.find((o) => o.material_id === materialId) ?? null);
+          setRun({ phase: 'idle' });
+          load();
+        } else if (result.state === 'paused' || result.state === 'cancelled') {
+          setRun({ phase: 'stopped' });
+        } else {
+          setRun({ phase: 'failed', message: 'The link check could not finish.' });
+        }
+      } catch (e) {
+        if (activeCheck.current !== attempt) return;
+        activeCheck.current = null;
+        setRun({ phase: 'failed', message: errorText(e) });
+      }
+    };
+    await advance();
+  }, [freshnessClient, load, materialId]);
 
   const changed = useCallback((mark: KbFreshnessMark, ingestJobId: string | null) => {
     setData((d) => (d ? { ...d, marks: d.marks.map((m) => (m.id === mark.id ? mark : m)) } : d));
@@ -206,7 +227,8 @@ export function useFreshness(materialId: string | null, onReplaced: () => void):
   const last = observation ?? data?.last_link_check ?? null;
   const goneMark = marks.some((m) => m.kind === 'link_gone');
   const couldNot = !goneMark && last?.outcome === 'could_not_check';
-  return { asked, marks, last, couldNot, checking: run.phase === 'running', observation, run, note, check, changed };
+  const checking = run.phase === 'submitting' || run.phase === 'running';
+  return { asked, marks, last, couldNot, checking, observation, run, note, check, changed };
 }
 
 /** The freshness blocks of one material: its marks, the last check's result and a running check —

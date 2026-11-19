@@ -5,6 +5,7 @@ The agent writes plain Markdown plus:
 * ``⟦m:<material_id>:<seg>⟧`` (``<seg>`` may be ``seg-12``), optionally with the
   verbatim words it relied on: ``⟦m:<material_id>:<seg>|<exact words>⟧``;
 * ``⟦p:<page_id>⟧`` or ``⟦p:<page_id>#<block_id>⟧``;
+* ``⟦frame:<visual_id>⟧`` for a linked frame supplied to this turn;
 * a fenced block ```` ```skaz-connection ```` holding JSON;
 * a fenced answer block ```` ```skaz-block ```` holding JSON (P1): its opening is reported at once
   (``BlockStart``: the chat shows a placeholder while it streams), its data when it closes.
@@ -29,6 +30,7 @@ _FENCE_OPEN = re.compile(r"^[ \t]{0,3}```(skaz-connection|skaz-block)[ \t]*\n", 
 _FENCE_CLOSE = re.compile(r"^[ \t]{0,3}```[ \t]*$", re.MULTILINE)
 _MATERIAL = re.compile(r"(mat-[A-Za-z0-9-]{1,80}):(?:seg-)?([1-9]\d{0,8})(?:\|(.*))?", re.DOTALL)
 _PAGE = re.compile(r"(pg-[A-Za-z0-9-]{1,80})(?:#(c-[A-Za-z0-9-]{1,120}))?")
+_FRAME = re.compile(r"vis-[A-Za-z0-9-]{1,192}")
 TOKEN_PATTERN = re.compile(r"⟦[^⟦⟧]*⟧")
 
 
@@ -56,6 +58,11 @@ class PageToken:
 
 
 @dataclass(frozen=True)
+class FrameToken:
+    visual_id: str
+
+
+@dataclass(frozen=True)
 class ConnectionOut:
     payload: str
 
@@ -76,11 +83,11 @@ class BlockData:
     cut: Cut = ""
 
 
-Output = KnowledgeOut | TextOut | CiteToken | PageToken | ConnectionOut | BlockStart | BlockData
+Output = KnowledgeOut | TextOut | CiteToken | PageToken | FrameToken | ConnectionOut | BlockStart | BlockData
 
 
-def parse_token(body: str) -> CiteToken | PageToken | KnowledgeOut | None:
-    """``m:…`` / ``p:…`` without the brackets; ``None`` when it is not a well-formed reference."""
+def parse_token(body: str) -> CiteToken | PageToken | FrameToken | KnowledgeOut | None:
+    """Parse a reference without its brackets."""
     if body == "knowledge":
         return KnowledgeOut()
     kind, sep, rest = body.partition(":")
@@ -97,6 +104,8 @@ def parse_token(body: str) -> CiteToken | PageToken | KnowledgeOut | None:
     if kind == "p":
         match = _PAGE.fullmatch(rest)
         return PageToken(match.group(1), match.group(2)) if match else None
+    if kind == "frame" and _FRAME.fullmatch(rest):
+        return FrameToken(rest)
     return None
 
 

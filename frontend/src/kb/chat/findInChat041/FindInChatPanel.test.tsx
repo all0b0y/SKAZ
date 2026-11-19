@@ -198,6 +198,62 @@ describe('chat find panel', () => {
     expect(activeText()).toBe('Another');
   });
 
+  it('searches a changed query without walking the unchanged rendered history again', () => {
+    render(<Conversation><Answer><p>Historic cache</p></Answer></Conversation>);
+    const history = screen.getByText('Historic cache');
+    const input = openFrom(mockScroller());
+    const style = vi.spyOn(window, 'getComputedStyle');
+
+    search(input, 'cache');
+    expect(activeText()).toBe('cache');
+    expect(style).toHaveBeenCalledWith(history);
+    style.mockClear();
+
+    search(input, 'absent');
+    expect(status()).toHaveTextContent('No matches');
+    expect(style).not.toHaveBeenCalledWith(history);
+  });
+
+  it('updates a streamed answer and preserves the active hit without walking earlier answers', async () => {
+    const thread = (text: string) => (
+      <Conversation>
+        <Answer id="history"><p>Historic cache</p></Answer>
+        <Answer id="stream"><p>{text}</p></Answer>
+      </Conversation>
+    );
+    const { rerender } = render(thread('Live cache'));
+    const history = screen.getByText('Historic cache');
+    const input = openFrom(mockScroller());
+    search(input, 'cache');
+    expect(status()).toHaveTextContent('Match 1 of 2');
+    const style = vi.spyOn(window, 'getComputedStyle');
+
+    rerender(thread('Live cache, followed by CACHE'));
+    await waitFor(() => expect(status()).toHaveTextContent('Match 1 of 3'));
+    expect(highlights.get(activeKey)?.values().next().value?.startContainer).toBe(history.firstChild);
+    expect(style).not.toHaveBeenCalledWith(history);
+    fireEvent.keyDown(input, { key: 'Enter', shiftKey: true });
+    expect(activeText()).toBe('CACHE');
+  });
+
+  it('refreshes visible runs when an expandable block changes before the next query', () => {
+    render(<Conversation>
+      <Answer><details><summary>Expandable answer</summary><p>Hidden cache</p></details></Answer>
+    </Conversation>);
+    const input = openFrom(mockScroller());
+    search(input, 'cache');
+    expect(status()).toHaveTextContent('No matches');
+
+    const disclosure = screen.getByText('Expandable answer').closest('details')!;
+    disclosure.open = true;
+    search(input, 'hidden cache');
+    expect(activeText()).toBe('Hidden cache');
+
+    disclosure.open = false;
+    search(input, 'cache');
+    expect(status()).toHaveTextContent('No matches');
+  });
+
   it('uses the active range to reveal an offscreen hit and retains DOM selection', () => {
     const { unmount } = render(<Conversation reducedMotion={false}>
       <Question><span>Selected text</span></Question>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePrefs, useServices, useUi } from '../state/context';
 import { RIGHT_MIN, SIDE_MIN } from '../state/prefs';
 import { AllMaterials } from '../materials/AllMaterials';
@@ -11,6 +11,7 @@ import { Resizer } from './Resizer';
 import { SidePanel } from './SidePanel';
 import { TitleBar } from './TitleBar';
 import { useStartList } from '../fx/listEntrance';
+import { useReaderCloseFocus } from '../document/readerSurface041/useReaderFocus';
 import '../document/readerSurface041/readerOverlays.css';
 
 function useWindowWidth(): number {
@@ -45,6 +46,8 @@ export function Shell() {
   const center = useUi((s) => s.center);
   const docExpanded = useUi((s) => s.docExpanded);
   const windowWidth = useWindowWidth();
+  const appRef = useRef<HTMLDivElement>(null);
+  useReaderCloseFocus(appRef, right);
 
   const isExplore = section === 'explore';
   // The graph asks for a wide panel (v4/v5); it still yields to the centre minimum.
@@ -57,7 +60,7 @@ export function Shell() {
   useStartList(layout.side > 0 ? section : null);
 
   return (
-    <div className="kb-app kb-reader-finish">
+    <div className="kb-app kb-reader-finish" ref={appRef}>
       <TitleBar />
       <div className="kb-body">
         <Rail />

@@ -352,6 +352,10 @@ function PdfPages(props: TranscriptProps) {
 
 const SPEECH = new Set(['recording', 'audio', 'video', 'video_link']);
 
+export function hasSpeechTranscript(material: KbMaterial): boolean {
+  return SPEECH.has(material.kind) && material.fragments.length > 0;
+}
+
 export function Transcript(props: TranscriptProps) {
   if (SPEECH.has(props.material.kind)) return <SpeechText {...props} />;
   if (props.material.kind === 'pdf' || props.material.kind === 'book') return <PdfPages {...props} />;

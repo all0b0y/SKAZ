@@ -6,7 +6,10 @@ are mirrored here without modifying any pre-existing host or predecessor files.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from ..knowledge.sources.visual import PreparedVisual as SourceVisual
 
 from ..knowledge.agents.engine import EngineId
 
@@ -40,6 +43,7 @@ class VisualSourceLocator:
     timestamp_ms: int | None = None
     label: str = ""
     source_sha256: str | None = None
+    source_url: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,7 @@ class PreparedVisual:
     source_text_excerpt: str | None = None
     permitted: bool = False
     permission_reason: str | None = None
+    linked_frame: SourceVisual | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.byte_size != len(self.data):

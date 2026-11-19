@@ -175,7 +175,8 @@
 .kb-st-sum { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .kb-st-sr { display: flex; align-items: center; gap: var(--kb-sp-8); padding: var(--kb-sp-6) var(--kb-sp-2); border-bottom: 1px solid var(--kb-line); font-size: var(--t-sm); }
 .kb-st-sr:last-child { border-bottom: 0; }
-.kb-st-sr > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-st-sr__question { flex: 1; min-width: 0; }
+.kb-st-sr__question > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-st-sr--ok > .kb-icon { color: var(--kb-ok); }
 .kb-st-sr--bad > .kb-icon { color: var(--kb-muted); } /* «not yet» is neutral, never red (P3-a) */
 .kb-st-sr--part > .kb-icon { color: var(--kb-warn); }
@@ -377,6 +378,7 @@
 .kb-st-pf--front .kb-st-basis { margin: var(--kb-sp-6) 0 auto; text-align: center; }
 .kb-st-pf--back .kb-st-basis { margin: var(--kb-sp-6) 0 0; padding-left: var(--kb-sp-14); text-align: left; }
 .kb-deck__q .kb-st-basis { margin-top: var(--kb-sp-2); }
+.kb-st-sr__question .kb-st-basis { margin-top: var(--kb-sp-2); }
 
 /* N4-7, N4-8, F6: saved decks and tests in the Study side panel. */
 .kb-shelf__hint { margin: var(--kb-sp-2) 0 var(--kb-sp-6) var(--kb-sp-18); font-size: var(--t-xs); color: var(--kb-muted); }

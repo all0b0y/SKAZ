@@ -10,45 +10,80 @@ const SKIP = 'script, style, template, textarea, .kb-visually-hidden, .katex-mat
 const SVG = 'http://www.w3.org/2000/svg';
 const SVG_METADATA = new Set(['title', 'desc', 'defs', 'clipPath', 'mask', 'symbol']);
 
-/** Read message content in DOM order, including offscreen history and drawn diagram labels. */
-export function collectRenderedChatRuns(scroll: HTMLElement): RenderedChatTextRun[] {
-  const view = scroll.ownerDocument.defaultView;
+function readMessageRuns(message: HTMLElement): RenderedChatTextRun[] {
+  const view = message.ownerDocument.defaultView;
   if (!view) return [];
+  const body = message.querySelector<HTMLElement>(':scope > :is(.kb-msg__bubble, .kb-msg__body)');
+  if (!body || message.closest('[hidden]') || view.getComputedStyle(message).display === 'none') return [];
+  const messageId = message.dataset.messageId!;
   const runs: RenderedChatTextRun[] = [];
-  for (const message of scroll.querySelectorAll<HTMLElement>(MESSAGE)) {
-    const body = message.querySelector<HTMLElement>(':scope > :is(.kb-msg__bubble, .kb-msg__body)');
-    if (!body || message.closest('[hidden]') || view.getComputedStyle(message).display === 'none') continue;
-    const messageId = message.dataset.messageId!;
-    let breakBefore = true;
-    const walk = (node: Node, svgLabel: Element | null = null) => {
-      if (node instanceof view.Text) {
-        if (!node.data || (breakBefore && !node.data.trim())) return;
-        if (node.parentElement?.namespaceURI === SVG && !svgLabel) return;
-        runs.push({ messageId, text: node.data, node, svgLabel, breakBefore });
-        breakBefore = false;
-      } else if (node instanceof view.Element) {
-        const tag = node.localName;
-        const svg = node.namespaceURI === SVG;
-        if (node.matches(SKIP) || (svg && SVG_METADATA.has(tag))) return;
-        const style = view.getComputedStyle(node);
-        if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse'
-          || style.contentVisibility === 'hidden') return;
-        const block = svg ? tag === 'text' : tag === 'br'
-          || (style.display !== '' && !style.display.startsWith('inline') && style.display !== 'contents');
-        if (block) breakBefore = true;
-        const label = svg && tag === 'text' ? node : svgLabel;
-        if (node instanceof view.HTMLDetailsElement && !node.open) {
-          const summary = node.querySelector(':scope > summary');
-          if (summary) walk(summary, label);
-        } else {
-          for (const child of node.childNodes) walk(child, label);
-        }
-        if (block) breakBefore = true;
+  let breakBefore = true;
+  const walk = (node: Node, svgLabel: Element | null = null) => {
+    if (node instanceof view.Text) {
+      if (!node.data || (breakBefore && !node.data.trim())) return;
+      if (node.parentElement?.namespaceURI === SVG && !svgLabel) return;
+      runs.push({ messageId, text: node.data, node, svgLabel, breakBefore });
+      breakBefore = false;
+    } else if (node instanceof view.Element) {
+      const tag = node.localName;
+      const svg = node.namespaceURI === SVG;
+      if (node.matches(SKIP) || (svg && SVG_METADATA.has(tag))) return;
+      const style = view.getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse'
+        || style.contentVisibility === 'hidden') return;
+      const block = svg ? tag === 'text' : tag === 'br'
+        || (style.display !== '' && !style.display.startsWith('inline') && style.display !== 'contents');
+      if (block) breakBefore = true;
+      const label = svg && tag === 'text' ? node : svgLabel;
+      if (node instanceof view.HTMLDetailsElement && !node.open) {
+        const summary = node.querySelector(':scope > summary');
+        if (summary) walk(summary, label);
+      } else {
+        for (const child of node.childNodes) walk(child, label);
       }
-    };
-    walk(body);
-  }
+      if (block) breakBefore = true;
+    }
+  };
+  walk(body);
   return runs;
+}
+
+/** Read rendered message content in DOM order, including offscreen history and drawn diagram labels. */
+export function collectRenderedChatRuns(
+  scroll: HTMLElement,
+  readMessage = readMessageRuns,
+): RenderedChatTextRun[] {
+  return Array.from(scroll.querySelectorAll<HTMLElement>(MESSAGE)).flatMap(readMessage);
+}
+
+/** Reuse unchanged message runs within one find session, always in current DOM order. */
+export function createRenderedChatReader(scroll: HTMLElement) {
+  let cache = new WeakMap<HTMLElement, RenderedChatTextRun[]>();
+  const clear = () => { cache = new WeakMap(); };
+  return {
+    read() {
+      return collectRenderedChatRuns(scroll, (message) => {
+        const cached = cache.get(message);
+        if (cached) return cached;
+        const runs = readMessageRuns(message);
+        cache.set(message, runs);
+        return runs;
+      });
+    },
+    invalidate(records: readonly MutationRecord[]) {
+      for (const { target, type } of records) {
+        const element = type === 'characterData' ? target.parentElement : target as Element;
+        const message = element?.closest<HTMLElement>(MESSAGE);
+        if (!message || !scroll.contains(message)) {
+          // Thread structure and ancestor styles can affect every message.
+          clear();
+          return;
+        }
+        cache.delete(message);
+      }
+    },
+    clear,
+  };
 }
 
 function toRange(runs: readonly RenderedChatTextRun[], { runIndex, start, end }: ChatMatchRange): Range | null {

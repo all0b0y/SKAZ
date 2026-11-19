@@ -88,7 +88,6 @@ export function AddMaterialModal() {
   const noAgent = agents !== null && !agentReady;
   const wikiOn = toWiki ?? (agentReady && wikiDefault(items, auto));
   const speech = items.some(isSpeech);
-  const localVideo = items.some(isLocalVideo);
   const blocked = speech ? speechBlock(speechSettings, keys) : null;
   const openPlace = () => { if (!blocked) return; setOpen(false); openSettings(blocked.section); };
   const firstSpeech = items.find(isSpeech)?.id;
@@ -198,6 +197,7 @@ export function AddMaterialModal() {
   // A link that failed its check stays on the list with its reason; Add neither counts nor sends it (QA B23).
   const broken = (i: AddItem) => i.type === 'link' && i.error !== null;
   const sendable = items.filter((i) => !broken(i) && !already[i.id]);
+  const localVideo = sendable.some(isLocalVideo);
   const typed = creating ? newName.trim() : '';
   const taken = typed ? folders.find((f) => sameName(f.name, typed)) ?? null : null;
   const pendingNew = typed !== '' && taken === null;
@@ -388,13 +388,13 @@ export function AddMaterialModal() {
                 <span>{target ? `Translate into ${languageName(target)}` : 'Translate'}</span>
               </div>
             )}
-            {localVideo && (
-              <p className="kb-arow__hint kb-muted" data-testid="local-video-audio-only">
-                {LOCAL_VIDEO_AUDIO_ONLY_NOTICE}
-              </p>
-            )}
           </div>
         )}
+        <p id="kb-add-video-notice" role="status" aria-live="polite"
+          className={localVideo ? 'kb-arow__hint kb-muted' : 'kb-visually-hidden'}
+          data-testid={localVideo ? 'local-video-audio-only' : undefined}>
+          {localVideo && LOCAL_VIDEO_AUDIO_ONLY_NOTICE}
+        </p>
         {Object.keys(errors).length > 0 && (noneAdded
           ? <Banner tone="error" title="None of these were added.">Fix or remove them and try again.</Banner>
           : <Banner tone="error" title="Some materials weren’t added.">The others were. Fix or remove these and try again.</Banner>
@@ -404,7 +404,8 @@ export function AddMaterialModal() {
         <span className="kb-muted">{sendable.length ? `${sendable.length} ${sendable.length === 1 ? 'material' : 'materials'}` : ''}</span>
         <span className="kb-head__spacer" />
         <Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>
-        <Button variant="fill" busy={busy} disabled={!ready} onClick={() => void submit()}>
+        <Button variant="fill" busy={busy} disabled={!ready} aria-describedby={localVideo ? 'kb-add-video-notice' : undefined}
+          onClick={() => void submit()}>
           {creating && pendingNew ? `Create «${typed}» and add ${sendable.length}` : sendable.length > 1 ? `Add ${sendable.length}` : 'Add'}
         </Button>
       </div>

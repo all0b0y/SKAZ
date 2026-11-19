@@ -55,8 +55,17 @@ describe('Empty chat: the dither field', () => {
     expect(log).toBeEmptyDOMElement();
     expect(log.contains(plate())).toBe(false);
     expect(stage().contains(plate())).toBe(false);
-    // The plate comes right before the message field.
-    expect(plate()!.nextElementSibling).toContainElement(screen.getByTestId('message-input'));
+    // The plate comes right before the message field. The 0.4.1 chat tabs wrap the stage and the
+    // plate in the workspace element: the wrapper boundary is what sits between the copy and the
+    // field now — no other content does. The plate ends the workspace, and the composer with the
+    // field is the next element after it. (The rendered proof — the copy visible above one usable
+    // composer, no overlap — is scripts/kb-emptygate.smoke.spec.ts.)
+    const workspace = plate()!.closest('.kb-chat__workspace');
+    expect(workspace).not.toBeNull();
+    expect(workspace!.parentElement).toBe(centre());
+    expect(plate()!.parentElement).toBe(workspace);
+    expect(plate()!.nextElementSibling).toBeNull();
+    expect(workspace!.nextElementSibling).toContainElement(screen.getByTestId('message-input'));
     // Clicking the empty area is harmless where there is no canvas (jsdom).
     await userEvent.setup().pointer({ keys: '[MouseLeft]', target: log });
     expect(field()).toBeInTheDocument();

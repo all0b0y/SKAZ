@@ -93,6 +93,13 @@ ANSWERED = (
     "Answer in the language of the question unless the user wrote their own words in another language. "
     "The question:"
 )
+ANSWERED_AGENT = (
+    "The user asks about this question of their test (pressed «Ask the agent») after answering it. "
+    "Explain it using the saved right answer and any key ideas. Start with what the user got right, "
+    "then explain what to add, kindly. Say the question is not based on the user's materials. "
+    "Never invent material citations. Answer in the language of the question unless the user wrote "
+    "their own words in another language. The question:"
+)
 
 
 def question_context(study: StudyService, block_id: str, item_id: str) -> tuple[str, str, str] | None:
@@ -142,4 +149,5 @@ def question_context(study: StudyService, block_id: str, item_id: str) -> tuple[
     if question.explanation:
         shown["agent_explanation"] = question.explanation
     shown["answered"] = True
-    return ANSWERED, "test question", json.dumps(shown, ensure_ascii=False, indent=1)
+    note = ANSWERED_AGENT if question.basis == "agent" else ANSWERED
+    return note, "test question", json.dumps(shown, ensure_ascii=False, indent=1)

@@ -126,6 +126,8 @@ class KbMaterialAdded(BaseModel):
     hidden_count: int
     #: Why the material is ``failed`` (e.g. a scanned PDF), else ``null``.
     failure_reason: str | None
+    #: Verified pages of a saved local PDF with no extracted text, for visual attachment intake.
+    saved_pdf_page_count: int | None = Field(default=None, gt=0)
     #: Mode ``both``: the video material added beside the article (``null`` otherwise or if it failed).
     video: KbMaterialSummary | None
     #: Mode ``both``: why the video could not be added (the article was added).

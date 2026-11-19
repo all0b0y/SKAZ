@@ -60,7 +60,7 @@
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
-  transition: grid-template-rows 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s ease;
+  transition: opacity 0.16s ease;
 }
 
 .kb-thought__earlier-fold[data-open='true'] {
@@ -82,24 +82,20 @@
   list-style: none;
 }
 
-.kb-thought[data-level='full'] .kb-thought__earlier-fold[data-open='true'] .kb-call {
-  animation: kb-early-chip-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
+/* CSS tracks both the Appearance knob and live OS changes on an already mounted answer. */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion='calm'], [data-motion='off']) .kb-thought__earlier-fold {
+    transition: grid-template-rows 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s ease;
 
-.kb-thought[data-level='full'] .kb-thought__earlier-fold[data-open='true'] .kb-call:nth-child(2n) {
-  animation-delay: 40ms;
-}
+    &[data-open='true'] .kb-call {
+      animation: kb-early-chip-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
 
-.kb-thought[data-level='full'] .kb-thought__earlier-fold[data-open='true'] .kb-call:nth-child(3n) {
-  animation-delay: 80ms;
-}
-
-.kb-thought[data-level='full'] .kb-thought__earlier-fold[data-open='true'] .kb-call:nth-child(4n) {
-  animation-delay: 120ms;
-}
-
-.kb-thought[data-level='full'] .kb-thought__earlier-fold[data-open='true'] .kb-call:nth-child(5n) {
-  animation-delay: 160ms;
+    &[data-open='true'] .kb-call:nth-child(2n) { animation-delay: 40ms; }
+    &[data-open='true'] .kb-call:nth-child(3n) { animation-delay: 80ms; }
+    &[data-open='true'] .kb-call:nth-child(4n) { animation-delay: 120ms; }
+    &[data-open='true'] .kb-call:nth-child(5n) { animation-delay: 160ms; }
+  }
 }
 
 @keyframes kb-early-chip-in {
@@ -113,22 +109,13 @@
   }
 }
 
-.kb-thought[data-level='calm'] .kb-thought__earlier-fold {
-  transition: opacity 0.16s ease;
-}
-
-.kb-thought[data-level='off'] .kb-thought__earlier-fold,
-.kb-thought[data-level='off'] .kb-thought__earlier-trigger {
+[data-motion='off'] .kb-thought__earlier-fold,
+[data-motion='off'] .kb-thought__earlier-trigger {
   transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .kb-thought__earlier-fold {
-    transition: opacity 0.16s ease;
-  }
-
-  .kb-thought__earlier-fold[data-open='true'] .kb-call {
+  .kb-thought .kb-thought__earlier-fold[data-open='true'] .kb-thought__earlier-list > .kb-call {
     animation: none;
-    animation-delay: 0ms;
   }
 }

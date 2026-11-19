@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { copyToClipboard } from '../../lib/clipboard';
-import type { KbAnswerBlockPart, KbCitation, KbMessage, KbMessageInput, KbMessagePart, KbWikiFixPart } from '../../api/kb/types.gen';
+import type { KbAnswerBlockPart, KbAnswerFrame, KbCitation, KbMessage, KbMessageInput, KbMessagePart, KbWikiFixPart } from '../../api/kb/types.gen';
 import { Button, Icon, IconButton, useCopied, useIconPlay } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
@@ -36,6 +36,7 @@ import { useDiagramFix } from './diagramFix';
 import { SelectionChip } from './select/SelectionChip';
 import { WikiFixCard } from './select/WikiFixCard';
 import { UnclearClearRow, useLastUnclearAnswer } from '../study/Unclear';
+import { AnswerFrames } from './videoFrames041/AnswerFrames';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -217,13 +218,16 @@ export interface AnswerActions {
 }
 
 /** One assistant answer: parts, the interruption card, and the actions under it. */
-export function AssistantMessage({ chatId, message, actions }: { chatId: string; message: KbMessage; actions: AnswerActions }) {
+export function AssistantMessage({ chatId, message, actions, frames = [] }: {
+  chatId: string; message: KbMessage; actions: AnswerActions; frames?: readonly KbAnswerFrame[];
+}) {
   const [copied, setCopied] = useCopied();
   // Feedback motion (animated-icons spec): the ✓ draws itself after a copy, the arrow turns on Regenerate.
   const [copyPlay, replayCopy] = useIconPlay();
   const [regenPlay, replayRegen] = useIconPlay();
   const open = useOpenDocument();
   const empty = message.parts.filter((p) => p.type !== 'tool' && p.type !== 'knowledge' && p.type !== 'text_only').length === 0;
+  const shaping = actions.busy === 'save' && !message.saved_page_id;
   const textOnly = message.parts.some((p) => p.type === 'text_only');
   // U1: an answer that waits for its agent's update says so instead of «Writing an answer…».
   const waitingFor = useAgentUpdates((s) => (empty && message.state === 'streaming' ? updateWait(s.view, message.engine, message.id) : null));
@@ -252,6 +256,7 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
         </SourcesProvider>
       </div>
       <FoldedSourcesRow index={sources} foldKey={`sources:${chatId}/${message.id}`} />
+      {message.state === 'done' && <AnswerFrames chatId={chatId} frames={frames} />}
       <NotFromSources chatId={chatId} message={message} />
       {/* P3-b: «Clear now» under the chat's last answer that read the «Unclear» marks. */}
       {message.state === 'done' && lastUnclear === message.id && <UnclearClearRow chatId={chatId} />}
@@ -279,14 +284,12 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
             }} />
           <IconButton icon="retry" iconPlay={regenPlay} label="Regenerate" size="sm" disabled={!!actions.busy}
             onClick={() => { replayRegen(); actions.onRegenerate(); }} />
+          {shaping && <Button size="sm" variant="quiet" busy disabled>Shaping for wiki…</Button>}
           {message.saved_page_id ? (
             <IconButton icon="check" label="Saved to wiki — open" size="sm"
               onClick={() => open({ type: 'page', id: message.saved_page_id! })} />
-          ) : actions.busy === 'save' ? (
-            <>
-              <Button size="sm" variant="quiet" busy disabled>Shaping for wiki…</Button>
-              <IconButton icon="stop" size="sm" label="Cancel wiki shaping" onClick={actions.onCancelSave} />
-            </>
+          ) : shaping ? (
+            <IconButton icon="stop" size="sm" label="Cancel wiki shaping" onClick={actions.onCancelSave} />
           ) : (
             <IconButton icon="saveWiki" label="Save to wiki" size="sm" disabled={!!actions.busy || message.state !== 'done'} onClick={actions.onSave} />
           )}

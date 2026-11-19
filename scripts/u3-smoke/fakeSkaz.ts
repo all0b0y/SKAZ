@@ -3,6 +3,7 @@
 // init script, so it is the only bridge the page sees. Unknown routes are recorded, not invented.
 
 import type { BridgeRequest, JsonResponse } from '../../frontend/src/api/bridge';
+import type { KbVisualPreflightRequest, KbVisualPreflightResponse } from '../../frontend/src/api/kb/types.gen';
 import { fakeNative, serveFake } from '../../frontend/src/kb/test/fakeKb';
 import { docWorld } from '../../frontend/src/kb/test/fixtures';
 
@@ -14,6 +15,28 @@ const skaz = {
   request: async (req: BridgeRequest): Promise<JsonResponse<unknown>> => {
     const answer = serveFake(world, req);
     if (answer) return answer;
+    if (req.method === 'POST' && req.path === '/kb/chats/visual-preflight') {
+      const body = req.body as KbVisualPreflightRequest | undefined;
+      // U3 opens materials beside an empty composer. This context alone has no visual intent.
+      if (body?.engine && body.context?.open_material_id && !body.text?.trim()
+        && !body.attachments?.length && !body.mentions?.length && !body.quotes?.length) {
+        const data: KbVisualPreflightResponse = {
+          requires_visual: false,
+          supported: false,
+          engine: body.engine,
+          model_id: body.model ?? null,
+          state: 'unverified',
+          reason_code: null,
+          title: null,
+          detail: null,
+          locator: null,
+          text_only_available: false,
+          draft_preserved: true,
+          compatible_models: [],
+        };
+        return { ok: true, status: 200, data };
+      }
+    }
     unknown.push(`${req.method} ${req.path}`);
     return { ok: false, status: 404, detail: `Not in the U3 smoke world: ${req.method} ${req.path}` };
   },

@@ -7,6 +7,7 @@ import { KIND_ICON, KIND_LABEL, formatTime } from '../library/materialMeta';
 import { formatBytes } from '../materials/addItems';
 import { useAskAbout } from '../document/parts';
 import { ReaderPanelHeader } from '../document/readerSurface041/ReaderPanelHeader';
+import { useReaderFocus } from '../document/readerSurface041/useReaderFocus';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
 import { useRecording, useServices, useUi } from '../state/context';
@@ -199,7 +200,10 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
   useEffect(() => { if (hasTranslation && !target.seg) setView('translation'); }, [hasTranslation, target.id, target.seg]);
   // A citation is checked against the original words: show them when we jump to a quote.
   useEffect(() => { if (target.seg) setView('original'); }, [target.seg, nonce]);
-  useScrollTarget(bodyRef.current, target.seg ? `seg-${target.seg}` : null, nonce, state.load === 'ready' || data !== null);
+  const targetKey = target.seg ? `seg-${target.seg}` : null;
+  const originalReady = !targetKey || !hasTranslation || view === 'original';
+  useScrollTarget(bodyRef.current, targetKey, nonce, data !== null && originalReady);
+  useReaderFocus(bodyRef, nonce, data !== null ? originalReady : state.load === 'error', targetKey);
 
   const onCorrection = (change: KbCorrectionChange) => {
     setNote(changeNote(change));
@@ -243,8 +247,10 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
         actions={(
           <>
             {notesPageId && (
-              <Button size="sm" variant="quiet" aria-label="Open the notes"
-                onClick={() => openDocument({ type: 'page', id: notesPageId })}>Notes</Button>
+              <Button size="sm" variant="quiet" aria-label="Open the notes" data-reader-action="notes"
+                onClick={() => openDocument({ type: 'page', id: notesPageId }, {
+                  destination: 'transcript', returnFocus: 'notes', origin: document.activeElement,
+                })}>Notes</Button>
             )}
             <IconButton icon="chats" label="Ask about material" disabled={!material || isWithoutSpeech(material)}
               onClick={() => material && askAbout({ type: 'material', id: material.id, title: material.title })} />

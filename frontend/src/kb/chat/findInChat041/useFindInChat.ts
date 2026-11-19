@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { findChatMatches, moveChatMatch, retainChatMatch, type ChatFindResult } from './findMatches';
-import { collectRenderedChatRuns, createChatHighlights, revealChatMatch, type RenderedChatTextRun } from './renderedChat';
+import { createChatHighlights, createRenderedChatReader, revealChatMatch, type RenderedChatTextRun } from './renderedChat';
 
 export interface FindInChatOptions {
   /** Null when no chat is open or the chat pane is hidden. */
@@ -59,6 +59,7 @@ function startFindSession(
   const doc = scroll.ownerDocument;
   const view = doc.defaultView!;
   const highlights = createChatHighlights(doc);
+  const renderedChat = createRenderedChatReader(scroll);
   const restoreFocus = keepFocusAndSelection(scope, scroll);
   const positions = new Map<HTMLElement, ScrollToOptions>();
   const rememberScroll = (el: HTMLElement) => {
@@ -85,23 +86,36 @@ function startFindSession(
   };
 
   const readResult = (previous?: ChatFindResult) => {
-    runs = query.trim() ? collectRenderedChatRuns(scroll) : [];
+    runs = query.trim() ? renderedChat.read() : [];
     return retainChatMatch(findChatMatches(runs, query), previous);
   };
 
-  const observer = new view.MutationObserver(() => {
+  const scheduleRefresh = () => {
     if (!query.trim() || frame !== null) return;
     frame = view.requestAnimationFrame(() => {
       frame = null;
+      renderedChat.invalidate(observer.takeRecords());
       const activeId = result.activeMatch?.id;
       result = readResult(result);
       show(activeId !== result.activeMatch?.id);
     });
+  };
+  const observer = new view.MutationObserver((records) => {
+    renderedChat.invalidate(records);
+    scheduleRefresh();
   });
   observer.observe(scroll, {
     childList: true, subtree: true, characterData: true, attributes: true,
     attributeFilter: ['class', 'style', 'hidden', 'open', 'data-message-id'],
   });
+  for (let ancestor = scroll.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    observer.observe(ancestor, { attributes: true });
+  }
+  const onResize = () => {
+    renderedChat.clear();
+    scheduleRefresh();
+  };
+  view.addEventListener('resize', onResize);
   publish(query, result);
 
   return {
@@ -110,15 +124,17 @@ function startFindSession(
       query = next;
       if (frame !== null) view.cancelAnimationFrame(frame);
       frame = null;
+      renderedChat.invalidate(observer.takeRecords());
       result = readResult();
       show(true);
     },
     move(direction: 1 | -1) {
       // A key event can arrive between a streaming React commit and the observer's frame.
-      const dirty = observer.takeRecords().length > 0;
-      if (dirty || frame !== null) {
+      const records = observer.takeRecords();
+      if (records.length || frame !== null) {
         if (frame !== null) view.cancelAnimationFrame(frame);
         frame = null;
+        renderedChat.invalidate(records);
         result = readResult(result);
       }
       result = moveChatMatch(result, direction);
@@ -126,6 +142,7 @@ function startFindSession(
     },
     dispose(restore: boolean) {
       observer.disconnect();
+      view.removeEventListener('resize', onResize);
       if (frame !== null) view.cancelAnimationFrame(frame);
       highlights.clear();
       if (restore) {
@@ -169,6 +186,13 @@ export function useFindInChat({ chatId, scopeRef, scrollRef, reducedMotion }: Fi
     const doc = scope.ownerDocument;
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing) return;
+      if (event.key === 'Escape' && session.current) {
+        // Modal makes the background inert and handles Escape on window if focus falls to body.
+        if (scope.closest('[inert]')) return;
+        event.preventDefault();
+        close();
+        return;
+      }
       const target = event.target;
       const inScope = target instanceof Node && scope.contains(target);
       const chatSelection = target === doc.body && scope.contains(doc.getSelection()?.anchorNode ?? null);
@@ -183,9 +207,6 @@ export function useFindInChat({ chatId, scopeRef, scrollRef, reducedMotion }: Fi
         } else {
           session.current = startFindSession(scope, scroll, (query, result) => setPanel({ chatId, query, result }), () => reduce.current);
         }
-      } else if (event.key === 'Escape' && session.current) {
-        event.preventDefault();
-        close();
       }
     };
     doc.addEventListener('keydown', onKey);

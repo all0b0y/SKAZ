@@ -6,6 +6,7 @@ import hashlib
 import inspect
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from ..knowledge.agents.engine import EngineId
 from .contracts import (
@@ -20,6 +21,9 @@ from .contracts import (
     VisualSourceKind,
     VisualSourceLocator,
 )
+
+if TYPE_CHECKING:
+    from ..knowledge.sources.visual import PreparedVisual as SourceVisual
 
 ALLOWED_IMAGE_MEDIA_TYPES: frozenset[str] = frozenset(
     {"image/png", "image/jpeg", "image/webp", "image/gif"}
@@ -52,6 +56,7 @@ def _locators_match(expected: VisualSourceLocator, actual: VisualSourceLocator) 
         and expected.page == actual.page
         and expected.timestamp_ms == actual.timestamp_ms
         and expected.source_sha256 == actual.source_sha256
+        and expected.source_url == actual.source_url
     )
 
 
@@ -67,6 +72,7 @@ class AuthorizedVisualPayload:
     sha256: str
     engine: EngineId
     model_id: str
+    linked_frame: SourceVisual | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not _is_nonempty_str(self.visual_id):
@@ -86,6 +92,17 @@ class AuthorizedVisualPayload:
         expected_sha = hashlib.sha256(self.approved_bytes).hexdigest()
         if self.sha256 != expected_sha:
             raise ValueError("sha256 must match approved_bytes.")
+        frame = self.linked_frame
+        if frame is not None and (
+            self.locator.source_kind != "video_link"
+            or frame.locator.kind != "video_frame"
+            or frame.locator.material_id != self.locator.material_id
+            or frame.locator.source_url != self.locator.source_url
+            or frame.timestamp_ms != self.locator.timestamp_ms
+            or frame.sha256 != self.sha256
+            or frame.data != self.approved_bytes
+        ):
+            raise ValueError("The retained frame must match the authorized visual.")
 
     def __repr__(self) -> str:
         return (
@@ -152,12 +169,13 @@ def build_unsupported_result(
     locator: VisualSourceLocator,
     text_only_available: bool,
     compatible_models: Sequence[CompatibleModelHint] = (),
+    custom_title: str | None = None,
     custom_detail: str | None = None,
 ) -> UnsupportedVisualResult:
     """Create a typed non-sending refusal preserving the user's draft."""
     return UnsupportedVisualResult(
         reason_code=reason_code,
-        title=_title_for(reason_code),
+        title=custom_title or _title_for(reason_code),
         detail=_default_detail_for(
             reason_code,
             locator.source_kind,
@@ -423,6 +441,7 @@ def authorize_prepared_visual(
         sha256=digest,
         engine=decision.engine,
         model_id=decision.model_id,
+        linked_frame=prepared.linked_frame,
     )
 
 

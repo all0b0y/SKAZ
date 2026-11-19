@@ -116,7 +116,7 @@ describe('external attachment boundary', () => {
     expect(screen.queryByText('Drop files to attach')).toBeNull();
   });
 
-  it('accepts a fresh OS drag after a cancelled drag leaves without a drop or dragend', () => {
+  it('keeps a cancelled drag tied to its owner after ambiguous window re-entry', () => {
     const { intake, props, rerender } = mount();
     const log = screen.getByRole('log');
     const dataTransfer = transfer(['Files'], [picture]);
@@ -130,6 +130,24 @@ describe('external attachment boundary', () => {
     fireEvent(log, entry);
     fireEvent.dragOver(log, { dataTransfer });
     fireEvent.drop(log, { dataTransfer });
-    expect(intake).toHaveBeenCalledOnce();
+    expect(intake).not.toHaveBeenCalled();
+  });
+
+  it('accepts a fresh drag after a cancelled drag leaves and ends', () => {
+    const { intake, props, rerender } = mount();
+    const log = screen.getByRole('log');
+    const previous = transfer(['Files'], [picture]);
+    fireEvent.dragOver(log, { dataTransfer: previous });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent(log, new MouseEvent('dragleave', { bubbles: true, relatedTarget: null }));
+    rerender(<Harness {...props} chatId="chat-b" />);
+    fireEvent.dragEnd(window, { dataTransfer: previous });
+
+    const fresh = new File(['new fixture'], 'new.png', { type: 'image/png' });
+    const dataTransfer = transfer(['Files'], [fresh]);
+    fireEvent.dragEnter(log, { dataTransfer });
+    fireEvent.dragOver(log, { dataTransfer });
+    fireEvent.drop(log, { dataTransfer });
+    expect(intake).toHaveBeenCalledExactlyOnceWith({ source: 'drop', file: fresh });
   });
 });
