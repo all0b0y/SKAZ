@@ -75,7 +75,7 @@ export interface ChatsActions {
     initialAgent?: AgentChoice | null;
     expectedTarget?: AgentChoice;
   }) => Promise<ActionResult<string> & { visualRefusal?: KbVisualPreflightResponse }>;
-  stop: (chatId: string, messageId: string) => Promise<ActionResult>;
+  stop: (chatId: string, messageId: string, intent?: 'answer' | 'shaping') => Promise<ActionResult>;
   regenerate: (chatId: string, messageId: string) => Promise<ActionResult>;
   /** Your question changed in place: the messages after it go and it is answered again (409 while answering). */
   edit: (chatId: string, messageId: string, input: KbMessageInput) => Promise<ActionResult>;
@@ -636,10 +636,11 @@ export function createChatsStore(client: KbClient): ChatsStore {
         }
       },
 
-      stop: (chatId, messageId) => act(async () => {
+      stop: (chatId, messageId, intent = 'answer') => act(async () => {
         if (isLocal(messageId)) return; // not started on the backend yet: nothing to stop there
         const m = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/stop', { path: { chat_id: chatId, message_id: messageId } });
-        merge(chatId, [m]);
+        // Shaping settles through Save. The Stop snapshot can predate newer answer events.
+        if (intent === 'answer') merge(chatId, [m]);
       }),
       edit: (chatId, messageId, input) => act(async () => {
         const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/edit', {

@@ -21,12 +21,9 @@ MAX_PIN_CACHE_BYTES = 8 * 1024 * 1024
 MAX_PIN_CACHE_FRAMES = 32
 
 
-def frame_citation(visual: AuthorizedVisualPayload) -> str:
-    timestamp = visual.locator.timestamp_ms
-    url = visual.locator.source_url
-    assert timestamp is not None and url is not None
-    target = video_timestamp_url(public_frame_source(url), timestamp)
-    return f"[Video frame at {frame_timestamp(timestamp)}]({target})"
+def frame_citation(source_url: str, timestamp_ms: int) -> str:
+    target = video_timestamp_url(public_frame_source(source_url), timestamp_ms)
+    return f"[Video frame at {frame_timestamp(timestamp_ms)}]({target})"
 
 
 def require_retainable_frame(sources: SourceService, visual: AuthorizedVisualPayload) -> PreparedVisual:

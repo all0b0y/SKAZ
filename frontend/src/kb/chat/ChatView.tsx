@@ -441,7 +441,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
                     onResume: () => void act(m, 'resume'),
                     onSave: () => void act(m, 'save'),
                     onCancelSave: async () => {
-                      const res = await chats.getState().stop(chat.id, m.id);
+                      const res = await chats.getState().stop(chat.id, m.id, 'shaping');
                       if (!res.ok && chats.getState().currentId === chat.id) setNotice(res.error);
                     },
                   }} />
