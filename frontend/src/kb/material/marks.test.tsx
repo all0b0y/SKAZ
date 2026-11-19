@@ -1,6 +1,8 @@
 // F5: N3 paragraph marks, read marks, N1 marks on a material and the wiki "outdated" footnote — every
 // state of N4 v4 states 15, 16 and 20–24 on the fake client's scenes. The fake answers contract shapes;
 // the real routes are the backend's to prove.
+import fs from 'node:fs';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -141,6 +143,10 @@ describe('N1 marks on a material (v4 states 20–23)', () => {
     const { kb, user } = mount('new_version', (k) => withMark(k, scenes.new_version.freshness.marks[0]!));
     expect(await screen.findByText('v3 is out (2026)')).toBeInTheDocument();
     expect(screen.getByText(/arXiv version history · checked/)).toBeInTheDocument();
+    // 11/A: the mark block keeps its place below the head; the manual entry point stays in the
+    // actions row — one button, not a second one inside the freshness block.
+    expect(screen.getAllByRole('button', { name: 'Check links' })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Check links' }).closest('.kb-mat__actions')).not.toBeNull();
     expect(screen.queryByRole('button', { name: /Delete source/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Replace with v3' }));
     expect(kb.maintenance.act).toHaveBeenCalledWith('mark-version', { action: 'replace_version' });
@@ -186,6 +192,34 @@ describe('N1 marks on a material (v4 states 20–23)', () => {
     expect(kb.freshness.check_links).toHaveBeenCalledWith({ material_ids: [MATERIAL] });
   });
 
+  it('Check links sits beside Write notes in one actions row; no empty freshness floor (11/A)', async () => {
+    const { kb, user } = mount(undefined, (k) => {
+      k.maintenance.marks = vi.fn(async () => ({ marks: [], last_link_check: null }));
+      k.freshness.check_links = vi.fn(async () => ({ ...scenes.couldnt_check.linkCheck, state: 'done' as const }));
+    });
+    const write = await screen.findByRole('button', { name: 'Write notes' });
+    const check = await screen.findByRole('button', { name: 'Check links' });
+    // One compact row under the status chips, Write notes first (11/A: the manual link check joins
+    // the notes action; the freshness block no longer holds a right-aligned bar of its own).
+    const row = check.closest('.kb-mat__actions')!;
+    expect(write.closest('.kb-mat__actions')).toBe(row);
+    expect([...row.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Write notes', 'Check links']);
+    // Nothing to report: the block itself is absent, so no empty tier sits between the actions
+    // and the transcript tabs.
+    expect(screen.queryByTestId('freshness')).not.toBeInTheDocument();
+    await user.click(check);
+    expect(kb.freshness.check_links).toHaveBeenCalledWith({ material_ids: [MATERIAL] });
+  });
+
+  it('keeps the narrow-width contract (11/A): no bar rule in the freshness styles, the actions row wraps', () => {
+    // jsdom cannot measure the material panel; the CSS is the narrow-width guarantee: the actions
+    // wrap instead of clipping, and the freshness block owns no right-aligned bar floor any more.
+    const marksCss = fs.readFileSync(path.resolve(__dirname, 'marks.css'), 'utf8');
+    expect(marksCss).not.toMatch(/kb-freshwrap__bar/);
+    const documentCss = fs.readFileSync(path.resolve(__dirname, '../styles/document.css'), 'utf8');
+    expect(documentCss.match(/\.kb-mat__actions\s*{[^}]*}/)?.[0]).toMatch(/flex-wrap:\s*wrap/);
+  });
+
   it('shows no block and no Check links for a material without marks and without an original link', async () => {
     const bridge = createFakeBridge(world());
     bridge.world.materials.find((x) => x.id === MATERIAL)!.origin = null;
@@ -202,6 +236,9 @@ describe('N1 marks on a material (v4 states 20–23)', () => {
     );
     await screen.findByRole('heading', { level: 2, name: 'Cross-entropy explained' });
     expect(screen.queryByTestId('freshness')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Check links' })).not.toBeInTheDocument();
+    // The notes action stays even when the link cannot be checked.
+    expect(screen.getByRole('button', { name: 'Write notes' })).toBeInTheDocument();
   });
 
   it('polls a running link check until it is done, then reads the marks again', async () => {
@@ -214,6 +251,30 @@ describe('N1 marks on a material (v4 states 20–23)', () => {
     expect(await screen.findByText('Checking the link…')).toBeInTheDocument();
     await waitFor(() => expect(kb.freshness.link_check).toHaveBeenCalledTimes(2), { timeout: 4000 });
     await waitFor(() => expect(screen.queryByText('Checking the link…')).not.toBeInTheDocument(), { timeout: 2000 });
+  });
+
+  it('a failed check from the actions row says so in the freshness block; the entry point recovers', async () => {
+    const { kb, user } = mount(undefined, (k) => {
+      k.maintenance.marks = vi.fn(async () => ({ marks: [], last_link_check: null }));
+      k.freshness.check_links = vi.fn(async () => { throw new Error('The site did not respond.'); });
+    });
+    const check = await screen.findByRole('button', { name: 'Check links' });
+    await user.click(check);
+    const block = await screen.findByTestId('freshness');
+    expect(within(block).getByRole('alert')).toHaveTextContent('The site did not respond.');
+    // Not stuck busy: the entry point recovers and the check can be retried.
+    expect(check).toBeEnabled();
+    await user.click(check);
+    expect(kb.freshness.check_links).toHaveBeenCalledTimes(2);
+  });
+
+  it('an interrupted check says it stopped and offers the retry', async () => {
+    const { user } = mount(undefined, (k) => {
+      k.maintenance.marks = vi.fn(async () => ({ marks: [], last_link_check: null }));
+      k.freshness.check_links = vi.fn(async () => ({ ...scenes.couldnt_check.linkCheck, state: 'paused' as const }));
+    });
+    await user.click(await screen.findByRole('button', { name: 'Check links' }));
+    expect(await screen.findByText('The link check stopped. Check links again to retry.')).toBeInTheDocument();
   });
 });
 

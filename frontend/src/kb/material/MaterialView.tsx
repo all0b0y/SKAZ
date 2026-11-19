@@ -21,7 +21,7 @@ import { OverlapLine } from './OverlapLine';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
 import { useLiveMaterial } from '../recording/useLiveMaterial';
 import { useRecognitionRecheck } from './RecognitionRecheck';
-import { FreshnessNotice } from './FreshnessNotice';
+import { FreshnessNotice, useFreshness } from './FreshnessNotice';
 import { ReadMarks } from './ReadMarks';
 import { RepeatToggle, useMaterialRepeats, useRepeatView } from './RepeatMarks';
 
@@ -159,6 +159,8 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
   // N3: passages the wiki already has. Text materials only; speech is shown as spoken.
   const repeatsData = useMaterialRepeats(target.id);
   const repeatMarks = useRepeatView(material && SPEECH.has(material.kind) ? null : repeatsData, material?.fragments ?? NO_FRAGMENTS, target.id);
+  // N1 freshness: the blocks below the head and the manual entry point in the actions row (11/A).
+  const freshness = useFreshness(material ? material.id : null, reload);
 
   useEffect(() => {
     void client.call('POST /kb/materials/{material_id}/opened', { path: { material_id: target.id } })
@@ -195,6 +197,15 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
     { value: 'translation' as const, label: 'Translation' },
     { value: 'both' as const, label: expanded ? 'Side by side' : 'Both', name: 'Both' },
   ];
+  // 11/A: the notes action and the manual link check share one compact actions row; the freshness
+  // block below appears only when it has something to say (marks, a result, a running check).
+  const originUrl = material?.origin?.url ?? null;
+  const jobsRunning = data?.jobs.some((j) => j.state === 'queued' || j.state === 'running') ?? false;
+  const notesReady = material !== null && material.status === 'ready' && material.wiki?.state === 'in_wiki'
+    && !material.wiki.note_page_id && !jobsRunning;
+  // The entry point waits for the marks answer so it cannot appear and vanish when a "couldn't
+  // check" result arrives (that result owns its own retry inside the freshness block).
+  const checkable = originUrl !== null && freshness.asked && !freshness.couldNot;
 
   return (
     <>
@@ -246,21 +257,25 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
               <h2 className="kb-doc__title">{material.title}</h2>
               <p className="kb-doc__meta">{metaLine(material)}</p>
               <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} onJobChanged={reload} />
-              {material.status === 'ready' && material.wiki?.state === 'in_wiki' && !material.wiki.note_page_id
-                && !data.jobs.some((j) => j.state === 'queued' || j.state === 'running') && (
+              {(notesReady || checkable) && (
                 <div className="kb-mat__actions">
-                  <Button size="sm" variant="quiet" icon="pencil" disabled={adding} onClick={() => void addToWiki(true)}>
-                    Write notes
-                  </Button>
-                  {material.wiki.error && <p className="kb-inline-error" role="alert">{material.wiki.error}</p>}
+                  {notesReady && (
+                    <Button size="sm" variant="quiet" icon="pencil" disabled={adding} onClick={() => void addToWiki(true)}>
+                      Write notes
+                    </Button>
+                  )}
+                  {checkable && (
+                    <Button size="sm" variant="quiet" busy={freshness.checking} disabled={freshness.checking}
+                      onClick={() => void freshness.check()}>Check links</Button>
+                  )}
+                  {notesReady && material.wiki.error && <p className="kb-inline-error" role="alert">{material.wiki.error}</p>}
                 </div>
               )}
               <OverlapLine overlap={material.overlap} />
               {repeatMarks.foldable && <RepeatToggle hide={repeatMarks.hide} onChange={repeatMarks.setHide} />}
               <ExcludedFragments materialId={material.id} count={material.excluded_count} guard={guard} onRestored={reload} />
             </div>
-            <FreshnessNotice materialId={material.id} originUrl={material.origin?.url ?? null}
-              onDelete={() => setDialog('delete')} onReplaced={reload} />
+            <FreshnessNotice freshness={freshness} onDelete={() => setDialog('delete')} />
             {continuable && (
               <div className="kb-mat__actions">
                 <Button size="sm" variant="outline" icon="mic" onClick={() => void recording.getState().continueRecording(material.id)}>
