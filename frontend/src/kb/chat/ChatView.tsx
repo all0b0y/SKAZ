@@ -177,7 +177,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const answerFrames = useAnswerFrames(effectiveHidden ? null : chat?.id ?? null, lastCompletedId);
   const background = backgroundActivity(open);
   const activeWorking = background ? background.state === 'answering' : isAnswering(chat);
-  const activeWaiting = background ? !!background.waiting_for_user : !!chat && chatWaits(chat);
+  const activeWaiting = background ? !!background.waiting_for_user : !!chat && chatWaits(chat, open?.stalePermissionIds);
   // B1 (decision 04): one stable anchor per assistant reply — the ordered ids the rail mirrors;
   // expose the action once the server admits the reply so focus survives settlement and deltas.
   const replyIds = useMemo(
@@ -212,7 +212,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         : itemSummary
           ? isWaitingForUser(itemSummary)
           : itemChat
-            ? chatWaits(itemChat)
+            ? chatWaits(itemChat, openChats[id]?.stalePermissionIds)
             : false,
       unread: itemSummary?.unread ?? itemChat?.unread ?? false,
       pinned: (isActive ? itemChat?.pinned : itemSummary?.pinned) ?? itemSummary?.pinned ?? itemChat?.pinned ?? false,
@@ -499,7 +499,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         />
       )}
       <Composer chatId={currentId} active={!effectiveHidden} handleImagePaste={attachments.handlePaste}
-        placeholder={waitingHint(chat) ?? (recording ? 'Ask about the lecture · @ to reference' : 'Ask about your materials · @ to reference')} />
+        placeholder={(activeWaiting ? waitingHint(chat) : null) ?? (recording ? 'Ask about the lecture · @ to reference' : 'Ask about your materials · @ to reference')} />
       <ExternalAttachmentDropOverlay visible={attachments.over} />
       </SelectionProvider>
     </section>
