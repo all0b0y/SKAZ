@@ -26,6 +26,8 @@ import { ChatBackdrop } from '../fx/backdrop/ChatBackdrop';
 import { SelectionProvider } from './select/context';
 import { useFollowSwitch } from './switchMotion';
 import { ScrollEdges } from './ScrollEdges';
+import { FindInChatPanel } from './findInChat041/FindInChatPanel';
+import { useFindInChat } from './findInChat041/useFindInChat';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
@@ -45,6 +47,8 @@ function useNotice(): [string | null, (text: string | null, ms?: number) => void
     if (text !== null) timer.current = window.setTimeout(() => setNotice(null), ms);
   }];
 }
+
+const nearBottom = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
 
 /** The burn-out of the empty view when the first message goes (FX-EFFECTS-SPEC Batch A §6). */
 export const LEAVE_MS = 700;
@@ -121,10 +125,13 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   /** Regenerate/Resume failed: the reason stays under that answer, by the button (QA D6). */
   const [actionError, setActionError] = useState<{ id: string; text: string } | null>(null);
   const agents = useAgents((s) => s.agents);
+  const scopeRef = useRef<HTMLElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const stick = useRef(true);
   const reduced = useReducedMotion() ?? false;
+  const find = useFindInChat({ chatId: hidden ? null : currentId, scopeRef, scrollRef, reducedMotion: reduced });
+  const findingChat = useRef<string | null>(null);
   // Decision 32: the main field is still only at «off» or the system's reduced motion; at «calm» it
   // keeps answering clicks and only its background drift stops.
   const fieldStill = useStillIndicators();
@@ -152,10 +159,14 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setRenaming(false); stick.current = true; setNotice(null); setActionError(null); }, [currentId]);
 
-  // Keep the newest text in view while the user is at the bottom.
+  // Find controls the viewport until it restores the starting position on close.
   useLayoutEffect(() => {
+    const closedFindHere = !hidden && findingChat.current !== null && findingChat.current === currentId && !find.isOpen;
+    findingChat.current = find.isOpen ? currentId : null;
     const el = scrollRef.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    if (!el || find.isOpen) return;
+    if (closedFindHere) stick.current = nearBottom(el);
+    else if (stick.current) el.scrollTop = el.scrollHeight;
   });
 
   const act = async (message: KbMessage, what: 'regenerate' | 'resume' | 'save') => {
@@ -195,7 +206,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const messages = chat ? (leavingHere ? chat.messages.slice(0, 1) : chat.messages) : [];
 
   return (
-    <section className="kb-center" data-pane="center" aria-label="Chat" hidden={hidden}>
+    <section ref={scopeRef} className="kb-center" data-pane="center" aria-label="Chat" hidden={hidden}>
       <SelectionProvider chatId={currentId}>
       <header className="kb-head kb-head--chat">
         {renaming && chat ? (
@@ -217,8 +228,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       {notice && <p className="kb-notice" role="status">{notice}</p>}
       <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={fieldStill} calm={fieldCalm}>
       {showBackdrop && <ChatBackdrop working={isAnswering(chat)} active={!hidden} reduced={reduced} />}
-      <div className="kb-chat__scroll" ref={scrollRef} role="log" aria-label="Conversation" aria-live="off"
-        onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>
+      <div className="kb-chat__scroll" ref={scrollRef} role="log" aria-label="Conversation" aria-live="off" tabIndex={currentId ? 0 : undefined}
+        onScroll={(e) => { if (!find.isOpen) stick.current = nearBottom(e.currentTarget); }}>
         {currentId && open?.load === 'loading' && !chat && <div className="kb-chat__wait"><Spinner label="Opening the chat" /></div>}
         {currentId && open?.load === 'error' && !chat && (
           <Banner tone="error" title="Couldn’t open this chat."
@@ -245,6 +256,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       </div>
       {/* Stage 6 B2 GradualBlur: soft edges under the title bar and above the composer (only over a thread). */}
       <ScrollEdges scrollRef={scrollRef} show={showBackdrop} />
+      <FindInChatPanel find={find} />
       </DitherStage>
       {showField && (
         // FX §5: what the empty chat is for, on a solid plate above the field — never on the canvas.

@@ -1,0 +1,67 @@
+.kb-find-chat {
+  position: absolute;
+  z-index: 8;
+  inset-block-start: var(--kb-sp-8);
+  inset-inline-end: var(--kb-sp-22);
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  gap: var(--kb-sp-4);
+  width: min(18.375rem, calc(100% - 2 * var(--kb-sp-22)));
+  padding: var(--kb-sp-4) var(--kb-sp-8);
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-pane);
+  box-shadow: var(--kb-shadow-pop);
+}
+
+/* Leave the top hit readable when the floating panel is open, even at scrollTop 0. */
+.kb-chat__stage:has(> .kb-find-chat) > .kb-chat__scroll {
+  margin-block-start: calc(var(--kb-control-h-sm) + var(--kb-sp-20) + 2px);
+  overflow-anchor: none;
+}
+
+.kb-find-chat__icon { flex: none; color: var(--kb-muted); }
+
+.kb-find-chat__input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--kb-sp-2) var(--kb-sp-4);
+  border: 0;
+  border-radius: var(--kb-r-xs);
+  background: transparent;
+  color: var(--kb-text);
+  font: inherit;
+  font-size: var(--t-sm);
+}
+
+.kb-find-chat__input::placeholder { color: var(--kb-muted); }
+.kb-find-chat__input:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: -1px; }
+
+.kb-find-chat__count {
+  flex: none;
+  color: var(--kb-muted);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kb-chat__scroll ::highlight(kb-chat-find-match) { background-color: var(--kb-warn-soft); }
+.kb-chat__scroll ::highlight(kb-chat-find-active) {
+  background-color: var(--kb-warn);
+  color: var(--kb-pane);
+  text-decoration: underline;
+}
+
+.kb-chat__scroll [data-kb-chat-find-label] {
+  paint-order: stroke;
+  stroke: var(--kb-warn-soft);
+  stroke-width: 0.35em;
+  stroke-linejoin: round;
+}
+
+.kb-chat__scroll [data-kb-chat-find-label='active'] {
+  fill: var(--kb-pane);
+  stroke: var(--kb-warn);
+  text-decoration: underline;
+}
