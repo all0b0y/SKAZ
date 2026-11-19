@@ -3,12 +3,32 @@
 // back into the chat in place (the chat's `part_update` events say the same everywhere else).
 
 import type {
-  KbDeckStudy, KbDeckStudyResult, KbDeckView, KbStudyAnswerIn, KbStudyCard, KbStudyMarkIn, KbStudyMove, KbStudyPart,
-  KbStudyLibrary, KbStudyQuestion, KbStudySettings,
+  KbDeckStudy, KbDeckStudyResult, KbDeckView, KbStudyAnswerIn, KbStudyCard, KbStudyLibrary, KbStudyMarkIn,
+  KbStudyMove, KbStudyOption, KbStudyPart, KbStudyQuestion, KbStudySettings,
 } from '../../api/kb/types.gen';
 import type { KbClient } from '../api/client';
 
-export type { KbDeckView, KbStudyCard, KbStudyPart, KbStudyQuestion };
+export type { KbDeckView, KbStudyCard, KbStudyOption, KbStudyPart, KbStudyQuestion };
+export type StudyBasis = NonNullable<KbStudyCard['basis']>;
+
+/** Shown under every question and answer that comes from the agent's own knowledge (#12, variant B). */
+export const NOT_FROM_MATERIALS = 'Not based on your materials';
+
+/** Whether a card, question or saved block comes from the agent's own knowledge rather than the user's materials. */
+export const isAgentBasis = (item: { basis?: StudyBasis | null; citations?: readonly unknown[] }): boolean =>
+  item.basis ? item.basis === 'agent' : Array.isArray(item.citations) && item.citations.length === 0;
+
+/**
+ * Whether `option` is a right answer to `question`, independent of whether the question comes from
+ * the user's materials (`origin: 'source'`) or from the agent's own knowledge (`origin: 'agent'`).
+ */
+export function isRightOption(question: Pick<KbStudyQuestion, 'basis' | 'citations' | 'answers'>, option: KbStudyOption): boolean {
+  if (typeof option.right === 'boolean') return option.right;
+  if (option.id.startsWith('r')) return true;
+  if (option.id.startsWith('w')) return false;
+  if (question.answers.includes(option.text)) return true;
+  return !isAgentBasis(question) && option.origin === 'source';
+}
 export type StudyGrade = 'again' | 'hard' | 'good' | 'easy';
 /**
  * Where a block can be in this interface: in the chat or beside it. The backend still accepts the

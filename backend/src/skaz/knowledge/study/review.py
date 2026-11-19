@@ -305,16 +305,22 @@ def _checked(reader: MaterialReader, sources: Sources, number: Any, quote: Any) 
     return Cite(source.material_id, source.seg, checked) if checked else None
 
 
-def built_ideas(raw: Mapping[str, Any], reader: MaterialReader, sources: Sources) -> list[dict[str, Any]]:
+def built_ideas(
+    raw: Mapping[str, Any], reader: MaterialReader, sources: Sources, *, basis: str = "source"
+) -> list[dict[str, Any]]:
     """Key ideas the judge wrote for an old test: those whose quote checks out, at most ``MAX_IDEAS``."""
     out: list[dict[str, Any]] = []
     for entry in raw.get("ideas") or []:
         if not isinstance(entry, Mapping):
             continue
         text = _text(entry.get("text"), 300)
-        cite = _checked(reader, sources, entry.get("source"), entry.get("quote"))
-        if text and cite is not None:
-            out.append({"id": f"k{len(out) + 1}", "text": text, "cites": [cite_json(cite)]})
+        if basis == "agent":
+            if text:
+                out.append({"id": f"k{len(out) + 1}", "text": text, "cites": []})
+        else:
+            cite = _checked(reader, sources, entry.get("source"), entry.get("quote"))
+            if text and cite is not None:
+                out.append({"id": f"k{len(out) + 1}", "text": text, "cites": [cite_json(cite)]})
         if len(out) == MAX_IDEAS:
             break
     return out

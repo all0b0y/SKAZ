@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as Reac
 import { useReducedMotion } from 'motion/react';
 import { Icon } from '../ui';
 import { SourceMarks } from '../cite/SourceMarks';
-import { PRACTICE, studyApi, type KbStudyCard, type KbStudyPart } from './api';
+import { NOT_FROM_MATERIALS, PRACTICE, isAgentBasis, studyApi, type KbStudyCard, type KbStudyPart } from './api';
 import { useServices } from '../state/context';
 import type { StudyActions } from './useStudy';
 import { UnclearMark } from './Unclear';
@@ -240,6 +240,7 @@ function CardFaces({ card, back, live, busy, onUnclear }: {
   // so the turn is visible; the hidden face is out of the accessibility tree.
   const [turned, setTurned] = useState(back);
   useEffect(() => setTurned(back), [back]);
+  const agentBasis = isAgentBasis(card);
   return (
     <div className="kb-st-pc__in">
       <section className="kb-st-pf kb-st-pf--front" aria-hidden={turned || !live} aria-label={live ? 'Question' : undefined}>
@@ -247,13 +248,15 @@ function CardFaces({ card, back, live, busy, onUnclear }: {
           <UnclearMark on={!!card.unclear} what="card" disabled={busy} onToggle={onUnclear} tabIndex={live && !turned ? 0 : -1} />
         </div>
         <p className="kb-st-pf__q">{card.question}</p>
+        {agentBasis && <p className="kb-st-basis" data-basis="agent">{NOT_FROM_MATERIALS}</p>}
       </section>
       <section className="kb-st-pf kb-st-pf--back" aria-hidden={!turned || !live} aria-label={live ? 'Answer' : undefined}>
         <div className="kb-st-pf__top">
           <span className="kb-st-pf__lab">Answer</span>
           <UnclearMark on={!!card.unclear} what="card" disabled={busy} onToggle={onUnclear} tabIndex={live && turned ? 0 : -1} />
         </div>
-        <p className="kb-st-pf__ans">{card.answer}<SourceMarks citations={card.citations} /></p>
+        <p className="kb-st-pf__ans">{card.answer}{!agentBasis && <SourceMarks citations={card.citations} />}</p>
+        {agentBasis && <p className="kb-st-basis" data-basis="agent">{NOT_FROM_MATERIALS}</p>}
         {card.explanation && (
           <p className="kb-st-pf__ex"><Icon name="analysis" size={14} /><span><b>Agent explanation</b> · {card.explanation}</span></p>
         )}
@@ -284,7 +287,10 @@ function LeavingCard({ card, reduced, onDone }: { card: KbStudyCard; reduced: bo
   return (
     <div ref={ref} className="kb-st-pc is-top is-leaving" style={{ zIndex: 70 }} aria-hidden="true">
       <div className="kb-st-pc__in">
-        <section className="kb-st-pf kb-st-pf--front"><p className="kb-st-pf__q">{card.question}</p></section>
+        <section className="kb-st-pf kb-st-pf--front">
+          <p className="kb-st-pf__q">{card.question}</p>
+          {isAgentBasis(card) && <p className="kb-st-basis" data-basis="agent">{NOT_FROM_MATERIALS}</p>}
+        </section>
       </div>
       <span ref={stamp} className="kb-st-stamp"><Icon name="check" size={18} />Got it</span>
     </div>

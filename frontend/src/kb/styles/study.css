@@ -369,6 +369,15 @@
   .kb-st-pc.is-back .kb-st-pf--front { opacity: 0; }
 }
 
+/* 0.4.1 #12: per-item agent-knowledge provenance label (variant B — separate line under the question/answer) */
+.kb-st-basis { display: block; font-size: var(--t-xs); font-weight: 500; color: var(--kb-muted); line-height: 1.45; margin: var(--kb-sp-6) 0 0; }
+.kb-st-tq:has(+ .kb-st-basis) { margin-bottom: 0; }
+.kb-st-face--flat > .kb-st-basis { margin: var(--kb-sp-6) 0 var(--kb-sp-16); }
+.kb-st-pf__q:has(+ .kb-st-basis) { margin-bottom: 0; }
+.kb-st-pf--front .kb-st-basis { margin: var(--kb-sp-6) 0 auto; text-align: center; }
+.kb-st-pf--back .kb-st-basis { margin: var(--kb-sp-6) 0 0; padding-left: var(--kb-sp-14); text-align: left; }
+.kb-deck__q .kb-st-basis { margin-top: var(--kb-sp-2); }
+
 /* N4-7, N4-8, F6: saved decks and tests in the Study side panel. */
 .kb-shelf__hint { margin: var(--kb-sp-2) 0 var(--kb-sp-6) var(--kb-sp-18); font-size: var(--t-xs); color: var(--kb-muted); }
 .kb-shelf__badge { display: inline-block; margin-bottom: var(--kb-sp-2); font-size: var(--t-xs); font-weight: 600; color: var(--kb-warn); }

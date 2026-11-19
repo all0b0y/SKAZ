@@ -15,6 +15,7 @@ KbStudyGroup = Literal["new", "learning", "known", "hard"]
 KbStudyMode = Literal["due", "new", "hard", "quick10", "all"]
 KbStudyPlace = Literal["chat", "panel", "window"]
 KbStudySide = Literal["question", "answer"]
+KbStudyBasis = Literal["source", "agent"]
 #: ``unclear`` / ``clear``: the user's «Unclear» mark (P3-b) — on the item, never FSRS.
 KbStudyMark = Literal["hard", "known", "hide", "unhide", "unhard", "unclear", "clear"]
 
@@ -39,6 +40,8 @@ class KbStudyCard(BaseModel):
     question: str
     #: The answer from the source; its citations hold the checked quotes.
     answer: str
+    #: ``source``: backed by checked quotes from materials; ``agent``: from the agent's own knowledge.
+    basis: KbStudyBasis = "source"
     citations: list[KbCitation]
     #: The agent's own explanation (example, mnemonic), shown as "Agent explanation".
     explanation: str | None
@@ -60,6 +63,8 @@ class KbStudyOption(BaseModel):
     text: str
     #: ``source``: a right answer from the source; ``agent``: made up by the agent (said after checking).
     origin: Literal["source", "agent"]
+    #: Whether this option is a right answer (independent of ``origin``).
+    right: bool = False
 
 
 class KbStudyIdeaRecheck(BaseModel):
@@ -145,6 +150,8 @@ class KbStudyQuestion(BaseModel):
     id: str
     type: Literal["choice", "multi", "short", "open"]
     question: str
+    #: ``source``: backed by checked quotes from materials; ``agent``: from the agent's own knowledge.
+    basis: KbStudyBasis = "source"
     #: choice / multi: right and made-up options in a fixed order (the origin is shown after checking).
     options: list[KbStudyOption]
     #: The right answer(s) from the source (shown after checking).

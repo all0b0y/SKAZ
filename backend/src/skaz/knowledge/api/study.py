@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -79,6 +79,7 @@ def _card(row: dict[str, Any], citation: CitationFn) -> KbStudyCard:
     intervals = row["intervals"]
     return KbStudyCard(
         id=row["id"], page_id=row["page_id"], question=row["question"], answer=row["answer"],
+        basis="agent" if row.get("basis") == "agent" else "source",
         citations=[citation(cite.material_id, cite.seg, cite.quote)
                    for cite in cast(tuple[Cite, ...], row["cites"])],
         explanation=row["explanation"], group=row["group"], state=row["state"], suspended=row["suspended"],
@@ -87,9 +88,18 @@ def _card(row: dict[str, Any], citation: CitationFn) -> KbStudyCard:
     )
 
 
-def _option(option: dict[str, str]) -> KbStudyOption:
-    return KbStudyOption(id=option["id"], text=option["text"],
-                         origin="agent" if option["origin"] == "agent" else "source")
+def _option(option: Mapping[str, Any]) -> KbStudyOption:
+    right = (
+        bool(option["right"])
+        if "right" in option
+        else (str(option.get("id", "")).startswith("r") or option.get("origin") == "source")
+    )
+    return KbStudyOption(
+        id=str(option["id"]),
+        text=str(option["text"]),
+        origin="agent" if option.get("origin") == "agent" else "source",
+        right=right,
+    )
 
 
 def _cites(cites: Any, citation: CitationFn) -> list[KbCitation]:
@@ -163,6 +173,7 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
             ) if given else None
             questions.append(KbStudyQuestion(
                 id=question.id, type=question.type, question=question.question,
+                basis=question.basis,
                 options=[_option(option) for option in study.options(block, question)],
                 answers=list(question.answers),
                 citations=[citation(c.material_id, c.seg, c.quote) for c in question.cites],

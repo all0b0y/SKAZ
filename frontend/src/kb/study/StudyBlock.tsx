@@ -11,7 +11,7 @@ import { useChats, useFold, useServices, useUi } from '../state/context';
 import { agentName } from '../chat/permission';
 import { RenameForm } from '../chat/ChatMenu';
 import type { KbPermissionPart } from '../api/permissions';
-import { MODE_LABEL, PLACE_LABEL, kindLabel, placeOf, studyApi, studyWhere, type KbStudyPart, type StudyPlace } from './api';
+import { MODE_LABEL, PLACE_LABEL, isAgentBasis, kindLabel, placeOf, studyApi, studyWhere, type KbStudyPart, type StudyPlace } from './api';
 import { CardStack, pileOf } from './CardStack';
 import { TestRunner, QUESTION_LABEL } from './TestRunner';
 import { useStudyActions, useStudyPart, useStudyRoute } from './useStudy';
@@ -67,8 +67,10 @@ export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbSt
   const shown = Math.min(part.position + 1, total);
   // A deck (P3-d): the share of the pass gone through — the cards known this pass.
   const progress = total ? (deck ? Math.min(total - pileOf(part).queue.length, total) : part.result ? total : part.position) / total : 0;
-  const sources = useMemo(() => indexSources(deck ? part.cards.flatMap((c) => c.citations) : part.questions.flatMap((q) => q.citations)),
-    [deck, part.cards, part.questions]);
+  const sources = useMemo(() => indexSources(deck
+    ? part.cards.flatMap((c) => isAgentBasis(c) ? [] : c.citations)
+    : part.questions.flatMap((q) => isAgentBasis(q) ? [] : q.citations)),
+  [deck, part.cards, part.questions]);
   const size = SIZE[where];
   const ownChatOpen = useChats((s) => s.currentId === chatId);
   const chatInCentre = useUi((s) => s.center === 'chat');

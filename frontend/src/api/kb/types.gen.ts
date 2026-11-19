@@ -2387,6 +2387,7 @@ export interface KbStudyCard {
   page_id: string | null;
   question: string;
   answer: string;
+  basis?: "source" | "agent";
   citations: KbCitation[];
   explanation: string | null;
   group: "new" | "learning" | "known" | "hard";
@@ -2483,6 +2484,7 @@ export interface KbStudyOption {
   id: string;
   text: string;
   origin: "source" | "agent";
+  right?: boolean;
 }
 
 /** A deck or test block in a chat (S5, W2): lives in one place — the chat, beside it, or its window. */
@@ -2528,6 +2530,7 @@ export interface KbStudyQuestion {
   id: string;
   type: "choice" | "multi" | "short" | "open";
   question: string;
+  basis?: "source" | "agent";
   options: KbStudyOption[];
   answers: string[];
   citations: KbCitation[];

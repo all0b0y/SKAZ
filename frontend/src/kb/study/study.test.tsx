@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { KbStudyPart } from '../../api/kb/types.gen';
+import type { KbStudyPart } from './api';
 import { serveFake, type FakeWorld } from '../test/fakeKb';
-import { studyWorld } from '../test/fixtures';
+import { studyCard, studyWorld } from '../test/fixtures';
 import { renderKb } from '../test/renderKb';
 import type { BridgeRequest, HttpMethod } from '../../api/bridge';
 import { createFakeBridge } from '../test/fakeBridge';
@@ -624,5 +624,235 @@ describe('The deck page (S12)', () => {
     await user.clear(field);
     await user.type(field, '5{Enter}');
     await waitFor(() => expect(fake.world.studyNewPerDay).toBe(5));
+  });
+});
+
+// ---- 0.4.1 #12: mixed sets with agent-knowledge provenance ----------------------------------------
+
+describe('Mixed study sets with agent-knowledge provenance (#12)', () => {
+  it('flashcards show Not based on your materials under the question and answer before and after flip, grading, saving and reopening', async () => {
+    const world = studyWorld();
+    const deck = block(world, 'st-deck');
+    deck.cards = [
+      studyCard('c-agent', 'What is write skew?', 'Two transactions read one snapshot, update different rows, and break a shared constraint.',
+        { basis: 'agent', citations: [] }),
+      studyCard('c-src', 'How did Boltzmann write entropy?', 'S = k·ln W'),
+    ];
+    deck.total = 2;
+
+    const { user } = await openChat(/Lecture 8 — cards/, { world });
+    const blockEl = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
+
+    // Before flip: agent card shows Not based on your materials under the question.
+    const front = within(blockEl).getByRole('region', { name: 'Question' });
+    expect(front).toHaveTextContent('What is write skew?');
+    expect(within(front).getByText('Not based on your materials')).toBeInTheDocument();
+    expect(front.querySelector('.kb-st-pf__q + .kb-st-basis[data-basis="agent"]')).not.toBeNull();
+
+    // Flip to back: Not based on your materials is shown under the answer, with no citation marks.
+    await user.click(within(front).getByText('What is write skew?'));
+    const back = await within(blockEl).findByRole('region', { name: 'Answer' });
+    expect(back).toHaveTextContent('Two transactions read one snapshot');
+    expect(within(back).getByText('Not based on your materials')).toBeInTheDocument();
+    expect(back.querySelector('.kb-st-pf__ans + .kb-st-basis[data-basis="agent"]')).not.toBeNull();
+    expect(back.querySelector('.kb-cite')).toBeNull();
+
+    // Flip back to question side via Space, skip (→) and bring back (←): provenance label stays on both sides.
+    blockEl.focus();
+    await user.keyboard(' ');
+    expect(await within(blockEl).findByRole('region', { name: 'Question' })).toHaveTextContent('Not based on your materials');
+    await user.keyboard('{ArrowRight}');
+    await waitFor(() => expect(within(blockEl).getByRole('region', { name: 'Question' })).toHaveTextContent('How did Boltzmann write entropy?'));
+    expect(within(within(blockEl).getByRole('region', { name: 'Question' })).queryByText('Not based on your materials')).toBeNull();
+    await user.keyboard('{ArrowLeft}');
+    await waitFor(() => expect(within(blockEl).getByRole('region', { name: 'Question' })).toHaveTextContent('What is write skew?'));
+    expect(within(within(blockEl).getByRole('region', { name: 'Question' })).getByText('Not based on your materials')).toBeInTheDocument();
+
+    // Grade the agent card and move to the source-backed card.
+    await user.click(within(blockEl).getByRole('button', { name: /I know this/ }));
+    await waitFor(() => expect(within(blockEl).getByRole('region', { name: 'Question' })).toHaveTextContent('How did Boltzmann write entropy?'));
+    const srcFront = within(blockEl).getByRole('region', { name: 'Question' });
+    expect(within(srcFront).queryByText('Not based on your materials')).toBeNull();
+
+    await user.click(within(srcFront).getByText('How did Boltzmann write entropy?'));
+    const srcBack = await within(blockEl).findByRole('region', { name: 'Answer' });
+    expect(within(srcBack).queryByText('Not based on your materials')).toBeNull();
+    expect(within(srcBack).getByRole('button', { name: /Lecture 8/ })).toBeInTheDocument();
+
+    // Save to Study, open DeckPage, and reopen for practice.
+    await user.click(within(blockEl).getByRole('button', { name: 'Save to Study' }));
+    await user.click(await within(blockEl).findByRole('button', { name: 'Open' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const cardsGrid = await within(doc).findByRole('grid', { name: 'Cards' });
+    const agentRow = within(cardsGrid).getByRole('row', { name: /What is write skew\?/ });
+    const srcRow = within(cardsGrid).getByRole('row', { name: /How did Boltzmann write entropy\?/ });
+    expect(within(agentRow).getByText('Not based on your materials')).toBeInTheDocument();
+    expect(within(srcRow).queryByText('Not based on your materials')).toBeNull();
+
+    await user.click(within(doc).getByRole('button', { name: 'Study' }));
+    const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    const reopenedFront = within(panel).getByRole('region', { name: 'Question' });
+    expect(reopenedFront).toHaveTextContent('What is write skew?');
+    expect(within(reopenedFront).getByText('Not based on your materials')).toBeInTheDocument();
+    await user.click(within(reopenedFront).getByText('What is write skew?'));
+    const reopenedBack = await within(panel).findByRole('region', { name: 'Answer' });
+    expect(within(reopenedBack).getByText('Not based on your materials')).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: /I know this/ }));
+    await waitFor(() => expect(within(panel).getByRole('region', { name: 'Question' })).toHaveTextContent('How did Boltzmann write entropy?'));
+    expect(within(within(panel).getByRole('region', { name: 'Question' })).queryByText('Not based on your materials')).toBeNull();
+  });
+
+  it('test questions separate provenance from correctness and keep Not based on your materials before and after checking, saving and reopening', async () => {
+    const world = studyWorld();
+    const test = block(world, 'st-test');
+    const legacySourceQ = {
+      ...test.questions[0]!,
+      basis: undefined,
+      options: [
+        { id: 'w0', text: 'S = k·W²', origin: 'agent' as const },
+        { id: 'r0', text: 'S = k·ln W', origin: 'source' as const },
+        { id: 'w1', text: 'S = W / k', origin: 'agent' as const },
+      ],
+    };
+    test.questions = [
+      {
+        id: 'q-agent-choice', type: 'choice', question: 'Which anomaly is possible under snapshot isolation?',
+        basis: 'agent', answers: ['Write skew'], citations: [], explanation: null, response: null,
+        options: [
+          { id: 'w0', text: 'Dirty read', origin: 'agent', right: false },
+          { id: 'r0', text: 'Write skew', origin: 'agent', right: true },
+          { id: 'w1', text: 'Lost update on restart', origin: 'agent', right: false },
+        ],
+      },
+      {
+        id: 'q-agent-multi', type: 'multi', question: 'Which two statements hold for write skew?',
+        basis: 'agent', answers: ['Reads one snapshot', 'Updates different rows'], citations: [], explanation: null, response: null,
+        options: [
+          { id: 'r0', text: 'Reads one snapshot', origin: 'agent', right: true },
+          { id: 'w0', text: 'Requires dirty reads', origin: 'agent', right: false },
+          { id: 'r1', text: 'Updates different rows', origin: 'agent', right: true },
+        ],
+      },
+      legacySourceQ,
+      {
+        id: 'q-agent-short', type: 'short', question: 'What is the short name for snapshot isolation?',
+        basis: 'agent', answers: ['SI'], citations: [], explanation: null, response: null, options: [],
+      },
+    ];
+    test.total = 4;
+
+    const { user } = await openChat(/Lecture 8 — test/, { world });
+    const testEl = await screen.findByRole('region', { name: 'Test: Lecture 8 check' });
+
+    // Agent choice question: label is visible under the question before checking.
+    expect(within(testEl).getByText('Which anomaly is possible under snapshot isolation?')).toBeInTheDocument();
+    expect(within(testEl).getByText('Not based on your materials')).toBeInTheDocument();
+    expect(testEl.querySelector('.kb-st-tq + .kb-st-basis[data-basis="agent"]')).not.toBeNull();
+
+    // Pick the right option on the agent-basis choice question: graded right, never labelled "from source".
+    await user.click(within(testEl).getByRole('radio', { name: 'Write skew' }));
+    await user.click(within(testEl).getByRole('button', { name: 'Check' }));
+    expect(await within(testEl).findByText('Got it.')).toBeInTheDocument();
+    expect(within(testEl).getByText('Not based on your materials')).toBeInTheDocument();
+    const rightRadio = within(testEl).getByRole('radio', { name: /Write skew/ });
+    expect(rightRadio).toHaveClass('is-ok');
+    expect(rightRadio).toHaveTextContent('Correct');
+    expect(rightRadio).not.toHaveTextContent(/from source/i);
+    expect(within(testEl).queryByText(/From the source/i)).toBeNull();
+
+    // Agent multi question: picks both right options, graded right without "from source".
+    await user.click(within(testEl).getByRole('button', { name: 'Next question' }));
+    expect(await within(testEl).findByText('Which two statements hold for write skew?')).toBeInTheDocument();
+    expect(within(testEl).getByText('Not based on your materials')).toBeInTheDocument();
+    await user.click(within(testEl).getByRole('checkbox', { name: 'Reads one snapshot' }));
+    await user.click(within(testEl).getByRole('checkbox', { name: 'Updates different rows' }));
+    await user.click(within(testEl).getByRole('button', { name: 'Check' }));
+    expect(await within(testEl).findByText('Got it.')).toBeInTheDocument();
+    expect(within(testEl).getByText('Not based on your materials')).toBeInTheDocument();
+    expect(within(testEl).getByRole('checkbox', { name: /Reads one snapshot/ })).not.toHaveTextContent(/from source/i);
+    expect(within(testEl).queryByText(/From the source/i)).toBeNull();
+
+    // Legacy source question: no agent provenance label, keeps "from source" and citation mark.
+    await user.click(within(testEl).getByRole('button', { name: 'Next question' }));
+    expect(await within(testEl).findByText('How did Boltzmann write entropy?')).toBeInTheDocument();
+    expect(within(testEl).queryByText('Not based on your materials')).toBeNull();
+    await user.click(within(testEl).getByRole('radio', { name: 'S = k·W²' }));
+    await user.click(within(testEl).getByRole('button', { name: 'Check' }));
+    expect(await within(testEl).findByText('Not yet.')).toBeInTheDocument();
+    expect(within(testEl).getByRole('radio', { name: /S = k·ln W.*Correct · from source/ })).toBeInTheDocument();
+    expect(within(testEl).getByText('From the source')).toBeInTheDocument();
+
+    // Agent short question: keeps label before and after checking, never says "The source says".
+    await user.click(within(testEl).getByRole('button', { name: 'Next question' }));
+    expect(await within(testEl).findByText('What is the short name for snapshot isolation?')).toBeInTheDocument();
+    expect(within(testEl).getByText('Not based on your materials')).toBeInTheDocument();
+    await user.type(within(testEl).getByRole('textbox', { name: 'Your answer' }), 'MVCC');
+    await user.click(within(testEl).getByRole('button', { name: 'Check' }));
+    expect(await within(testEl).findByText('Not yet.')).toBeInTheDocument();
+    expect(within(testEl).getByText('Not based on your materials')).toBeInTheDocument();
+    expect(within(testEl).queryByText(/The source says/i)).toBeNull();
+    expect(within(testEl).getByText(/Answer: «SI»/)).toBeInTheDocument();
+
+    // Save to Study, open the saved TestPage, and reopen via Take the test.
+    await user.click(within(testEl).getByRole('button', { name: 'See result' }));
+    expect(await within(testEl).findByText('2 of 4')).toBeInTheDocument();
+    const summaryRows = within(testEl).getAllByRole('listitem');
+    await user.click(within(summaryRows[0]!).getByRole('button', { name: 'Review' }));
+    expect(await within(testEl).findByText('Which anomaly is possible under snapshot isolation?')).toBeInTheDocument();
+    expect(within(testEl).getByText('Not based on your materials')).toBeInTheDocument();
+    expect(within(testEl).getByRole('radio', { name: /Write skew/ })).not.toHaveTextContent(/from source/i);
+    await user.click(within(testEl).getByRole('button', { name: 'Back to result' }));
+
+    await user.click(within(testEl).getByRole('button', { name: 'Save to Study' }));
+    await user.click(await within(testEl).findByRole('button', { name: 'Open' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const list = await within(doc).findByRole('list', { name: 'Questions' });
+    const items = within(list).getAllByRole('listitem');
+    expect(within(items[0]!).getByText('Not based on your materials')).toBeInTheDocument();
+    expect(within(items[1]!).getByText('Not based on your materials')).toBeInTheDocument();
+    expect(within(items[2]!).queryByText('Not based on your materials')).toBeNull();
+    expect(within(items[3]!).getByText('Not based on your materials')).toBeInTheDocument();
+
+    await user.click(within(doc).getByRole('button', { name: 'Take the test' }));
+    const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    const reopenedTest = within(panel).getByRole('region', { name: 'Test: Lecture 8 check' });
+    expect(within(reopenedTest).getByText('Which anomaly is possible under snapshot isolation?')).toBeInTheDocument();
+    expect(within(reopenedTest).getByText('Not based on your materials')).toBeInTheDocument();
+    await user.click(within(reopenedTest).getByRole('radio', { name: 'Write skew' }));
+    await user.click(within(reopenedTest).getByRole('button', { name: 'Check' }));
+    expect(await within(reopenedTest).findByText('Got it.')).toBeInTheDocument();
+    expect(within(reopenedTest).getByText('Not based on your materials')).toBeInTheDocument();
+    expect(within(reopenedTest).getByRole('radio', { name: /Write skew/ })).not.toHaveTextContent(/from source/i);
+  });
+
+  it('source-only sets never show Not based on your materials before or after grading, saving and reopening', async () => {
+    const world = studyWorld();
+    const { user } = await openChat(/Lecture 8 — test/, { world });
+    const testEl = await screen.findByRole('region', { name: 'Test: Lecture 8 check' });
+
+    expect(within(testEl).queryByText('Not based on your materials')).toBeNull();
+    await user.click(within(testEl).getByRole('radio', { name: 'S = k·ln W' }));
+    await user.click(within(testEl).getByRole('button', { name: 'Check' }));
+    expect(await within(testEl).findByText('Got it.')).toBeInTheDocument();
+    expect(within(testEl).queryByText('Not based on your materials')).toBeNull();
+    expect(within(testEl).getByRole('radio', { name: /S = k·ln W.*Correct · from source/ })).toBeInTheDocument();
+    expect(within(testEl).getByText('From the source')).toBeInTheDocument();
+
+    await user.click(within(testEl).getByRole('button', { name: 'Save to Study' }));
+    await user.click(await within(testEl).findByRole('button', { name: 'Open' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    expect(within(doc).queryByText('Not based on your materials')).toBeNull();
+    const list = await within(doc).findByRole('list', { name: 'Questions' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(3);
+
+    await user.click(within(doc).getByRole('button', { name: 'Take the test' }));
+    const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    const reopenedTest = within(panel).getByRole('region', { name: 'Test: Lecture 8 check' });
+    expect(within(reopenedTest).queryByText('Not based on your materials')).toBeNull();
+    await user.click(within(reopenedTest).getByRole('radio', { name: 'S = k·ln W' }));
+    await user.click(within(reopenedTest).getByRole('button', { name: 'Check' }));
+    expect(await within(reopenedTest).findByText('Got it.')).toBeInTheDocument();
+    expect(within(reopenedTest).queryByText('Not based on your materials')).toBeNull();
+    expect(within(reopenedTest).getByRole('radio', { name: /S = k·ln W.*Correct · from source/ })).toBeInTheDocument();
   });
 });

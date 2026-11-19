@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { KbStudyPart, KbStudyQuestion } from '../../api/kb/types.gen';
+import type { KbStudyPart, KbStudyQuestion } from './api';
 import { useOpenChatWith } from './Unclear';
 
 /** The default words of «Ask the agent» (P3-c decision 11): Enter sends them, or the user adds their own. */

@@ -106,6 +106,8 @@ def question_context(study: StudyService, block_id: str, item_id: str) -> tuple[
     options = study.options(block, question)
     shown: dict[str, Any] = {"test": block.title, "question_number": f"{number} of {total}",
                              "type": question.type, "question": question.question}
+    if question.basis == "agent":
+        shown["basis"] = "agent"
     if not checked:
         # Only what the user sees before answering: the options' words, never their origin.
         if options:
@@ -116,7 +118,9 @@ def question_context(study: StudyService, block_id: str, item_id: str) -> tuple[
     if options:
         shown["options"] = [
             {"key": chr(65 + n), "text": option["text"],
-             "from": "the source (right)" if option["origin"] == "source" else "made up by the agent (wrong)",
+             "from": ("the agent's knowledge (right)" if question.basis == "agent" else "the source (right)")
+             if option.get("right", option["origin"] == "source")
+             else "made up by the agent (wrong)",
              "picked_by_user": option["id"] in (entry.get("choices") or [])}
             for n, option in enumerate(options)
         ]
