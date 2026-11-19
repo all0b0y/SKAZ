@@ -43,7 +43,7 @@ export function ChatMenu({ chat, onNotice, onRename, size = 'md' }: {
     <>
       <IconButton ref={anchor} icon="more" label={`More for “${chat.title}”`} size={size} aria-haspopup="menu" aria-expanded={menu}
         onClick={() => setMenu((v) => !v)} />
-      <Menu open={menu} onClose={() => setMenu(false)} anchorRef={anchor} label="Chat actions" items={[
+      <Menu open={menu} onClose={() => setMenu(false)} anchorRef={anchor} label="Chat actions" className="kb-reader-menu" items={[
         {
           id: 'pin', label: chat.pinned ? 'Unpin' : 'Pin', icon: chat.pinned ? 'unpin' : 'pin',
           onSelect: async () => { const r = await chats.getState().setPinned(chat.id, !chat.pinned); if (!r.ok) onNotice(r.error); },

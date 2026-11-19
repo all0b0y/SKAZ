@@ -134,7 +134,7 @@ function SourceTrigger({ entry, quotes, row = false }: { entry: SourceEntry; quo
         <ChipStipple on={state !== 'closed'} />
       </button>
       <Popover open={state !== 'closed'} onClose={close} anchorRef={ref} label={entry.title}
-        autoFocus={state === 'pinned'} className="kb-srcpop-wrap">
+        autoFocus={state === 'pinned'} className="kb-srcpop-wrap kb-reader-citation-preview">
         <div
           ref={popRef}
           onMouseEnter={peek}

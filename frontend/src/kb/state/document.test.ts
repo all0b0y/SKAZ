@@ -25,11 +25,13 @@ describe('Document navigator (openDocument)', () => {
     expect(a?.kind === 'doc' && b?.kind === 'doc' && b.nonce > a.nonce).toBe(true);
   });
 
-  it('keeps ⤢ within the same kind of panel and resets it for another kind; ✕ closes anything', () => {
+  it('opens a different reader beside the chat, restores its previous manual expansion on Back, and closes anything', () => {
     const ui = createUiStore();
     ui.getState().openDoc('m1');
     ui.getState().toggleDocExpanded();
     ui.getState().openDocument({ type: 'page', id: 'p1' });
+    expect(ui.getState().docExpanded).toBe(false);
+    ui.getState().goBack();
     expect(ui.getState().docExpanded).toBe(true);
     ui.getState().openGraph();
     expect(ui.getState().docExpanded).toBe(false);

@@ -11,6 +11,7 @@ import { Resizer } from './Resizer';
 import { SidePanel } from './SidePanel';
 import { TitleBar } from './TitleBar';
 import { useStartList } from '../fx/listEntrance';
+import '../document/readerSurface041/readerOverlays.css';
 
 function useWindowWidth(): number {
   const [width, setWidth] = useState(() => window.innerWidth);
@@ -56,7 +57,7 @@ export function Shell() {
   useStartList(layout.side > 0 ? section : null);
 
   return (
-    <div className="kb-app">
+    <div className="kb-app kb-reader-finish">
       <TitleBar />
       <div className="kb-body">
         <Rail />
