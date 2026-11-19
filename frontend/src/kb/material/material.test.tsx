@@ -23,10 +23,13 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     for (const chip of ['Recognised', 'Translated', '1 correction', '1 doubtful', '14 concepts in wiki', 'Notes']) {
       expect(within(doc).getByText(chip)).toBeInTheDocument();
     }
-    // Decision 24: a recording made with translation opens in translation.
-    expect(within(doc).getByRole('radio', { name: 'Translation' })).toHaveAttribute('aria-checked', 'true');
+    // Decision 24: the reader selects Translation after its material data arrives.
+    await waitFor(() => expect(within(doc).getByRole('radio', { name: 'Translation' })).toHaveAttribute('aria-checked', 'true'));
+    expect(within(doc).getByText(/Итак, Больцман записал/)).toBeVisible();
     const user = userEvent.setup();
     await user.click(within(doc).getByRole('radio', { name: 'Original' }));
+    expect(within(doc).getByRole('radio', { name: 'Original' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(doc).queryByText(/Итак, Больцман записал/)).not.toBeInTheDocument();
     expect(within(doc).getAllByText('Speaker 1').length).toBeGreaterThan(0);
     expect(within(doc).getByText('08:12')).toBeInTheDocument();
     // An applied fix is underlined at the corrected word, a doubtful one at the recognised words.
@@ -63,6 +66,7 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
   it('switches original / translation / both; "both" keeps the pairs aligned by segment', async () => {
     const user = userEvent.setup();
     const { doc } = await openMaterial('m-lec8');
+    await within(doc).findByRole('radio', { name: 'Translation', checked: true });
     expect(within(doc).getByText(/Итак, Больцман записал/)).toBeInTheDocument();
     expect(within(doc).queryByText(/So Boltzmann wrote/)).not.toBeInTheDocument();
     await user.click(within(doc).getByRole('radio', { name: 'Both' }));

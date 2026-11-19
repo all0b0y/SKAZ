@@ -155,15 +155,18 @@ export function useFreshness(materialId: string | null, onReplaced: () => void):
   const [run, setRun] = useState<Run>({ phase: 'idle' });
   const [note, setNote] = useState<string | null>(null);
   const [observation, setObservation] = useState<KbLinkObservation | null>(null);
-  const live = useRef(true);
+  const marksGeneration = useRef(0);
   const activeCheck = useRef<LinkCheckAttempt | null>(null);
-  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
 
   const load = useCallback(() => {
     // Marks are an extra: when they cannot be read the material simply shows none.
     if (!materialId) return;
-    maintenance.marks(materialId).then((d) => { if (live.current) { setData(d); setAsked(true); } },
-      () => { if (live.current) setAsked(true); });
+    const generation = ++marksGeneration.current;
+    maintenance.marks(materialId).then((d) => {
+      if (generation !== marksGeneration.current) return;
+      setData(d);
+      setAsked(true);
+    }, () => { if (generation === marksGeneration.current) setAsked(true); });
   }, [maintenance, materialId]);
   useEffect(() => {
     setData(null);
@@ -173,6 +176,7 @@ export function useFreshness(materialId: string | null, onReplaced: () => void):
     setObservation(null);
     load();
     return () => {
+      marksGeneration.current += 1;
       clearTimeout(activeCheck.current?.timer);
       activeCheck.current = null;
     };
@@ -183,9 +187,11 @@ export function useFreshness(materialId: string | null, onReplaced: () => void):
     // Take ownership before React commits the disabled button.
     const attempt: LinkCheckAttempt = {};
     activeCheck.current = attempt;
+    // An in-flight marks read belongs to the previous check, including while this POST is pending.
+    marksGeneration.current += 1;
+    // Keep the previous observation so a refusal keeps its Retry control while the check runs.
     setRun({ phase: 'submitting' });
     setNote(null);
-    setObservation(null);
 
     const advance = async (jobId?: string): Promise<void> => {
       try {
@@ -201,7 +207,12 @@ export function useFreshness(materialId: string | null, onReplaced: () => void):
         }
         activeCheck.current = null;
         if (result.state === 'done') {
-          setObservation(result.observations.find((o) => o.material_id === materialId) ?? null);
+          const next = result.observations.find((o) => o.material_id === materialId) ?? null;
+          setObservation(next);
+          if (next?.outcome === 'ok') {
+            // The backend clears unkept gone marks before the job completes.
+            setData((d) => d && { ...d, marks: d.marks.filter((m) => m.kind !== 'link_gone' || m.kept_marked) });
+          }
           setRun({ phase: 'idle' });
           load();
         } else if (result.state === 'paused' || result.state === 'cancelled') {
@@ -238,9 +249,10 @@ export function useFreshness(materialId: string | null, onReplaced: () => void):
 export function FreshnessNotice({ freshness, onDelete }: { freshness: FreshnessState; onDelete: () => void }) {
   const { asked, marks, last, couldNot, checking, observation, run, note, check, changed } = freshness;
   const goneMark = marks.some((m) => m.kind === 'link_gone');
+  const showObservation = run.phase === 'idle' && !goneMark && !couldNot;
   const hasContent = checking || marks.length > 0 || (couldNot && last !== null) || note !== null
     || run.phase === 'stopped' || run.phase === 'failed'
-    || observation?.outcome === 'ok' || observation?.outcome === 'suspected_gone';
+    || (showObservation && (observation?.outcome === 'ok' || observation?.outcome === 'suspected_gone'));
   if (!asked || !hasContent) return null;
   const checkButton = (
     <Button size="sm" variant="outline" busy={checking} disabled={checking} onClick={() => void check()}>Check links</Button>
@@ -258,10 +270,10 @@ export function FreshnessNotice({ freshness, onDelete }: { freshness: FreshnessS
           </div>
         </div>
       )}
-      {!couldNot && !goneMark && observation?.outcome === 'ok' && (
+      {showObservation && observation?.outcome === 'ok' && (
         <p className="kb-fresh__evidence" role="status">The original link works · {checkedLabel(observation.checked_at)}.</p>
       )}
-      {!couldNot && !goneMark && observation?.outcome === 'suspected_gone' && (
+      {showObservation && observation?.outcome === 'suspected_gone' && (
         <p className="kb-fresh__evidence" role="status">The original link did not answer. It will be checked again before anything is marked.</p>
       )}
       {run.phase === 'stopped' && <p className="kb-fresh__evidence" role="status">The link check stopped. Check links again to retry.</p>}
