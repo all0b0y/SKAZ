@@ -63,6 +63,14 @@ export function isSpeech(item: AddItem): boolean {
   return false;
 }
 
+/** Decision 3 (01-LOCAL-VISUAL-PROCESSING): local video files are transcribed for audio only. */
+export const LOCAL_VIDEO_AUDIO_ONLY_NOTICE = 'SKAZ transcribes the audio only. It doesn’t save the video or its frames.';
+
+/** A local video file (audio track is transcribed; video and frames are not saved). */
+export function isLocalVideo(item: AddItem): boolean {
+  return item.type === 'file' && item.kind === 'speech' && item.video;
+}
+
 /** Decision 15: files and links go to the wiki by default, pasted text does not. */
 export function wikiDefault(items: readonly AddItem[], settings: { files: boolean; text: boolean }): boolean {
   if (items.length === 0) return settings.files;

@@ -22,7 +22,7 @@ import os
 import shutil
 import threading
 import weakref
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -69,6 +69,17 @@ from .intake import (
 from .links import LinkInfo, VideoProbe, classify_link, classify_offline, domain_of
 from .material_info import INTAKE_FILE, wiki_states
 from .paths import given_path, resolved_file
+from .visual import (
+    DEFAULT_FRAME_POLICY,
+    DEFAULT_SEARCH_PDF_PAGES,
+    FramePolicyConfig,
+    FrameRetriever,
+    PdfPageRenderer,
+    PreparedVisual,
+    RetainedFrameRecord,
+    VisualFallbackSeam,
+    VisualSourcePreparer,
+)
 from .web_page import WebPageUnavailable, page_key, prepare_web_page
 
 log = logging.getLogger(__name__)
@@ -188,10 +199,19 @@ class SourceService:
         *,
         fetcher: SafeFetcher | None = None,
         video_probe: VideoProbe | None = None,
+        page_renderer: PdfPageRenderer | None = None,
+        frame_retriever: FrameRetriever | None = None,
+        frame_policy: FramePolicyConfig = DEFAULT_FRAME_POLICY,
     ) -> None:
         self.kb = kb
         self.fetcher = fetcher or SafeFetcher()
         self.video_probe = video_probe
+        self.visual = VisualSourcePreparer(
+            kb,
+            page_renderer=page_renderer,
+            frame_retriever=frame_retriever,
+            frame_policy=frame_policy,
+        )
         self._listeners: list[Listener] = []
         self._lock = _GUARD_LOCK
         #: Q1 n2 L3: one add at a time per file content / per address (duplicate check, then store).
@@ -619,3 +639,118 @@ class SourceService:
                 current.notification_id = self._notify(material_id, files.title, new)
             self._write_exclusions(files.directory, current)
         return self.guard_report(material_id)
+
+    # -- visual preparation and frame retention (V3 seam for V1/V4) ------------
+
+    def prepare_image(
+        self,
+        path: str | Path,
+        *,
+        material_id: str | None = None,
+    ) -> PreparedVisual:
+        return self.visual.prepare_image(path, material_id=material_id)
+
+    def prepare_pdf_pages(
+        self,
+        material_id: str,
+        *,
+        pages: Sequence[int] | None = None,
+        page_range: tuple[int, int] | None = None,
+        query: str | None = None,
+        max_pages: int = DEFAULT_SEARCH_PDF_PAGES,
+    ) -> tuple[PreparedVisual, ...]:
+        return self.visual.prepare_pdf_pages(
+            material_id,
+            pages=pages,
+            page_range=page_range,
+            query=query,
+            max_pages=max_pages,
+        )
+
+    async def prepare_video_frames(
+        self,
+        material_id: str,
+        *,
+        timestamps_ms: Sequence[int] | None = None,
+        query: str | None = None,
+    ) -> tuple[PreparedVisual, ...]:
+        return await self.visual.prepare_video_frames(
+            material_id,
+            timestamps_ms=timestamps_ms,
+            query=query,
+        )
+
+    def retain_video_frames(
+        self,
+        material_id: str,
+        frames: Sequence[PreparedVisual],
+        *,
+        cited_timestamps_ms: Collection[int] = (),
+        cited_sha256s: Collection[str] = (),
+        pinned_timestamps_ms: Collection[int] = (),
+        pinned_sha256s: Collection[str] = (),
+        citation_refs: Mapping[int, Sequence[str]] | Sequence[str] = (),
+    ) -> tuple[RetainedFrameRecord, ...]:
+        return self.visual.retain_video_frames(
+            material_id,
+            frames,
+            cited_timestamps_ms=cited_timestamps_ms,
+            cited_sha256s=cited_sha256s,
+            pinned_timestamps_ms=pinned_timestamps_ms,
+            pinned_sha256s=pinned_sha256s,
+            citation_refs=citation_refs,
+        )
+
+    def pin_video_frame(self, material_id: str, frame: PreparedVisual) -> RetainedFrameRecord:
+        return self.visual.pin_video_frame(material_id, frame)
+
+    def unpin_video_frame(
+        self,
+        material_id: str,
+        frame_id_or_timestamp_ms: str | int,
+    ) -> tuple[RetainedFrameRecord, ...]:
+        return self.visual.unpin_video_frame(material_id, frame_id_or_timestamp_ms)
+
+    def list_retained_frames(self, material_id: str) -> tuple[RetainedFrameRecord, ...]:
+        return self.visual.list_retained_frames(material_id)
+
+    def read_retained_frame(
+        self,
+        material_id: str,
+        frame_id_or_timestamp_ms: str | int,
+    ) -> PreparedVisual:
+        return self.visual.read_retained_frame(material_id, frame_id_or_timestamp_ms)
+
+    def prepare_visual_seam(
+        self,
+        *,
+        material_id: str | None = None,
+        image_path: str | Path | None = None,
+        pages: Sequence[int] | None = None,
+        page_range: tuple[int, int] | None = None,
+        timestamps_ms: Sequence[int] | None = None,
+        query: str | None = None,
+        max_pages: int = DEFAULT_SEARCH_PDF_PAGES,
+    ) -> VisualFallbackSeam:
+        return self.visual.prepare_visual_seam(
+            material_id=material_id,
+            image_path=image_path,
+            pages=pages,
+            page_range=page_range,
+            timestamps_ms=timestamps_ms,
+            query=query,
+            max_pages=max_pages,
+        )
+
+    async def prepare_video_frames_seam(
+        self,
+        material_id: str,
+        *,
+        timestamps_ms: Sequence[int] | None = None,
+        query: str | None = None,
+    ) -> VisualFallbackSeam:
+        return await self.visual.prepare_video_frames_seam(
+            material_id,
+            timestamps_ms=timestamps_ms,
+            query=query,
+        )

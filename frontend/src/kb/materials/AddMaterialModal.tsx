@@ -6,8 +6,8 @@ import { useAgents, useLibrary, useServices, useSettings, useUi } from '../state
 import { agentOf } from '../state/agents';
 import type { EngineId } from '../api/names';
 import {
-  addedNote, fileItem, isSpeech, itemMeta, itemTitle, pasteItem, speechBlock, submitItem, wikiDefault, type AddItem,
-  type LinkItem,
+  addedNote, fileItem, isLocalVideo, isSpeech, itemMeta, itemTitle, LOCAL_VIDEO_AUDIO_ONLY_NOTICE, pasteItem,
+  speechBlock, submitItem, wikiDefault, type AddItem, type LinkItem,
 } from './addItems';
 import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 
@@ -85,6 +85,7 @@ export function AddMaterialModal() {
   const noAgent = agents !== null && !agentReady;
   const wikiOn = toWiki ?? (agentReady && wikiDefault(items, auto));
   const speech = items.some(isSpeech);
+  const localVideo = items.some(isLocalVideo);
   const blocked = speech ? speechBlock(speechSettings, keys) : null;
   const openPlace = () => { if (!blocked) return; setOpen(false); openSettings(blocked.section); };
   const firstSpeech = items.find(isSpeech)?.id;
@@ -316,6 +317,11 @@ export function AddMaterialModal() {
                 <Switch label="Translate" checked={translate} onChange={setTranslate} />
                 <span>{target ? `Translate into ${languageName(target)}` : 'Translate'}</span>
               </div>
+            )}
+            {localVideo && (
+              <p className="kb-arow__hint kb-muted" data-testid="local-video-audio-only">
+                {LOCAL_VIDEO_AUDIO_ONLY_NOTICE}
+              </p>
             )}
           </div>
         )}

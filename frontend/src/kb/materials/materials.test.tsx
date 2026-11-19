@@ -5,7 +5,7 @@ import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
 import { materialWiki } from '../test/fakeKb';
 import { addedLabel } from './AllMaterials';
-import { addedNote, fileItem, itemMeta, NOT_A_LINK, pasteItem, speechBlock, wikiDefault, type LinkItem } from './addItems';
+import { addedNote, fileItem, isLocalVideo, itemMeta, LOCAL_VIDEO_AUDIO_ONLY_NOTICE, NOT_A_LINK, pasteItem, speechBlock, wikiDefault, type LinkItem } from './addItems';
 import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 
 async function ready() {
@@ -204,6 +204,10 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(pasteItem('  some notes\nmore  ')).toMatchObject({ type: 'text', text: 'some notes\nmore' });
     expect(pasteItem('   ')).toBeNull();
     expect(fileItem('/a/b/lecture.MP4', 'lecture.MP4', 10)).toMatchObject({ kind: 'speech', video: true });
+    expect(isLocalVideo(fileItem('/a/b/lecture.MP4', 'lecture.MP4', 10))).toBe(true);
+    expect(isLocalVideo(fileItem('/a/b/talk.mp3', 'talk.mp3', 10))).toBe(false);
+    expect(isLocalVideo(fileItem('/a/b.pdf', 'b.pdf', 10))).toBe(false);
+    expect(LOCAL_VIDEO_AUDIO_ONLY_NOTICE).toBe('SKAZ transcribes the audio only. It doesn’t save the video or its frames.');
     expect(fileItem('/a/b.pdf', 'b.pdf', 10)).toMatchObject({ kind: 'document' });
     const text = pasteItem('notes')!;
     const link = pasteItem('https://example.org')!;
@@ -521,6 +525,42 @@ describe('+ Material (v11, decisions 15–16)', () => {
     await user.click(screen.getByRole('button', { name: 'Add material' }));
     expect(await screen.findByRole('dialog', { name: 'Add material' })).toBeInTheDocument();
     act(() => undefined);
+  });
+
+  it('shows the pre-import audio-only notice for local video files, not for audio files or video links (01 decision 3)', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = await ready();
+    services.bridge.droppedMediaFile = (file: File) => ({ path: `/Users/me/${file.name}`, name: file.name, url: `skaz-media://${file.name}` });
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const notice = 'SKAZ transcribes the audio only. It doesn’t save the video or its frames.';
+
+    // Audio file and video link alone do not show the local-video audio-only notice.
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), {
+      dataTransfer: { files: [new File(['x'], 'lecture9.m4a', { type: 'audio/mp4' })], getData: () => '' },
+    });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Link or any text' }), 'https://www.youtube.com/watch?v=abc{Enter}');
+    expect(await within(dialog).findByText('Seminar on entropy')).toBeInTheDocument();
+    expect(within(dialog).queryByText(notice)).not.toBeInTheDocument();
+
+    // Dropping a local video file shows the notice before import.
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), {
+      dataTransfer: { files: [new File(['v'], 'seminar.mp4', { type: 'video/mp4' })], getData: () => '' },
+    });
+    expect(within(dialog).getByTestId('local-video-audio-only')).toHaveTextContent(notice);
+
+    // Removing the local video file hides the notice again while keeping audio and video link.
+    await user.click(within(dialog).getByRole('button', { name: 'Remove seminar.mp4' }));
+    expect(within(dialog).queryByText(notice)).not.toBeInTheDocument();
+
+    // Re-adding the local video file and pressing Add imports it via speech import.
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), {
+      dataTransfer: { files: [new File(['v'], 'seminar.mp4', { type: 'video/mp4' })], getData: () => '' },
+    });
+    expect(within(dialog).getByText(notice)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Add 3' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    expect(fake.calls.some((c) => c.path === '/kb/imports' && (c.body as { path?: string })?.path === '/Users/me/seminar.mp4')).toBe(true);
   });
 });
 
