@@ -209,19 +209,21 @@ describe('Message field', () => {
     const input = await ready();
     await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
     await user.click(screen.getByRole('menuitem', { name: 'File…' }));
-    const chips = await screen.findByRole('list', { name: 'Attachments' });
+    const chips = await screen.findByRole('list', { name: 'Draft attachments' });
     expect(within(chips).getByText('paper.pdf')).toBeInTheDocument();
     // Held out of the wiki until the message is sent: the switch decides then (decision 15).
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/materials/file', body: { path: '/Users/me/Downloads/paper.pdf', folder_id: 'inbox', to_wiki: false } })));
     // Settings → Wiki add files automatically: that is the default, and it stays switchable.
-    const inWiki = within(chips).getByRole('checkbox', { name: 'In wiki' });
+    await user.click(within(chips).getByRole('button', { name: 'View paper.pdf' }));
+    const inWiki = within(screen.getByRole('dialog', { name: 'paper.pdf' })).getByRole('checkbox', { name: 'In wiki' });
     expect(inWiki).toBeChecked();
     expect(inWiki).toBeEnabled();
+    await user.keyboard('{Escape}');
     await user.click(input);
     await user.keyboard('Summarise it{Enter}');
     await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ attachments: [expect.stringMatching(/^m-new/)] }));
     await waitFor(() => expect(fake.calls.some((c) => /\/kb\/materials\/m-new\d+\/ingest/.test(c.path))).toBe(true));
-    expect(screen.queryByRole('list', { name: 'Attachments' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Draft attachments' })).not.toBeInTheDocument();
   });
 
   it('"+" → File: the Materials lists show the new material at once (QA B7)', async () => {
@@ -241,10 +243,13 @@ describe('Message field', () => {
     const input = await ready();
     await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
     await user.click(screen.getByRole('menuitem', { name: 'File…' }));
-    const chips = await screen.findByRole('list', { name: 'Attachments' });
+    const chips = await screen.findByRole('list', { name: 'Draft attachments' });
     await waitFor(() => expect(fake.calls.some((c) => c.path === '/kb/materials/file')).toBe(true));
-    await user.click(within(chips).getByRole('checkbox', { name: 'In wiki' }));
-    expect(within(chips).getByRole('checkbox', { name: 'In wiki' })).not.toBeChecked();
+    await user.click(within(chips).getByRole('button', { name: 'View paper.pdf' }));
+    const inWiki = within(screen.getByRole('dialog', { name: 'paper.pdf' })).getByRole('checkbox', { name: 'In wiki' });
+    await user.click(inWiki);
+    expect(inWiki).not.toBeChecked();
+    await user.keyboard('{Escape}');
     await user.click(input);
     await user.keyboard('Summarise it{Enter}');
     await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ attachments: [expect.stringMatching(/^m-new/)] }));
@@ -259,10 +264,12 @@ describe('Message field', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Paste text…' }));
     await user.type(await screen.findByLabelText('Any text — it is saved to Materials'), 'Lecture notes about entropy');
     await user.click(screen.getByRole('button', { name: 'Add' }));
-    const chips = await screen.findByRole('list', { name: 'Attachments' });
-    const inWiki = within(chips).getByRole('checkbox', { name: 'In wiki' });
+    const chips = await screen.findByRole('list', { name: 'Draft attachments' });
+    await user.click(within(chips).getByRole('button', { name: 'View Lecture notes about entropy' }));
+    const inWiki = within(screen.getByRole('dialog', { name: 'Lecture notes about entropy' })).getByRole('checkbox', { name: 'In wiki' });
     expect(inWiki).not.toBeChecked();
     await user.click(inWiki);
+    await user.keyboard('{Escape}');
     await waitFor(() => expect(fake.calls.some((c) => c.path === '/kb/materials/text')).toBe(true));
     await user.click(input);
     await user.keyboard('Check{Enter}');
@@ -283,10 +290,12 @@ describe('Message field', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Link…' }));
     await user.type(await screen.findByLabelText('Link to an article or a video'), 'https://blog.example/boiling');
     await user.click(screen.getByRole('button', { name: 'Add' }));
-    const chips = await screen.findByRole('list', { name: 'Attachments' });
+    const chips = await screen.findByRole('list', { name: 'Draft attachments' });
     expect(await within(chips).findByText('Already in your library')).toBeInTheDocument();
     expect(chips.querySelector('[data-icon="link"]')).not.toBeNull();
-    expect(within(chips).queryByRole('checkbox', { name: 'In wiki' })).not.toBeInTheDocument();
+    await user.click(within(chips).getByRole('button', { name: 'View https://blog.example/boiling' }));
+    expect(within(screen.getByRole('dialog', { name: 'https://blog.example/boiling' })).queryByRole('checkbox', { name: 'In wiki' })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
     await user.click(input);
     await user.keyboard('Summarise it{Enter}');
     await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ attachments: [expect.any(String)] }));

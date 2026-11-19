@@ -139,7 +139,11 @@ export const PATTERNS: readonly BoardPattern[] = [
       },
       {
         label: 'With attachments', pane: 'pane',
-        prepare: (s) => { s.composer.getState().drafts.set('new', { nodes: [document.createTextNode('Compare these with the lecture')], attachments: composerAttachments() }); },
+        prepare: (s) => {
+          const { drafts, attachmentDrafts } = s.composer.getState();
+          drafts.set('new', [document.createTextNode('Compare these with the lecture')]);
+          attachmentDrafts.getState().update('new', composerAttachments);
+        },
         render: () => <Composer chatId={null} placeholder="Ask about your materials · @ to reference" />,
       },
     ],
