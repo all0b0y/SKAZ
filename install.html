@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Download, verify, and install SKAZ on an Apple Silicon Mac.">
+  <title>Install SKAZ</title>
+  <style>
+    *{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0c0d0d;color:#f1f0e8;font:1rem/1.65 system-ui,sans-serif}
+    main{width:min(100% - 2.5rem,39rem);margin:auto;padding:2.5rem 0 4rem}
+    h1,h2{font-family:Georgia,serif;font-weight:400;line-height:1.05}h1{font-size:clamp(3.4rem,11vw,6rem);letter-spacing:-.065em;margin:1.25rem 0 1rem}h2{font-size:1.8rem;margin:1.8rem 0 .5rem}
+    p,ol{max-width:61ch;margin:.75rem 0}ol{padding-left:1.5rem}li+li{margin-top:.4rem}a{color:inherit;text-underline-offset:.22em}a:focus-visible{outline:2px solid #d4e5a5;outline-offset:4px}
+    .download{display:inline-block;margin:.55rem 0 .25rem;background:#efeddf;color:#10120f;padding:.65rem 1.1rem;font-weight:600;text-decoration:none}.download:hover{text-decoration:underline}
+    .notice{border-left:2px solid #bac598;padding-left:1rem;color:#dddcd3}.more{border-top:1px solid #45483f;margin-top:2rem;padding-top:1rem;display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
+  </style>
+</head>
+<body>
+  <main>
+    <nav aria-label="Home"><a href="./">← Back to SKAZ</a></nav>
+    <h1>Install SKAZ</h1>
+    <p>SKAZ 0.3.2 is an early-access release for <strong>Apple Silicon Macs running macOS 13 or later</strong>. There is no Intel Mac, Windows, or Linux build.</p>
+    <a class="download" href="https://github.com/all0b0y/SKAZ/releases/download/v0.3.2/SKAZ-0.3.2-arm64.dmg">Download SKAZ 0.3.2 (.dmg)</a>
+    <p>Download from GitHub Releases. <a href="https://github.com/all0b0y/SKAZ/releases/download/v0.3.2/SHA256SUMS.txt">SHA-256 checksums</a></p>
+    <h2>Set up the app</h2>
+    <ol>
+      <li>Open the DMG and drag SKAZ into Applications.</li>
+      <li>Open SKAZ from Applications. If macOS can’t verify it, click <strong>Done</strong>, then go to <strong>System Settings → Privacy &amp; Security → Open Anyway</strong> for SKAZ. Leave the system-wide security settings on.</li>
+      <li>On first launch, choose an agent and connect your own account. Provider terms and charges may apply.</li>
+    </ol>
+    <p>Prefer Terminal? <a href="https://github.com/all0b0y/SKAZ#-install">See the official Terminal installation instructions</a>.</p>
+    <p class="notice">This release is signed with the project’s own SKAZ certificate and is not notarized by Apple. If upgrading, back up your SKAZ library and profile before opening the new version.</p>
+    <nav class="more" aria-label="Release and project links">
+      <a href="https://github.com/all0b0y/SKAZ/releases/tag/v0.3.2">Release notes</a>
+      <a href="https://github.com/all0b0y/SKAZ/releases/latest">Latest stable release</a>
+      <a href="https://github.com/all0b0y/SKAZ">Project on GitHub</a>
+    </nav>
+  </main>
+</body>
+</html>
