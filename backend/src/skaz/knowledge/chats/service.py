@@ -893,6 +893,9 @@ class ChatService:
         *,
         expected_target: tuple[EngineId, str | None, str | None] | None = None,
     ) -> tuple[Message, Message]:
+        has_text = bool(given.text.strip())
+        if not has_text and not given.attachments:
+            raise ChatInvalid("Write a message or attach a material.")
         chat = await self._chat(chat_id)
         if expected_target is not None and (chat.engine, chat.model, chat.effort) != expected_target:
             raise ChatConflict(
@@ -908,6 +911,8 @@ class ChatService:
                 raise ChatConflict(
                     "Finish the agent’s question before sending visual sources.", "WAITING_FOR_QUESTION",
                 )
+            if not has_text:
+                raise ChatInvalid("Write a reply to the agent’s question.")
             return await self._answer_question(chat, run, given)
         self._reserve(chat_id)
         try:
@@ -917,6 +922,12 @@ class ChatService:
                 checked = await self._checked_selection(prior, given.selection, chat_id)
                 given = replace(given, selection=checked)
             visuals, text_only_mode = await self._authorize_visuals(chat, given)
+            if not has_text and await disk_call(
+                lambda: any(
+                    self.kb.material_repo.get(material_id) is None for material_id in given.attachments
+                ),
+            ):
+                raise ChatInvalid("An attached material is no longer in the library.")
             now = utc_now()
             user = Message(id=new_id("msg"), chat_id=chat_id, seq=0, role="user", state="done",
                            created_at=now, parts=(TextPart(given.text),), input=given)

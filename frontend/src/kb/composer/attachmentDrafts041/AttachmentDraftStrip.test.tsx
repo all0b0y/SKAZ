@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Menu } from '../../ui/Popover';
+import { MotionProvider } from '../../ui/motion';
 import { AttachmentDraftStrip } from './AttachmentDraftStrip';
 import type { DraftAttachment } from './draft';
 
@@ -54,6 +56,35 @@ describe('attachment draft strip', () => {
     const dialog = screen.getByRole('dialog', { name: 'Attachments' });
     fireEvent.keyDown(dialog, { key: 'Escape' });
     await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('keeps focus on the overflow trigger when Escape exposes the exiting file menu under the pointer', () => {
+    function ComposerAttachments() {
+      const [menu, setMenu] = useState(true);
+      const anchor = useRef<HTMLButtonElement>(null);
+      return <>
+        <button ref={anchor} type="button">Add a file</button>
+        <Menu open={menu} onClose={() => setMenu(false)} anchorRef={anchor} label="Add to the question"
+          items={[{ id: 'file', label: 'File…', onSelect: () => {} }]} />
+        <Harness initial={[attachment('first'), attachment('second'), attachment('third')]} />
+      </>;
+    }
+    render(<MotionProvider><ComposerAttachments /></MotionProvider>);
+    const file = screen.getByRole('menuitem', { name: 'File…' });
+    fireEvent.click(file);
+
+    const trigger = screen.getByRole('button', { name: 'Show all 3 attachments' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = within(screen.getByRole('dialog', { name: 'Attachments' }));
+    const close = dialog.getByRole('button', { name: 'Close' });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: 'Escape' });
+    expect(trigger).toHaveFocus();
+
+    expect(file).toBeInTheDocument();
+    fireEvent.pointerOver(file);
+    expect(trigger).toHaveFocus();
   });
 
   it('moves focus back to the strip if the overflow trigger was removed', async () => {

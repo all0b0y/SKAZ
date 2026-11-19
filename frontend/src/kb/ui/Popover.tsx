@@ -28,6 +28,9 @@ function useGlide(enabled: boolean, open: boolean) {
   const level = useMotionLevel();
   const levelRef = useRef<MotionLevel>(level);
   levelRef.current = level;
+  // AnimatePresence retains the old pointer handlers until the exit finishes.
+  const openRef = useRef(open);
+  useLayoutEffect(() => { openRef.current = open; }, [open]);
   const glideRef = useRef<HTMLSpanElement | null>(null);
   const cur = useRef<HTMLElement | null>(null);
   const hovered = useRef<HTMLElement | null>(null);
@@ -156,6 +159,7 @@ function useGlide(enabled: boolean, open: boolean) {
 
   const handlers = enabled ? {
     onPointerOver: (event: { target: EventTarget | null }) => {
+      if (!openRef.current) return;
       const row = rowOf(event.target);
       if (!row) return; // gaps, headings, separators: the highlight stays where it is
       const pop = popOf();
@@ -163,6 +167,7 @@ function useGlide(enabled: boolean, open: boolean) {
       else { hovered.current = null; if (pop) pointTo(pop); rest(); }
     },
     onPointerLeave: () => {
+      if (!openRef.current) return;
       hovered.current = null;
       const pop = popOf();
       if (pop && pointerFocus.current && document.activeElement === pointerFocus.current) pop.focus({ preventScroll: true });
