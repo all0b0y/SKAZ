@@ -9,8 +9,12 @@
     *{box-sizing:border-box}html{color-scheme:dark}body{margin:0;background:#0c0d0d;color:#f1f0e8;font:1rem/1.65 system-ui,sans-serif}
     main{width:min(100% - 2.5rem,39rem);margin:auto;padding:2.5rem 0 4rem}
     h1,h2{font-family:Georgia,serif;font-weight:400;line-height:1.05}h1{font-size:clamp(3.4rem,11vw,6rem);letter-spacing:-.065em;margin:1.25rem 0 1rem}h2{font-size:1.8rem;margin:1.8rem 0 .5rem}
-    p,ol{max-width:61ch;margin:.75rem 0}ol{padding-left:1.5rem}li+li{margin-top:.4rem}a{color:inherit;text-underline-offset:.22em}a:focus-visible{outline:2px solid #d4e5a5;outline-offset:4px}
-    .download{display:inline-block;margin:.55rem 0 .25rem;background:#efeddf;color:#10120f;padding:.65rem 1.1rem;font-weight:600;text-decoration:none}.download:hover{text-decoration:underline}
+    p,ol{max-width:61ch;margin:.75rem 0}ol{padding-left:1.5rem}li+li{margin-top:.4rem}a{color:inherit;text-underline-offset:.22em}:is(a,button):focus-visible{outline:2px solid #d4e5a5;outline-offset:4px}
+    .terminal{border:1px solid #5d6354;background:#151713;padding:.85rem 1rem;margin:1rem 0}
+    pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#e5ead1;font: .94rem/1.55 ui-monospace,monospace;user-select:text}
+    pre code{font:inherit}.copy-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .9rem;margin-top:.85rem}.copy-row[hidden]{display:none}
+    .copy-row button{min-height:44px;padding:0 .9rem;border:1px solid transparent;background:#efeddf;color:#10120f;font:600 .92rem system-ui,sans-serif;cursor:pointer}.copy-row button:hover{background:#fffdf2}.copy-row button:disabled{cursor:wait}.copy-row span{color:#dfded4;font-size:.875rem}
+    .manual{border-top:1px solid #45483f;margin:2rem 0 0;padding-top:.35rem}.download{display:inline-flex;align-items:center;min-height:44px;font-weight:600}
     .notice{border-left:2px solid #bac598;padding-left:1rem;color:#dddcd3}.more{border-top:1px solid #45483f;margin-top:2rem;padding-top:1rem;display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
   </style>
 </head>
@@ -18,22 +22,59 @@
   <main>
     <nav aria-label="Home"><a href="./">← Back to SKAZ</a></nav>
     <h1>Install SKAZ</h1>
-    <p>SKAZ 0.3.2 is an early-access release for <strong>Apple Silicon Macs running macOS 13 or later</strong>. There is no Intel Mac, Windows, or Linux build.</p>
-    <a class="download" href="https://github.com/all0b0y/SKAZ/releases/download/v0.3.2/SKAZ-0.3.2-arm64.dmg">Download SKAZ 0.3.2 (.dmg)</a>
-    <p>Download from GitHub Releases. <a href="https://github.com/all0b0y/SKAZ/releases/download/v0.3.2/SHA256SUMS.txt">SHA-256 checksums</a></p>
-    <h2>Set up the app</h2>
-    <ol>
-      <li>Open the DMG and drag SKAZ into Applications.</li>
-      <li>Open SKAZ from Applications. If macOS can’t verify it, click <strong>Done</strong>, then go to <strong>System Settings → Privacy &amp; Security → Open Anyway</strong> for SKAZ. Leave the system-wide security settings on.</li>
-      <li>On first launch, choose an agent and connect your own account. Provider terms and charges may apply.</li>
-    </ol>
-    <p>Prefer Terminal? <a href="https://github.com/all0b0y/SKAZ#-install">See the official Terminal installation instructions</a>.</p>
-    <p class="notice">This release is signed with the project’s own SKAZ certificate and is not notarized by Apple. If upgrading, back up your SKAZ library and profile before opening the new version.</p>
+    <p>Requires <strong>Apple Silicon Macs running macOS 13 or later</strong>. There is no Intel Mac, Windows, or Linux build.</p>
+    <h2>Install via Terminal</h2>
+    <p>Open Terminal, paste this command, and press Return.</p>
+    <div class="terminal">
+      <pre><code id="install-command">curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash</code></pre>
+      <div class="copy-row" hidden><button type="button" id="copy-command">Copy command</button><span role="status"></span></div>
+    </div>
+    <p>The installer downloads the latest stable release, verifies the checksum and SKAZ signature, then installs and opens the app. <a href="https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh">Read the installer script</a>.</p>
+    <p class="notice">SKAZ is in early access and is not notarized by Apple. If upgrading, back up your SKAZ library and profile before opening the new version.</p>
+    <section class="manual" aria-labelledby="manual-title">
+      <h2 id="manual-title">Install from a disk image instead</h2>
+      <a class="download" href="https://github.com/all0b0y/SKAZ/releases/download/v0.3.2/SKAZ-0.3.2-arm64.dmg">Download SKAZ 0.3.2 (.dmg)</a>
+      <p>Download from GitHub Releases. <a href="https://github.com/all0b0y/SKAZ/releases/download/v0.3.2/SHA256SUMS.txt">SHA-256 checksums</a></p>
+      <ol>
+        <li>Open the DMG and drag SKAZ into Applications.</li>
+        <li>Open SKAZ from Applications. If macOS can’t verify it, click <strong>Done</strong>, then go to <strong>System Settings → Privacy &amp; Security → Open Anyway</strong> for SKAZ. Leave the system-wide security settings on.</li>
+      </ol>
+    </section>
+    <p>On first launch, choose an agent and connect your own account. Provider terms and charges may apply.</p>
     <nav class="more" aria-label="Release and project links">
       <a href="https://github.com/all0b0y/SKAZ/releases/tag/v0.3.2">Release notes</a>
       <a href="https://github.com/all0b0y/SKAZ/releases/latest">Latest stable release</a>
       <a href="https://github.com/all0b0y/SKAZ">Project on GitHub</a>
     </nav>
   </main>
+  <script>
+    const command = document.querySelector('#install-command');
+    const copy = document.querySelector('#copy-command');
+    const status = document.querySelector('[role="status"]');
+
+    copy.parentElement.hidden = false;
+    copy.addEventListener('click', async () => {
+      if (copy.getAttribute('aria-busy') === 'true') return;
+      copy.setAttribute('aria-busy', 'true');
+      status.textContent = '';
+      try {
+        await navigator.clipboard.writeText(command.textContent);
+        status.textContent = 'Copied.';
+      } catch {
+        const range = document.createRange();
+        range.selectNodeContents(command);
+        const selection = window.getSelection();
+        if (selection) {
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+        status.textContent = selection?.toString() === command.textContent
+          ? 'Couldn’t copy automatically. Copy the selected command.'
+          : 'Couldn’t copy automatically. Select and copy the command above.';
+      } finally {
+        copy.removeAttribute('aria-busy');
+      }
+    });
+  </script>
 </body>
 </html>
