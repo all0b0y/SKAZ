@@ -1,6 +1,6 @@
 import { usePageVisible } from './usePageVisible';
 import { useMotionLevel, useReducedMotion, useStillIndicators } from '../ui/motionLevel';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
@@ -26,6 +26,7 @@ import { ChatBackdrop } from '../fx/backdrop/ChatBackdrop';
 import { SelectionProvider } from './select/context';
 import { useFollowSwitch } from './switchMotion';
 import { ScrollEdges } from './ScrollEdges';
+import { ReplyAnchorRail, ReturnToLatest, useReplyAnchors } from './replyAnchors041';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
@@ -124,6 +125,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const stick = useRef(true);
+  /** B1 (decision 04): an explicit jump to a reply is still flying; see the onScroll guard. */
+  const anchorFlight = useRef(false);
   const reduced = useReducedMotion() ?? false;
   // Decision 32: the main field is still only at «off» or the system's reduced motion; at «calm» it
   // keeps answering clicks and only its background drift stops.
@@ -132,6 +135,16 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const { leaving, bornHere } = useFirstMessageLeave(chats, reduced);
 
   const chat = open?.chat ?? null;
+  // B1 (decision 04): one stable anchor per assistant reply — the ordered ids the rail mirrors;
+  // streaming grows an answer's text, never its id.
+  const replyIds = useMemo(
+    () => chat?.messages.flatMap((m) => (m.role === 'assistant' ? [m.id] : [])) ?? [],
+    [chat?.messages],
+  );
+  // B1 (decision 04): the marker follows the reading position; only explicit navigation — a dot
+  // click, bare ↑/↓ outside fields, the return button — ever moves the view, and content growth
+  // while an answer streams leaves the user's manual reading position alone.
+  const anchors = useReplyAnchors(scrollRef, replyIds, { reducedMotion: reduced, frozen: hidden });
   const questionActions = useQuestionActions(currentId, chat);
   const title = chat?.title ?? summary?.title ?? 'New chat';
   // Decision 25: switching chats, the thread follows the tab's direction; the title crossfades.
@@ -150,7 +163,14 @@ export function ChatView({ hidden }: { hidden: boolean }) {
 
   // A notice or an error belongs to the chat it was about (QA D10).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setRenaming(false); stick.current = true; setNotice(null); setActionError(null); }, [currentId]);
+  useEffect(() => { setRenaming(false); stick.current = true; anchorFlight.current = false; setNotice(null); setActionError(null); }, [currentId]);
+
+  // B1 (decision 04): explicit navigation owns the reading position — a jump to a reply takes the
+  // thread off the streaming bottom (the user is reading history). The return-to-latest button
+  // queues no intent here: its landing's own scroll event re-sticks the thread.
+  useLayoutEffect(() => {
+    if (anchors.state.intent.kind === 'jumpToReply') { anchorFlight.current = true; stick.current = false; }
+  }, [anchors.state.intent]);
 
   // Keep the newest text in view while the user is at the bottom.
   useLayoutEffect(() => {
@@ -218,7 +238,17 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={fieldStill} calm={fieldCalm}>
       {showBackdrop && <ChatBackdrop working={isAnswering(chat)} active={!hidden} reduced={reduced} />}
       <div className="kb-chat__scroll" ref={scrollRef} role="log" aria-label="Conversation" aria-live="off"
-        onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>
+        data-anchors="true" tabIndex={currentId ? 0 : undefined}
+        onScroll={(e) => {
+          // B1 (decision 04 §7): the native scrollbar is gone (replyAnchors.css hooks this
+          // attribute), scrolling itself is untouched. A reply jump that starts at the bottom
+          // flies through the stick zone; its own events must not re-stick the thread mid-flight,
+          // or the next streamed delta would snap the flight back to the bottom.
+          const el = e.currentTarget;
+          const near = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+          if (anchorFlight.current) { if (near) return; anchorFlight.current = false; }
+          stick.current = near;
+        }}>
         {currentId && open?.load === 'loading' && !chat && <div className="kb-chat__wait"><Spinner label="Opening the chat" /></div>}
         {currentId && open?.load === 'error' && !chat && (
           <Banner tone="error" title="Couldn’t open this chat."
@@ -245,6 +275,13 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       </div>
       {/* Stage 6 B2 GradualBlur: soft edges under the title bar and above the composer (only over a thread). */}
       <ScrollEdges scrollRef={scrollRef} show={showBackdrop} />
+      {/* B1 (decision 04): the dot column — one dot per model answer, the active one a longer
+          dash; a click jumps to that answer and takes the thread off the streaming bottom. */}
+      <ReplyAnchorRail ids={anchors.state.ids} activeId={anchors.state.activeId}
+        onGoToReply={(id) => { anchorFlight.current = true; stick.current = false; anchors.goToReply(id); }} />
+      {/* B1 (decision 04 §4): back to the newest message — only once the user left the bottom;
+          its landing's scroll event re-sticks streaming (the explicit return, not a forced pull). */}
+      <ReturnToLatest visible={anchors.state.showReturn} onReturn={anchors.returnToLatest} />
       </DitherStage>
       {showField && (
         // FX §5: what the empty chat is for, on a solid plate above the field — never on the canvas.
