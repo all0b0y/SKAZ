@@ -16,6 +16,7 @@ Material ``.skaz/`` files written here:
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import hashlib
 import logging
@@ -324,7 +325,7 @@ class SourceService:
         # Q1 n2 L3: the check and the store under one lock per content — two adds at once make one.
         with self._same_file.hold(validated.sha256):
             category = validated.classification.category
-            if category in ("pdf", "text"):
+            if category in ("pdf", "presentation", "text"):
                 data = read_bounded_bytes(
                     validated.resolved_path,
                     max_bytes=validated.classification.max_bytes,
@@ -345,7 +346,11 @@ class SourceService:
                         "sha256": validated.sha256,
                     }
                 )
-                if category == "pdf":
+                if category in ("pdf", "presentation"):
+                    if category == "presentation":
+                        from .presentation import presentation_pdf
+
+                        data = presentation_pdf(data, validated.classification.extension)
                     prepared = prepare_pdf(
                         data,
                         origin=origin,
@@ -599,7 +604,9 @@ class SourceService:
         return IntakeResult(duplicate.material_id, duplicate.title, status, 0, 0, None, existing=True)
 
     def _duplicate_pdf_pages(self, material_id: str, selected_bytes: bytes) -> int | None:
-        """A dedup match alone does not verify that the saved PDF original is still usable."""
+        """Check the saved content as well as the selected source before reusing a scan."""
+        from .document_card import CARD_NAME, MAX_CARD_BYTES, card_pages
+
         try:
             files = self._material_files(material_id)
             if files.manifest.kind not in ("pdf", "book") or files.fragments:
@@ -607,13 +614,19 @@ class SourceService:
             intake = self._intake(files.directory)
             if (
                 intake is None or intake.extractor != "pdf" or not intake.failure
-                or intake.original != "original.pdf"
+                or intake.original not in ("original.pdf", CARD_NAME)
             ):
                 return None
             pages = _scan_page_count((intake.model_extra or {}).get("pages"), intake.hidden)
             if pages is None:
                 return None
             original = self.visual._authorized_service_file(files, intake.original)
+            if intake.original == CARD_NAME:
+                metadata = files.manifest.origin.model_extra if files.manifest.origin else None
+                saved = read_bounded_bytes(original, max_bytes=MAX_CARD_BYTES)
+                if (metadata or {}).get("stored_sha256") != content_hash(saved):
+                    return None
+                return pages if len(card_pages(saved)) == pages and len(open_pdf(selected_bytes).pages) == pages else None
             descriptor = os.open(original, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
             with os.fdopen(descriptor, "rb") as handle:
                 verify_handle_version(
@@ -796,6 +809,36 @@ class SourceService:
         if record is None:
             raise NotFound("Material not found.")
         return self.kb.require().read_material(material_id, hint=record.rel_dir)
+
+    def share_file(self, material_id: str) -> Path:
+        files = self._material_files(material_id)
+        intake = self._intake(files.directory)
+        if files.manifest.kind in ("image", "pdf", "book") and intake and intake.original:
+            return self.visual._authorized_service_file(files, intake.original)
+        return files.source_path
+
+    def display_content(self, material_id: str) -> tuple[str, str]:
+        from .document_card import CARD_NAME, MAX_CARD_BYTES
+        from .native_intake041.images import material_webp
+
+        files = self._material_files(material_id)
+        intake = self._intake(files.directory)
+        if not intake or not intake.original:
+            return "text", ""
+        if files.manifest.kind != "image" and intake.original != CARD_NAME:
+            return "text", ""
+        path = self.visual._authorized_service_file(files, intake.original)
+        data = read_bounded_bytes(path, max_bytes=MAX_CARD_BYTES)
+        metadata = files.manifest.origin.model_extra if files.manifest.origin else None
+        expected = (metadata or {}).get("stored_sha256") or (metadata or {}).get("sha256")
+        if expected and content_hash(data) != expected:
+            raise SourceRejected("The stored material has changed since import.")
+        if intake.original == CARD_NAME:
+            return "document", data.decode("utf-8")
+        if path.suffix.lower() != ".webp":
+            fmt = classify_extension(path).format_id
+            data, _ = material_webp(data, cast(ImageFormat, fmt))
+        return "image", base64.b64encode(data).decode("ascii")
 
     @staticmethod
     def _read_exclusions(directory: Path) -> ExclusionFile:

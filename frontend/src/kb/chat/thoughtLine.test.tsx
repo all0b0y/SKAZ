@@ -74,7 +74,7 @@ describe('ThoughtLine while the agent works', () => {
     vi.setSystemTime(START + 2_300);
     const m = msg([tool('skaz_search', 'Searched «entropy»')]);
     render(<ThoughtLine message={m} head={head(m)} />);
-    const status = screen.getByText('Writing an answer…');
+    const status = screen.getByText('Writing an answer…').closest('[role="status"]')!;
     expect(status).toHaveAttribute('role', 'status');
     expect(screen.getByRole('timer')).toHaveTextContent('2.3 s');
     act(() => { vi.advanceTimersByTime(1_000); });

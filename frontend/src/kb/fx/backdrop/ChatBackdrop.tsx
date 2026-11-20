@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { FxCanvas } from '../FxCanvas';
 import { BackdropScene } from './scene';
 
@@ -31,12 +31,52 @@ export function ChatBackdrop({ working, active, reduced }: ChatBackdropProps) {
   runningRef.current = running;
   const frameMs = useCallback(() => scene.frameMs, [scene]);
 
+  const host = useRef<HTMLDivElement | null>(null);
+  const paintBridge = useCallback(() => {
+    const source = host.current?.querySelector('canvas');
+    const app = host.current?.closest('.kb-app');
+    const target = app?.querySelector<HTMLElement>('.kb-chatrow.is-current');
+    const canvas = target?.closest('.kb-tabhost')?.querySelector<HTMLCanvasElement>('.kb-tab--bridge:not([hidden]) .kb-tab__backdrop');
+    if (!source || !canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const origin = source.getBoundingClientRect();
+    if (!rect.width || !rect.height || !origin.height) return;
+    canvas.width = Math.ceil(rect.width);
+    canvas.height = Math.ceil(rect.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const w = canvas.width;
+    const h = canvas.height;
+    const r = Math.min(10, w, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(0, r);
+    ctx.lineTo(w - r, r);
+    ctx.arcTo(w, r, w, 0, r);
+    ctx.lineTo(w, h);
+    ctx.arcTo(w, h - r, w - r, h - r, r);
+    ctx.lineTo(0, h - r);
+    ctx.clip();
+    const scaleX = source.width / origin.width;
+    const scaleY = source.height / origin.height;
+    ctx.drawImage(source, (rect.left - origin.left) * scaleX, (rect.top - origin.top) * scaleY,
+      rect.width * scaleX, rect.height * scaleY, 0, 0, w, h);
+  }, []);
+  useLayoutEffect(() => {
+    const app = host.current?.closest('.kb-app');
+    if (!app) return;
+    const side = app.querySelector('.kb-side');
+    const observer = new MutationObserver(paintBridge);
+    if (side) observer.observe(side, { subtree: true, attributes: true, childList: true, attributeFilter: ['hidden', 'class', 'style'] });
+    app.addEventListener('scroll', paintBridge, true);
+    return () => { observer.disconnect(); app.removeEventListener('scroll', paintBridge, true); };
+  }, [paintBridge]);
   return (
-    <div className="kb-chat__backdrop" aria-hidden="true" data-working={moving ? 'true' : undefined} data-still={reduced ? 'true' : undefined}>
+    <div ref={host} className="kb-chat__backdrop" aria-hidden="true" data-working={moving ? 'true' : undefined} data-still={reduced ? 'true' : undefined}>
       <FxCanvas className="kb-fx-backdrop" active={active && (reduced || running)} reduced={reduced} frameMs={frameMs}
         onFrame={(ctx, w, h, _t, dt, colors) => {
           scene.step(dt);
           scene.draw(ctx, w, h, colors);
+          paintBridge();
           if (runningRef.current && scene.settled) {
             runningRef.current = false;
             setRunning(false);

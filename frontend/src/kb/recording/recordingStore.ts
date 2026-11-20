@@ -9,8 +9,7 @@ import { barsFrom, SILENT_BARS, type Bars } from './level';
 
 /**
  * Recording in the new interface (decisions 26–28).
- * `Record` → POST /kb/recordings (material + session) → POST /kb/chats {recording_material_id}
- * (a new chat about the recording, C1) → the live panel opens on the right → the existing capture
+ * Record acquires the requested devices before creating a material and session. The existing capture
  * pipeline streams to the session. Pause/Resume/Stop end the stream first, then settle the
  * material over /kb/recordings/{id}/pause|resume|stop. Nothing blinks: the capsule shows three
  * bars from the real signal and a red timer.
@@ -277,7 +276,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         try {
           const view = await deps.client.call(action === 'stop' ? 'POST /kb/recordings/{material_id}/stop' : 'POST /kb/recordings/{material_id}/pause',
             { path: { material_id: materialId } });
-          if (action === 'pause' || (view.recording_state !== 'processing' && view.status !== 'processing')) return;
+          if (action === 'pause' || (view.recording_state !== 'processing' && view.status !== 'processing')) return view;
         } catch (error) {
           if (!(error instanceof KbApiError && error.status === 409)) return;
         }
@@ -290,10 +289,10 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       return { ...(o.deviceId ? { deviceId: o.deviceId } : {}), systemAudio: o.systemAudio };
     };
 
-    const begin = async (sessionId: string, sampleRate?: number) => {
+    const begin = async (sessionId: string, sampleRate?: number, prepared?: CaptureEngine) => {
       if (!deps.capture) throw new Error('Recording isn’t available in this window.');
       const id = ++attempt;
-      engine = deps.capture();
+      engine = prepared ?? deps.capture();
       await engine.start({ sessionId, sources: sources(), sampleRate }, { onLevel: onLevel(id), onFailure: onFailure(id) });
       if (id !== attempt) return;
       set({ phase: 'recording', elapsedMs: engine.elapsedMs() });
@@ -372,6 +371,9 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         report();
         let materialId: string | null = null;
         try {
+          if (!deps.capture) throw new Error('Recording isn’t available in this window.');
+          engine = deps.capture();
+          await engine.prepare?.(sources());
           const speech = await deps.client.call('POST /kb/recordings', { body: { folder_id: get().options.folderId } });
           materialId = speech.material_id;
           set({
@@ -379,23 +381,29 @@ export function createRecordingStore(deps: Deps): RecordingStore {
             view: get().options.mode === 'translation' ? 'translation' : 'original',
             options: { ...get().options, folderId: speech.folder_id },
           });
+          await begin(speech.session_id, undefined, engine);
           deps.onMaterialsChanged?.();
           deps.ui.getState().openLive(materialId);
-          // A new chat about this recording; the recording works even if the chat can't open.
-          void deps.client.call('POST /kb/chats', { body: { recording_material_id: materialId } }).then(
-            (chat) => { if (get().materialId === materialId) set({ chatId: chat.id }); },
-            (error: unknown) => { if (get().materialId === materialId) set({ chatError: errorText(error) }); },
-          );
-          await begin(speech.session_id);
         } catch (error) {
           tick(false);
           attempt += 1;
           await engine?.stop().catch(() => false);
           engine = null;
-          if (materialId) await settle(materialId, 'stop');
+          let cleanupError = '';
+          if (materialId) {
+            const stopped = await settle(materialId, 'stop');
+            if (stopped?.recording_state === 'stopped' && stopped.fragment_count === 0 && stopped.duration_ms === 0) {
+              try {
+                await deps.client.call('DELETE /kb/materials/{material_id}', { path: { material_id: materialId } });
+              } catch (cleanup) {
+                cleanupError = ` The empty recording could not be removed: ${errorText(cleanup)}`;
+              }
+            }
+            deps.onMaterialsChanged?.();
+          }
           set({
-            phase: 'idle', startError: materialId ? captureErrorText(error) : errorText(error), startErrorWhen: 'start',
-            startPermission: materialId ? capturePermission(error) : null, bars: SILENT_BARS,
+            phase: 'idle', materialId: null, sessionId: null, title: null, startError: captureErrorText(error) + cleanupError, startErrorWhen: 'start',
+            startPermission: capturePermission(error), bars: SILENT_BARS,
           });
           report();
         }
@@ -498,9 +506,9 @@ export function createRecordingStore(deps: Deps): RecordingStore {
             view: translation ? 'translation' : 'original',
             options: { ...get().options, folderId: speech.folder_id },
           });
-          deps.ui.getState().openLive(materialId);
           // The session keeps its PCM clock: capture continues at the sample rate it started with.
           await begin(speech.session_id, live.ok ? live.data.sample_rate : undefined);
+          deps.ui.getState().openLive(materialId);
         } catch (error) {
           tick(false);
           attempt += 1;

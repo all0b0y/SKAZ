@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, ShareMenu, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron';
 import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { open, realpath, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -216,6 +216,23 @@ export function registerIpc(
     isFile: (p) => { try { return statSync(p).isFile(); } catch { return false; } },
   };
   let choosingExport = false;
+  ipcMain.handle(CHANNELS.share, async (event, item: unknown) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!senderTrusted(event) || !owner || !item || typeof item !== 'object') return 'failed';
+    if (process.platform !== 'darwin') return 'unavailable';
+    try {
+      if ('kind' in item && item.kind === 'text' && 'text' in item && typeof item.text === 'string'
+          && item.text.trim() && Buffer.byteLength(item.text, 'utf8') <= 8 * 1024 * 1024) {
+        new ShareMenu({ texts: [item.text] }).popup({ window: owner });
+        return 'opened';
+      }
+      if (!('kind' in item) || (item.kind !== 'material' && item.kind !== 'page')) return 'failed';
+      const target = await resolveTarget(item, actionDeps, exportFolders);
+      if (!target || target.directory || owner.isDestroyed()) return 'failed';
+      new ShareMenu({ filePaths: [target.path] }).popup({ window: owner });
+      return 'opened';
+    } catch { return 'failed'; }
+  });
   ipcMain.handle(CHANNELS.chooseExportFolder, async (event): Promise<string | null> => {
     if (!senderTrusted(event) || choosingExport) return null;
     const owner = BrowserWindow.fromWebContents(event.sender);

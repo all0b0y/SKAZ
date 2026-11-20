@@ -1,4 +1,5 @@
 /* Chat tabs and empty-tab state (0.4.1 B2), using only tokens.css variables. */
+.kb-head__title > .kb-chattabs__dot { display: inline-block; margin-inline-end: var(--kb-sp-6); vertical-align: middle; }
 
 .kb-chattabs {
   flex: 1;
@@ -15,7 +16,7 @@
   min-width: 0;
   align-self: stretch;
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: var(--kb-sp-4);
   overflow-x: auto;
   overflow-y: hidden;
@@ -32,11 +33,12 @@
   display: flex;
   align-items: center;
   position: relative;
-  min-width: 112px;
+  min-width: 80px;
   max-width: 185px;
-  flex: 0 1 185px;
+  flex: 0 1 auto;
+  height: 30px;
   color: var(--kb-muted-strong);
-  border-radius: var(--kb-r-sm) var(--kb-r-sm) 0 0;
+  border-radius: var(--kb-r-sm);
 }
 
 .kb-chattabs__item:hover {
@@ -47,18 +49,7 @@
 .kb-chattabs__item[data-active='true'] {
   color: var(--kb-text);
   font-weight: 600;
-}
-
-.kb-chattabs__item[data-active='true']::after {
-  content: '';
-  position: absolute;
-  height: 2px;
-  background: var(--kb-text);
-  left: var(--kb-sp-8);
-  right: var(--kb-sp-8);
-  bottom: 0;
-  border-radius: var(--kb-r-2xs);
-  pointer-events: none;
+  background: var(--kb-accent-soft);
 }
 
 .kb-chattabs__tab {
@@ -117,7 +108,17 @@
   margin-right: var(--kb-sp-2);
   border-radius: var(--kb-r-xs);
   color: var(--kb-muted-strong);
-  opacity: 0.8;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.kb-chattabs__item:is(:hover, :focus-within) .kb-chattabs__close {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .kb-chattabs__close { opacity: 1; pointer-events: auto; }
 }
 
 .kb-chattabs__close:hover,

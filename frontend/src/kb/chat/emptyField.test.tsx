@@ -41,55 +41,41 @@ function holdLeaveTimer(ms: number) {
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('Empty chat: the dither field', () => {
-  it('no chat selected: the field is there, decorative; the copy is on the plate above the message field', async () => {
+  it('no chat selected: the field is there, decorative; the composer carries the reference hint', async () => {
     renderKb({ world: chatWorld() });
     await within(side()).findByRole('region', { name: 'Pinned' });
     expect(field()).toBeInTheDocument();
     expect(field()).toHaveAttribute('aria-hidden', 'true');
     expect(stage()).toHaveAttribute('data-fx', 'field');
     expect(stage()).toHaveAttribute('data-interactive', 'true'); // crosshair, clicks connect
-    expect(plate()).toHaveTextContent('Ask about your materials');
-    expect(plate()).toHaveTextContent('Answers cite the exact moments of your recordings and the pages of your documents. Type @ to point at a page, a material or a chat.');
-    // No text on the canvas area: the conversation log holds nothing, the plate sits outside it.
+    expect(plate()).toBeNull();
     const log = within(centre()).getByRole('log', { name: 'Conversation' });
     expect(log).toBeEmptyDOMElement();
-    expect(log.contains(plate())).toBe(false);
-    expect(stage().contains(plate())).toBe(false);
-    // The plate comes right before the message field. The 0.4.1 chat tabs wrap the stage and the
-    // plate in the workspace element: the wrapper boundary is what sits between the copy and the
-    // field now — no other content does. The plate ends the workspace, and the composer with the
-    // field is the next element after it. (The rendered proof — the copy visible above one usable
-    // composer, no overlap — is scripts/kb-emptygate.smoke.spec.ts.)
-    const workspace = plate()!.closest('.kb-chat__workspace');
-    expect(workspace).not.toBeNull();
-    expect(workspace!.parentElement).toBe(centre());
-    expect(plate()!.parentElement).toBe(workspace);
-    expect(plate()!.nextElementSibling).toBeNull();
-    expect(workspace!.nextElementSibling).toContainElement(screen.getByTestId('message-input'));
+    expect(screen.getByTestId('message-input')).toHaveAttribute('aria-placeholder', 'Write a message… · @ to reference');
     // Clicking the empty area is harmless where there is no canvas (jsdom).
     await userEvent.setup().pointer({ keys: '[MouseLeft]', target: log });
     expect(field()).toBeInTheDocument();
   });
 
-  it('an open chat with no messages (a recording opened it) shows the field and its own copy', async () => {
+  it('an open chat with no messages (a recording opened it) shows only the field above the composer', async () => {
     const user = userEvent.setup();
     const world = chatWorld();
     Object.assign(world.chats.find((c) => c.id === 'c2')!, { messages: [], state: 'idle' });
     renderKb({ world });
     await user.click(await within(side()).findByRole('button', { name: /What did I miss in lecture 8/ }));
-    await waitFor(() => expect(plate()).toHaveTextContent('Ask about the lecture'));
-    expect(plate()).toHaveTextContent('Questions here are answered from what has been recognised so far.');
+    await waitFor(() => expect(field()).toBeInTheDocument());
+    expect(plate()).toBeNull();
     expect(field()).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('an empty chat that is not a recording: «No messages yet»', async () => {
+  it('an ordinary empty chat also shows only the field', async () => {
     const user = userEvent.setup();
     const world = chatWorld();
     Object.assign(world.chats.find((c) => c.id === 'c3')!, { messages: [] });
     renderKb({ world });
     await user.click(await within(side()).findByRole('button', { name: /Compare regularisation/ }));
-    await waitFor(() => expect(plate()).toHaveTextContent('No messages yet'));
-    expect(plate()).toHaveTextContent('Ask about your materials. Type @ to point at a page, a material or a chat.');
+    await waitFor(() => expect(field()).toBeInTheDocument());
+    expect(plate()).toBeNull();
     expect(field()).toBeInTheDocument();
   });
 
@@ -104,7 +90,7 @@ describe('Empty chat: the dither field', () => {
     expect(centre().querySelector('.kb-chat__messages--enter')).toBeNull();
   });
 
-  it('the first message: the field burns out, the plate fades, only the question rises; then an ordinary chat', async () => {
+  it('the first message: the field burns out, only the question rises; then an ordinary chat', async () => {
     const user = userEvent.setup();
     const world = chatWorld();
     world.hold = true; // the answer keeps streaming: «Writing an answer…» stays to be seen
@@ -118,9 +104,7 @@ describe('Empty chat: the dither field', () => {
     expect(stage()).toHaveAttribute('data-fx', 'leaving');
     expect(stage()).not.toHaveAttribute('data-interactive'); // no clicks while it leaves
     expect(field()).toBeInTheDocument();
-    expect(plate()).toHaveAttribute('data-leaving', 'true');
-    // The copy stays the new chat's (no «No messages yet» flash for the chat the send created).
-    expect(plate()).toHaveTextContent('Ask about your materials');
+    expect(plate()).toBeNull();
     const messages = centre().querySelector('.kb-chat__messages')!;
     expect(messages).toHaveClass('kb-chat__messages--enter');
     expect(messages.firstElementChild).toHaveAttribute('aria-label', 'Your question');
@@ -136,19 +120,17 @@ describe('Empty chat: the dither field', () => {
     expect(stage()).not.toHaveAttribute('data-fx');
     expect(centre().querySelector('.kb-chat__messages')).not.toHaveClass('kb-chat__messages--enter');
     // The waiting mark: the decorative canvas beside the words, the words are the status.
-    const status = within(centre()).getByText('Writing an answer…');
+    const status = within(centre()).getByText('Writing an answer…').closest('[role="status"]')!;
     expect(status).toHaveAttribute('role', 'status');
     expect(status.querySelector('canvas.kb-msg__think')).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('F2: the send lands in one commit — the same plate node fades, the question rises with it, never «No messages yet»', async () => {
+  it('F2: the send lands in one commit — the field burns out, the question rises with it, never «No messages yet»', async () => {
     const user = userEvent.setup();
     const world = chatWorld();
     world.hold = true;
     renderKb({ world });
     await within(side()).findByRole('region', { name: 'Pinned' });
-    const before = plate();
-    expect(before).not.toBeNull();
     // Every committed DOM state between the send and the question: a MutationObserver callback runs
     // after each commit, before a later (lower-priority) render could fix it up.
     const frames: Array<{ plate: string | null; leaving: string | null; messages: string | null; field: boolean }> = [];
@@ -156,7 +138,7 @@ describe('Empty chat: the dither field', () => {
       const list = centre().querySelector('.kb-chat__messages');
       frames.push({
         plate: plate()?.textContent ?? null,
-        leaving: plate()?.getAttribute('data-leaving') ?? null,
+        leaving: stage()?.getAttribute('data-fx') ?? null,
         messages: list ? list.className : null,
         field: !!field(),
       });
@@ -172,12 +154,9 @@ describe('Empty chat: the dither field', () => {
     const withMessages = frames.filter((f) => f.messages !== null);
     expect(withMessages.length).toBeGreaterThan(0);
     for (const f of withMessages) {
-      expect(f).toMatchObject({ leaving: 'true', field: true });
+      expect(f).toMatchObject({ leaving: 'leaving', field: true, plate: null });
       expect(f.messages).toContain('kb-chat__messages--enter');
     }
-    // The plate was never unmounted: the same node carries data-leaving, so its 250 ms fade runs.
-    expect(plate()).toBe(before);
-    expect(plate()).toHaveAttribute('data-leaving', 'true');
   });
 
   it('a system message into an empty chat (a model switch note) removes the field without the transition', async () => {
@@ -186,7 +165,8 @@ describe('Empty chat: the dither field', () => {
     Object.assign(world.chats.find((c) => c.id === 'c3')!, { messages: [] });
     const { services } = renderKb({ world });
     await user.click(await within(side()).findByRole('button', { name: /Compare regularisation/ }));
-    await waitFor(() => expect(plate()).toHaveTextContent('No messages yet'));
+    await waitFor(() => expect(field()).toBeInTheDocument());
+    expect(plate()).toBeNull();
     const leave = holdLeaveTimer(LEAVE_MS);
     const note = chatMessage('c3-s1', 1, 'system', '2026-10-22T10:00:00Z', [{ type: 'text', text: 'Model changed to Opus' }]);
     act(() => {
@@ -223,7 +203,7 @@ describe('Empty chat: the dither field', () => {
     await within(centre()).findByRole('article', { name: 'Answer' });
     await user.click(screen.getByTestId('message-input'));
     await user.keyboard('And the base of the logarithm?{Enter}');
-    const wait = await within(centre()).findByText('Writing an answer…');
+    const wait = (await within(centre()).findByText('Writing an answer…')).closest('[role="status"]')!;
     expect(wait).toHaveAttribute('role', 'status');
     expect(wait.querySelector('canvas.kb-msg__think')).toHaveAttribute('aria-hidden', 'true');
     expect(field()).toBeNull();

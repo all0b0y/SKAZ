@@ -100,7 +100,8 @@ describe('Chat overview in the right panel (N8)', () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: world() });
     await user.click(await within(screen.getByRole('region', { name: 'Chats' })).findByRole('button', { name: /Wiki trust overview/ }));
-    await user.click(await screen.findByRole('button', { name: 'Chat overview' }));
+    await user.click(within(screen.getByRole('region', { name: 'Chat' })).getByRole('button', { name: /More for/ }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Chat overview' }));
     const panel = await screen.findByRole('region', { name: 'Chat overview' });
     expect(panel).toHaveTextContent('Sources as in Settings');
     const tabs = within(panel).getAllByRole('tab').map((t) => t.textContent);
@@ -143,7 +144,8 @@ describe('Chat overview in the right panel (N8)', () => {
     expect(within(panel).getByRole('tab', { name: /Used/ })).toHaveAttribute('aria-selected', 'true');
 
     // The header button closes it again.
-    await user.click(screen.getByRole('button', { name: 'Close the chat overview' }));
+    await user.click(within(screen.getByRole('region', { name: 'Chat' })).getByRole('button', { name: /More for/ }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Close the chat overview' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Chat overview' })).toBeNull());
   });
 });

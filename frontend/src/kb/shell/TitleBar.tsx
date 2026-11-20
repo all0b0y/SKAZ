@@ -8,9 +8,10 @@ import { useLibrary, usePrefs, useServices, useUi } from '../state/context';
  * Holds the panel toggle, the recording control "Record | Folder ▾" (a capsule while recording —
  * the only place that shows a recording is running) and "+ Material".
  */
-export function TitleBar() {
+export function TitleBar({ materialActionsInSidebar = false, compactSide }: { materialActionsInSidebar?: boolean; compactSide?: { open: boolean; toggle: () => void } }) {
   const { prefs } = useServices();
-  const sideOpen = usePrefs((s) => s.sideOpen);
+  const savedOpen = usePrefs((s) => s.sideOpen);
+  const sideOpen = compactSide?.open ?? savedOpen;
   const ready = useLibrary((s) => s.library?.state === 'ready');
   const setAddOpen = useUi((s) => s.setAddMaterialOpen);
   return (
@@ -24,11 +25,11 @@ export function TitleBar() {
           label={sideOpen ? 'Hide side panel' : 'Show side panel'}
           className="kb-titlebar__panel-toggle"
           aria-controls="kb-side"
-          onClick={() => prefs.getState().set({ sideOpen: !sideOpen })}
+          onClick={compactSide?.toggle ?? (() => prefs.getState().set({ sideOpen: !sideOpen }))}
         />
       </div>
       <div className="kb-titlebar__drag" />
-      <div className="kb-titlebar__group">
+      {!materialActionsInSidebar && <div className="kb-titlebar__group">
         <RecordControls />
         <Tooltip text={ready ? 'Add files, links or text' : 'Connect the library first'} describes>
           <button type="button" className="kb-pill" aria-disabled={!ready || undefined} data-testid="add-material"
@@ -36,7 +37,7 @@ export function TitleBar() {
             <Icon name="plus" size={14} />Material
           </button>
         </Tooltip>
-      </div>
+      </div>}
     </header>
   );
 }

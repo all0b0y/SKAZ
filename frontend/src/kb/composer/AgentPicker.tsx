@@ -259,7 +259,7 @@ export function AgentPicker({ choice, onChoose, existingChat, lastOf, settings, 
           aria-label={`Agent and model: ${[choice ? ENGINE_NAME[choice.engine] : 'none', modelLabel].filter((v, i, all) => all.indexOf(v) === i).join(', ')}`}
           onClick={() => setOpen((v) => !v)} data-testid="agent-picker">
           {choice && <EngineBadge engine={choice.engine} size={16} />}
-          <span className="kb-picker__label">{modelLabel}</span>
+          <span className="kb-picker__label">{choice?.model && current ? current.name.replace(/ Agent$/, '') : modelLabel}</span>
           <Icon name="chevronDown" size={12} />
         </button>
       )}

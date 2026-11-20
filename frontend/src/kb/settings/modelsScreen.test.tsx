@@ -64,10 +64,15 @@ describe('Models screen v2', () => {
     const menu = await screen.findByRole('menu', { name: 'Wiki model' });
     const claude = within(menu).getByRole('group', { name: 'Claude Code' });
     expect(claude).toHaveTextContent('last: Sonnet 5.5');
-    // Reasoning lives at the bottom of the same menu, for the chosen model.
-    await user.click(within(menu).getByRole('radio', { name: 'Medium' }));
+    expect(within(menu).queryByRole('radiogroup')).toBeNull();
+    await user.keyboard('{Escape}');
+    await user.click(within(wiki).getByRole('button', { name: /^Effort:/ }));
+    await user.click(within(await screen.findByRole('menu', { name: 'Effort' })).getByRole('menuitemradio', { name: 'Medium' }));
     await waitFor(() => expect(fake.world.wiki.wiki_effort).toBe('medium'));
-    await user.click(within(claude).getByRole('menuitemradio', { name: 'Sonnet 5.5' }));
+    await user.click(button);
+    const reopened = await screen.findByRole('menu', { name: 'Wiki model' });
+    await user.click(within(within(reopened).getByRole('group', { name: 'Claude Code' }))
+      .getByRole('menuitemradio', { name: 'Sonnet 5.5' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({
       method: 'PUT', path: '/kb/settings/wiki', body: { wiki_engine: 'claude_code', wiki_model: 'claude-sonnet-5-5', wiki_effort: 'low' },
     })));

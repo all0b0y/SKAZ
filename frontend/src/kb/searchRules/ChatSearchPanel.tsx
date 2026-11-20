@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { animate } from 'motion';
+import { useMotionLevel } from '../ui/motionLevel';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { KbPageRef, KbRef } from '../../api/kb/types.gen';
@@ -141,6 +143,20 @@ export function ChatSearchButton({ chatId }: { chatId: string | null }) {
   const [turns, setTurns] = useState(0);
   const button = useRef<HTMLButtonElement | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
+  const level = useMotionLevel();
+  const loaded = !!rules;
+  useLayoutEffect(() => {
+    const el = panel.current;
+    if (!open || !el || level === 'off') return;
+    const plus = button.current?.parentElement?.querySelector('[data-search-origin]') ?? button.current;
+    const a = plus?.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    el.style.transformOrigin = a ? `${a.left + a.width / 2 - box.left}px ${a.top + a.height / 2 - box.top}px` : 'left bottom';
+    const entry = animate(el, level === 'full'
+      ? { opacity: [0, 1], x: [-8, 0], y: [9, 0], scale: [0.93, 1] } : { opacity: [0, 1] },
+    { duration: 0.19, ease: 'easeOut' });
+    return () => entry.stop();
+  }, [open, loaded, level]);
 
   useEffect(() => {
     const ask = (e: Event) => {
@@ -352,6 +368,26 @@ function SourcePicker({ taken, onPick }: { taken: readonly string[]; onPick: (so
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [found, setFound] = useState<KbSourceRef[]>([]);
+  const [active, setActive] = useState(0);
+  const listId = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const restoreTrigger = useRef(false);
+  useLayoutEffect(() => {
+    if (!open && restoreTrigger.current) {
+      restoreTrigger.current = false;
+      trigger.current?.focus({ preventScroll: true });
+    }
+  }, [open]);
+  const close = () => {
+    restoreTrigger.current = true;
+    setOpen(false);
+    setFound([]);
+    setQ('');
+  };
+  const pick = (source: KbSourceRef) => { onPick(source); close(); };
+  useEffect(() => {
+    document.getElementById(`${listId}-${active}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [active, found, listId]);
   const input = useRef<HTMLInputElement | null>(null);
   useEffect(() => { if (open) input.current?.focus(); }, [open]);
   useEffect(() => {
@@ -362,6 +398,7 @@ function SourcePicker({ taken, onPick }: { taken: readonly string[]; onPick: (so
         if (!live) return;
         const materials = res.materials.map((m: KbRef) => ({ id: m.id, kind: 'material' as const, title: m.title }));
         const pages = res.pages.map((p: KbPageRef) => ({ id: p.id, kind: 'page' as const, title: p.title }));
+        setActive(0);
         setFound([...materials, ...pages].filter((s) => !taken.includes(s.id)));
       }, () => { if (live) setFound([]); });
     }, 120);
@@ -369,19 +406,30 @@ function SourcePicker({ taken, onPick }: { taken: readonly string[]; onPick: (so
   }, [client, open, q, taken]);
 
   if (!open) {
-    return <button type="button" className="kb-site-add" onClick={() => setOpen(true)}><Icon name="plus" size={12} />Add material</button>;
+    return <button ref={trigger} type="button" className="kb-site-add" onClick={() => setOpen(true)}><Icon name="plus" size={12} />Add material</button>;
   }
   return (
     <span className="kb-src-pick">
-      <input ref={input} className="kb-site-input" aria-label="Find a material or wiki page" placeholder="Material or page" value={q}
-        onChange={(e) => setQ(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); setQ(''); } }} />
+      <input ref={input} className="kb-site-input" aria-label="Find a material or wiki page" placeholder="Material or page"
+        role="combobox" aria-expanded={found.length > 0} aria-controls={listId}
+        aria-activedescendant={found[active] ? `${listId}-${active}` : undefined}
+        value={q} onChange={(e) => { setFound([]); setQ(e.target.value); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+          if (!found.length) return;
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            setActive((i) => (i + (e.key === 'ArrowDown' ? 1 : -1) + found.length) % found.length);
+          }
+          if (e.key === 'Enter' && found[active]) { e.preventDefault(); pick(found[active]!); }
+        }} />
       {found.length > 0 && (
-        <ul className="kb-src-pick__list" aria-label="Materials and pages">
-          {found.map((s) => (
-            <li key={s.id}>
-              <button type="button" onClick={() => { onPick(s); setOpen(false); setQ(''); }}>
-                <Icon name={s.kind === 'page' ? 'wiki' : 'text'} size={12} />{s.title}
+        <ul className="kb-src-pick__list" role="listbox" id={listId} aria-label="Materials and pages">
+          {found.map((source, i) => (
+            <li key={source.id} role="presentation">
+              <button type="button" role="option" id={`${listId}-${i}`} aria-selected={active === i}
+                onMouseDown={(event) => event.preventDefault()} onClick={() => pick(source)}>
+                <Icon name={source.kind === 'page' ? 'wiki' : 'text'} size={12} />{source.title}
               </button>
             </li>
           ))}

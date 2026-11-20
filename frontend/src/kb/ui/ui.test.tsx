@@ -11,7 +11,7 @@ import { boundaryFor, placePopup } from './geometry';
 import { MotionProvider } from './motion';
 
 // Where each concept's glyph comes from (animated-icons spec §3).
-const HUGE_CONCEPTS = ['chats', 'materials', 'bell', 'copy', 'retry', 'close', 'web', 'quote', 'mic', 'settings', 'search', 'more', 'pencil', 'chevronDown', 'stop', 'compass'];
+const HUGE_CONCEPTS = ['chats', 'materials', 'bell', 'copy', 'retry', 'close', 'web', 'quote', 'mic', 'settings', 'search', 'more', 'pencil', 'chevronDown', 'stop', 'share', 'compass'];
 const ANIMATED_CONCEPTS = ['send', 'newChat', 'check'];
 
 describe('Icon', () => {
@@ -333,8 +333,9 @@ describe('Switch and Segmented', () => {
       await user.click(onlyBtn);
       expect(frames).toHaveLength(1);
       expect(frames[0]).toEqual([
-        { transform: 'translate(-90px, 0px)', width: '88px' },
-        { transform: 'translate(0px, 0px)', width: '84px' },
+        { transform: `translate(-90px, 0px) scale(${88 / 84}, 1)`, transformOrigin: 'left center' },
+        expect.objectContaining({ transform: expect.stringMatching(/^translate\(-[\d.]+px, 0px\) scale\(1\.06, \.93\)$/) }),
+        { transform: 'translate(0px, 0px) scale(1, 1)', transformOrigin: 'left center' },
       ]);
     } finally {
       Element.prototype.animate = origAnimate;

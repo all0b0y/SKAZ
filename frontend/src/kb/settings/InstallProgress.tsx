@@ -114,7 +114,8 @@ function InstallProgress({ engine, kind }: { engine: EngineId; kind: Kind }) {
           </ol>
         )}
         {failed && <>
-          <p className="kb-inline-error kb-inline-error--flat" role="alert">{failure?.reason ?? task?.reason ?? 'The task did not complete.'}</p>
+          <FailureFeedback attempt={task?.id ?? failure?.reason}><p className="kb-inline-error kb-inline-error--flat" role="alert">
+            {failure?.reason ?? task?.reason ?? 'The task did not complete.'}</p></FailureFeedback>
           <p className="kb-muted">An unsuccessful installer does not confirm whether the agent still works.</p>
           {agent && <p className="kb-muted">Last checked: {agent.state === 'ready' ? `Connected${agent.version ? ` · ${agent.version}` : ''}` : agent.reason ?? agent.state}</p>}
           <Button size="sm" variant="quiet" disabled={!!busy} busy={busy === 'check'} onClick={() => void run('check')}>Check agent</Button>
@@ -143,7 +144,7 @@ function InstallProgress({ engine, kind }: { engine: EngineId; kind: Kind }) {
           <Button size="sm" disabled={!!busy} busy={busy === 'rollback'} onClick={() => void run('rollback')}>Roll back to {failure.previous}</Button>
           {engine === 'claude_code' && <p className="kb-muted">Claude Code may update itself again.</p>}
         </>}
-        {error && <p className="kb-inline-error kb-inline-error--flat" role="alert">{error}</p>}
+        {error && <FailureFeedback attempt={error}><p className="kb-inline-error kb-inline-error--flat" role="alert">{error}</p></FailureFeedback>}
       </div>
       <footer className="kb-install-progress__foot">
         {active ? <>
@@ -157,3 +158,4 @@ function InstallProgress({ engine, kind }: { engine: EngineId; kind: Kind }) {
     </>
   );
 }
+import { FailureFeedback } from '../ui/FailureFeedback';

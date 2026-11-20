@@ -187,7 +187,7 @@ function useRailMarkY(nav: RefObject<HTMLElement | null>, activeId: string | nul
  * heights, nothing appears or disappears when sections or panels change. The graph lives in the
  * Wiki section (v39).
  */
-export function Rail() {
+export function Rail({ onSection, sideVisible }: { onSection?: () => void; sideVisible?: boolean } = {}) {
   const { prefs } = useServices();
   const section = usePrefs((s) => s.section);
   const sideOpen = usePrefs((s) => s.sideOpen);
@@ -204,7 +204,7 @@ export function Rail() {
   const labels = useRailLabels();
   const navRef = useRef<HTMLElement | null>(null);
   // Today's rule for the active item: the side panel is open on that section (the graph counts as Wiki).
-  const activeId = sideOpen ? ITEMS.find((item) => section === item.id || (item.id === 'wiki' && section === 'graph'))?.id ?? null : null;
+  const activeId = (sideVisible ?? sideOpen) ? ITEMS.find((item) => section === item.id || (item.id === 'wiki' && section === 'graph'))?.id ?? null : null;
   const markY = useRailMarkY(navRef, activeId);
   // 0.3.1 P4: a chat other than the one in front of you waits for an answer — a dot, nothing pops up.
   const waiting = useChats((s) => {
@@ -230,7 +230,7 @@ export function Rail() {
                 id={item.id} label={item.label} hint={badge > 0 ? `${badge} unread` : waits ? 'Waiting for you' : undefined} icon={item.icon} iconPlay={item.id === 'notifications' ? bellPlay : undefined} active={active} labels={labels}
                 ariaLabel={badge > 0 ? `${item.label}, ${badge} unread` : waits ? `${item.label}, waiting for you` : item.label}
                 attrs={{ 'aria-current': active ? 'page' : undefined }}
-                onClick={() => prefs.getState().set({ section: item.id, sideOpen: true })}
+                onClick={() => { prefs.getState().set({ section: item.id, sideOpen: true }); onSection?.(); }}
               >
                 {badge > 0 && <span className="kb-badge" aria-hidden="true">{badge > 99 ? '99+' : badge}</span>}
                 {waits && <span className="kb-dot kb-dot--waiting" aria-hidden="true" data-testid="chats-waiting-dot" />}

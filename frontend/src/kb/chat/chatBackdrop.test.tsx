@@ -79,7 +79,7 @@ describe('Chat backdrop', () => {
     expect(field()).toBeInTheDocument();
     expect(backdrop()).toBeNull();
     await user.click(within(side()).getByRole('button', { name: /Compare regularisation/ }));
-    await waitFor(() => expect(centre().querySelector('.kb-chat__plate')).toHaveTextContent('No messages yet'));
+    await within(centre()).findByRole('heading', { name: /Compare regularisation/ });
     expect(field()).toBeInTheDocument();
     expect(backdrop()).toBeNull();
   });

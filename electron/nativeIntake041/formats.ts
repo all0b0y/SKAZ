@@ -3,7 +3,7 @@
 export const TEXT_EXTENSIONS = ['txt', 'md', 'markdown'] as const;
 export const PDF_EXTENSIONS = ['pdf'] as const;
 export const DOCX_EXTENSIONS = ['docx'] as const;
-export const DOCUMENT_EXTENSIONS = [...PDF_EXTENSIONS, ...TEXT_EXTENSIONS, ...DOCX_EXTENSIONS] as const;
+export const DOCUMENT_EXTENSIONS = [...PDF_EXTENSIONS, ...TEXT_EXTENSIONS, ...DOCX_EXTENSIONS, 'pptx', 'key'] as const;
 export const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'heic'] as const;
 export const AUDIO_EXTENSIONS = [
   'aac', 'aiff', 'amr', 'asf', 'flac', 'm4a', 'mp3', 'mp4', 'ogg', 'wav', 'webm',
@@ -20,7 +20,7 @@ export const MAX_SPEECH_BYTES = 2 * 1024 * 1024 * 1024;
 export const HEADER_SNIFF_BYTES = 64;
 export const MAX_CHOSEN_FILES = 2000;
 
-export type IntakeCategory = 'text' | 'pdf' | 'docx' | 'image' | 'speech';
+export type IntakeCategory = 'text' | 'pdf' | 'docx' | 'presentation' | 'image' | 'speech';
 export type IntakeRoute = 'document' | 'image' | 'speech';
 export type ImageFormat = 'jpeg' | 'png' | 'webp' | 'heic';
 
@@ -116,6 +116,11 @@ export function classifyMaterialExtension(fileNameOrPath: string): ClassifiedMat
       nativePreviewable: false,
     };
   }
+  if (ext === 'pptx' || ext === 'key') {
+    return { ext, category: 'presentation', route: 'document', formatId: ext,
+      mimeType: ext === 'pptx' ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/vnd.apple.keynote',
+      maxBytes: MAX_PDF_BYTES, isNew041: true, nativePreviewable: false };
+  }
   const img = IMAGE_META[ext];
   if (img) {
     return {
@@ -196,13 +201,13 @@ export function verifyHeaderForExtension(
   if (classified.category === 'pdf') {
     return asciiAt(head, 0, 5) === '%PDF-' ? null : "This file isn't a valid PDF document.";
   }
-  if (classified.category === 'docx') {
+  if (classified.category === 'docx' || classified.category === 'presentation') {
     const isZip =
       head.length >= 4 &&
       head[0] === 0x50 &&
       head[1] === 0x4b &&
       ((head[2] === 0x03 && head[3] === 0x04) || (head[2] === 0x05 && head[3] === 0x06));
-    return isZip ? null : "This file isn't a valid DOCX document.";
+    return isZip ? null : `This file isn't a valid ${classified.formatId.toUpperCase()} document.`;
   }
   if (classified.category === 'image') {
     const detected = sniffImageHeader(head);

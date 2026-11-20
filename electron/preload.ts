@@ -23,6 +23,8 @@ import type {
 // no filesystem, no shell — just the narrow backend request channels and status.
 
 const api: BridgeApi = {
+  share: (item) => ipcRenderer.invoke(CHANNELS.share, item.kind === 'text'
+    ? { kind: 'text', text: item.text } : { kind: item.kind, id: item.id }),
   openNative: (sessionId, sampleRate) => ipcRenderer.invoke(CHANNELS.nativeOpen, sessionId, sampleRate),
   sendNativeAudio: (sessionId, meta, pcm) => ipcRenderer.invoke(CHANNELS.nativeAudio, sessionId, meta, pcm),
   endNative: (sessionId, action) => ipcRenderer.invoke(CHANNELS.nativeEnd, sessionId, action),

@@ -18,14 +18,13 @@ describe('Wiki processing profile', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Models' }));
     const wiki = within(within(dialog).getByRole('group', { name: 'Wiki model' }));
     await user.click(await wiki.findByRole('button', { name: /^Wiki model:/ }));
-    let menu = await screen.findByRole('menu', { name: 'Wiki model' });
+    const menu = await screen.findByRole('menu', { name: 'Wiki model' });
     await user.click(within(within(menu).getByRole('group', { name: 'Codex' })).getByRole('menuitemradio', { name: model.name! }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({
       method: 'PUT', path: '/kb/settings/wiki', body: expect.objectContaining({ wiki_engine: 'codex', wiki_model: model.id }),
     })));
-    await user.click(await wiki.findByRole('button', { name: new RegExp(`^Wiki model: Codex, ${model.name}`) }));
-    menu = await screen.findByRole('menu', { name: 'Wiki model' });
-    await user.click(within(menu).getByRole('radio', { name: 'High' }));
+    await user.click(wiki.getByRole('button', { name: /^Effort:/ }));
+    await user.click(within(await screen.findByRole('menu', { name: 'Effort' })).getByRole('menuitemradio', { name: 'High' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({
       method: 'PUT', path: '/kb/settings/wiki', body: { wiki_effort: 'high' },
     })));

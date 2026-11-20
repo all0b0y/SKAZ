@@ -15,20 +15,29 @@
 
 /* ---- Title bar ---- */
 .kb-titlebar {
+  --kb-titlebar-inset: 80px;
   height: var(--kb-titlebar-h);
   flex: none;
   display: flex;
   align-items: center;
   gap: var(--kb-sp-10);
-  padding: 0 var(--kb-sp-12) 0 80px;
-  transition: padding-left 200ms ease;
+  padding: 0 var(--kb-sp-12) 0 var(--kb-titlebar-inset);
   background: var(--kb-side);
   -webkit-app-region: drag;
 }
 /* Full screen: no traffic lights, so the toggle moves to the edge (M-1). */
-html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
-@media (prefers-reduced-motion: reduce) { .kb-titlebar { transition: none; } }
+html[data-full-screen] .kb-titlebar { --kb-titlebar-inset: var(--kb-sp-12); }
 .kb-titlebar__group { display: flex; align-items: center; gap: var(--kb-sp-8); -webkit-app-region: no-drag; min-width: 0; }
+/* The flex slot reserves the final inset. Anchor the control to the window edge so its
+   transform can move it smoothly while the rest of the title bar lays out once. */
+.kb-titlebar__group:first-child {
+  position: relative;
+  left: calc(0px - var(--kb-titlebar-inset));
+  transform: translateX(var(--kb-titlebar-inset));
+}
+@media (prefers-reduced-motion: no-preference) {
+  html[data-motion='full'] .kb-titlebar__group:first-child { transition: transform 200ms ease; }
+}
 .kb-titlebar__drag { flex: 1; min-width: 0; align-self: stretch; }
 .kb-titlebar__panel-toggle:focus-visible {
   background: var(--kb-accent-soft);
@@ -211,6 +220,9 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   text-overflow: ellipsis;
 }
 .kb-side__body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.kb-side__record { padding: var(--kb-sp-4) var(--kb-sp-12) var(--kb-sp-8); }
+.kb-side__record .kb-voicepill { max-width: 100%; }
+.kb-side__record .kb-capsule__folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-side__scroll {
   flex: 1;
   min-height: 0;
@@ -432,3 +444,20 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
 html[data-motion='calm'] .kb-fold,
 html[data-motion='calm'] .kb-wfold__chev { transition: none; }
 @media (prefers-reduced-motion: reduce) { .kb-fold, .kb-wfold__chev { transition: none; } }
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-motion='calm'], [data-motion='off']) :is(.kb-action-feedback > span, .kb-picker .kb-picker__label, .kb-send > svg) {
+    transition: transform 160ms cubic-bezier(.2,.8,.2,1);
+  }
+  html:not([data-motion='calm'], [data-motion='off']) :is(.kb-action-feedback, .kb-picker, .kb-send):active > :is(span, svg) {
+    transform: scale(1.06, .92);
+  }
+}
+.kb-material-photo { max-width: 100%; overflow: auto; }
+.kb-material-photo button { display: block; width: 100%; cursor: zoom-in; text-align: left; }
+.kb-material-photo button[aria-pressed='true'] { width: max-content; cursor: zoom-out; }
+.kb-material-photo img, .kb-document-content img { display: block; width: auto; max-width: 100%; height: auto; }
+.kb-material-photo img.is-full-size { max-width: none; }
+.kb-document-content section { padding-block: var(--kb-sp-12); border-block-start: 1px solid var(--kb-line); }
+.kb-document-content figure { margin: var(--kb-sp-12) 0; }
+.kb-document-content details > summary { cursor: pointer; }
+.kb-document-content p { white-space: pre-wrap; }

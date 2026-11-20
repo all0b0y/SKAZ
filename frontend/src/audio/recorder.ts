@@ -116,6 +116,16 @@ async function openSystemAudio(): Promise<MediaStream> {
   return stream;
 }
 
+export async function acquireSources(sources: CaptureSources) {
+  const mic = await openMicrophone(sources.deviceId);
+  try {
+    return { mic, system: sources.systemAudio ? await openSystemAudio() : null };
+  } catch (error) {
+    stopTracks(mic);
+    throw error;
+  }
+}
+
 interface BarrierMessage {
   type: 'barrier';
   id: number;
@@ -168,17 +178,16 @@ export class AudioRecorder {
     return this.systemStream !== null;
   }
 
-  async start(sources: CaptureSources = {}): Promise<void> {
+  async start(sources: CaptureSources = {}, prepared?: Awaited<ReturnType<typeof acquireSources>>): Promise<void> {
     if (['recording', 'processing', 'paused'].includes(this._state)) return;
     this._state = 'processing';
     this.stopRequested = false;
     this.stopPromise = null;
     try {
-      this.micStream = await openMicrophone(sources.deviceId);
+      const streams = prepared ?? await acquireSources(sources);
+      this.micStream = streams.mic;
+      this.systemStream = streams.system;
       this.micDeviceId = sources.deviceId;
-      if (this.stopRequested) throw new Error('Recording start was cancelled.');
-      // Both sources or neither: the user asked to record the other side too.
-      if (sources.systemAudio) this.systemStream = await openSystemAudio();
       if (this.stopRequested) throw new Error('Recording start was cancelled.');
       // A continued session keeps its original PCM clock even if the device changes.
       this.context = new AudioContext(this.options.sampleRate === undefined

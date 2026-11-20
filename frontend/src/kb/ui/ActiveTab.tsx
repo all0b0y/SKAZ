@@ -198,7 +198,9 @@ export function ActiveTab({ host, activeKey, variant }: ActiveTabProps) {
 
   return (
     <div className="kb-tablayer" aria-hidden="true">
-      <div ref={tabRef} className={`kb-tab kb-tab--${variant}`} data-testid="active-tab" hidden />
+      <div ref={tabRef} className={`kb-tab kb-tab--${variant}`} data-testid="active-tab" hidden>
+        {variant === 'bridge' && <canvas className="kb-tab__backdrop" />}
+      </div>
     </div>
   );
 }

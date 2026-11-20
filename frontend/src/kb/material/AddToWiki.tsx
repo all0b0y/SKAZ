@@ -26,7 +26,7 @@ export function AddToWiki({ materialId, onAdded }: { materialId: string; onAdded
     finally { pending.current = false; setBusy(false); }
   };
   return <span className="kb-add-to-wiki" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-    <Button size="sm" variant="quiet" busy={busy} onClick={() => void add()}>Add to wiki</Button>
+    <Button feedback icon="saveWiki" size="sm" variant="quiet" busy={busy} onClick={() => void add()}>Add to wiki</Button>
     {error && <span role="alert" className="kb-inline-error">{error}</span>}
   </span>;
 }

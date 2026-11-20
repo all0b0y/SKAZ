@@ -20,8 +20,10 @@ describe('Material smart selections use actual metadata', () => {
       await user.click(await screen.findByTestId('all-materials'));
       const center = await screen.findByRole('region', { name: 'All materials' });
       await within(center).findByRole('grid');
-      await user.click(within(center).getByRole('button', { name: 'Select items' }));
-      await user.click(await screen.findByRole('menuitem', { name: /^This week/ }));
+      expect(within(center).queryByRole('button', { name: 'Select items' })).toBeNull();
+      const first = center.querySelector<HTMLElement>(`[data-sel-id="${eligible[0]!.id}"] [data-sel-box]`)!;
+      await user.click(first);
+      await user.click(await within(center).findByRole('button', { name: 'This week' }));
       const selected = [...center.querySelectorAll('[data-sel-id][aria-selected="true"]')].map((r) => r.getAttribute('data-sel-id'));
       expect(new Set(selected)).toEqual(new Set([eligible[0]!.id, eligible[1]!.id]));
     } finally {

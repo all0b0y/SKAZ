@@ -4,9 +4,10 @@ import type { KbAnswerBlockPart, KbAnswerFrame, KbCitation, KbMessage, KbMessage
 import { Button, Icon, IconButton, useCopied, useIconPlay } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
+import { platform, splitLinks } from '../composer/inlineLinks';
 import { inputPieces, quoteLabel } from '../composer/editor';
 import { useOpenDocument } from '../state/document';
-import { useAgentUpdates, useServices } from '../state/context';
+import { useAgentUpdates, useLibrary, useServices } from '../state/context';
 import { updateWait } from '../state/agentUpdates';
 import { InlineMarkdown } from './Markdown';
 import { ConnectionBlock, InlinePart } from './parts';
@@ -311,6 +312,8 @@ export function questionInput(message: KbMessage): KbMessageInput {
  * Resend under it (2026-10-21); Edit turns the bubble into a field in place.
  */
 export function UserMessage({ message, actions }: { message: KbMessage; actions?: QuestionActions }) {
+  const open = useOpenDocument();
+  const materials = useLibrary((s) => s.materials);
   const input = questionInput(message);
   const [editing, setEditing] = useState(false);
   const articleRef = useRef<HTMLElement | null>(null);
@@ -335,7 +338,10 @@ export function UserMessage({ message, actions }: { message: KbMessage; actions?
         <div className="kb-msg__bubble">{renderInput(input)}</div>
       )}
       {input.attachments.length > 0 && (
-        <p className="kb-msg__attach"><Icon name="attach" size={12} />{input.attachments.length} {input.attachments.length === 1 ? 'attachment' : 'attachments'}</p>
+        <div className="kb-msg__attach" aria-label="Attachments">{input.attachments.map((id, index) => (
+          <Button key={id} size="sm" variant="quiet" icon="attach"
+            onClick={() => open({ type: 'material', id })}>{materials.find((item) => item.id === id)?.title ?? `Attachment ${index + 1}`}</Button>
+        ))}</div>
       )}
       {actions && !editing && <QuestionActionsRow text={input.text} actions={actions} onEdit={() => setEditing(true)} />}
       {actions?.error && !editing && <p className="kb-inline-error kb-inline-error--flat kb-msg__error" role="alert">{actions.error}</p>}
@@ -345,7 +351,10 @@ export function UserMessage({ message, actions }: { message: KbMessage; actions?
 
 export function renderInput(input: KbMessageInput): ReactNode {
   return inputPieces(input).map((piece, i) => {
-    if (typeof piece === 'string') return piece;
+    if (typeof piece === 'string') return splitLinks(piece).map((run, j) => typeof run === 'string' ? run : (
+      <a key={`link-${i}-${j}`} className="kb-prose-link" href={run.url} title={run.url} target="_blank"
+        rel="noopener noreferrer" data-platform={platform(new URL(run.url))}>{run.label}</a>
+    ));
     if (piece.kind === 'mention') {
       const { ref } = piece;
       return <span key={`m${i}`} className="kb-token kb-token--mention" data-icon={ref.type === 'chat' ? 'chat' : ref.type === 'material' ? 'material' : 'page'}>{ref.title}</span>;

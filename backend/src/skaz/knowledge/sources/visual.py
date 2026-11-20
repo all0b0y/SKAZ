@@ -699,7 +699,7 @@ class VisualSourcePreparer:
         max_pages: int = DEFAULT_SEARCH_PDF_PAGES,
         read_original: Callable[[MaterialFiles, Path], bytes] | None = None,
     ) -> tuple[PreparedVisual, ...]:
-        """Prepare selected PDF pages on demand from ``.skaz/original.pdf`` (decision 1.5)."""
+        """Render selected pages from the stored material card or a legacy PDF."""
         files = self._material_files(material_id)
         if files.manifest.kind not in ("pdf", "book"):
             raise VisualSourceUnsupported(
@@ -715,9 +715,24 @@ class VisualSourcePreparer:
         pdf_bytes = (
             original_path.read_bytes() if read_original is None else read_original(files, original_path)
         )
-        pdf_sha256 = content_hash(pdf_bytes)
+        from .document_card import CARD_NAME, card_page_png, card_pages
+
+        stored_digest = content_hash(pdf_bytes)
+        origin = files.manifest.origin
+        metadata = (origin.model_extra or {}) if origin else {}
+        expected_digest = metadata.get("stored_sha256") or metadata.get("sha256")
+        if expected_digest and stored_digest != expected_digest:
+            raise VisualSourceUnsupported("unauthorized_path", "The material has changed since import.")
+        pdf_sha256 = str(metadata.get("sha256") or stored_digest)
+        stored_card = None
+        reader = None
         try:
-            reader = open_pdf(pdf_bytes)
+            if original_name == CARD_NAME:
+                stored_card = card_pages(pdf_bytes)
+                page_count = len(stored_card)
+            else:
+                reader = open_pdf(pdf_bytes)
+                page_count = len(reader.pages)
         except PdfRejected as error:
             raise VisualSourceUnsupported(
                 "pdf_render_unavailable",
@@ -725,7 +740,6 @@ class VisualSourcePreparer:
                 has_source_text=has_text,
                 text_fallback_detail=detail,
             ) from error
-        page_count = len(reader.pages)
 
         selected: list[int] = []
         explicit = False
@@ -804,13 +818,17 @@ class VisualSourcePreparer:
                 file_name=original_name,
             )
             try:
-                display, *comparisons = pdf_raster_inputs(reader, page_number)
-                image_bytes = self.page_renderer(display, page_number)
-                for filtered in comparisons:
-                    if self.page_renderer(filtered, page_number) != image_bytes:
-                        raise PdfRejected(
-                            f"SKAZ can't faithfully render page {page_number} with its hidden text."
-                        )
+                if stored_card is not None:
+                    image_bytes = card_page_png(stored_card, page_number)
+                else:
+                    assert reader is not None
+                    display, *comparisons = pdf_raster_inputs(reader, page_number)
+                    image_bytes = self.page_renderer(display, page_number)
+                    for filtered in comparisons:
+                        if self.page_renderer(filtered, page_number) != image_bytes:
+                            raise PdfRejected(
+                                f"SKAZ can't faithfully render page {page_number} with its hidden text."
+                            )
                 header = inspect_image_bytes(image_bytes)
             except (PdfRejected, VisualSourceUnsupported) as error:
                 raise VisualSourceUnsupported(

@@ -10,6 +10,7 @@ from typing import Literal, cast
 from ...markdown.source import FragmentInput, Origin
 from ..fragments import sanitize_title, to_fragments
 from ..guard import Finding
+from ..presentation import presentation_pdf
 from ..intake import (
     Original,
     Prepared,
@@ -20,8 +21,9 @@ from ..intake import (
 )
 from .docx import extract_docx
 from .formats import MAX_IMAGE_BYTES, ImageFormat, sniff_image_format
-from .images import MAX_PREVIEW_EDGE, DecodedImageInfo, decode_image
+from .images import MAX_PREVIEW_EDGE, DecodedImageInfo, decode_image, material_webp
 from .trusted import (
+    FILE_CHANGED_MESSAGE,
     TrustedFileSelection,
     ValidatedTrustedFile,
     read_bounded_bytes,
@@ -171,14 +173,17 @@ def prepare_image_selection(
     generate_preview: bool = False,
 ) -> NativeIntakePrepared:
     """Verify and decode a validated JPEG, PNG, WebP, or HEIC file (no OCR)."""
-    decoded = decode_verified_image(validated, generate_preview=generate_preview)
+    data = read_bounded_bytes(validated.resolved_path, max_bytes=validated.classification.max_bytes)
+    if len(data) != validated.size_bytes or hashlib.sha256(data).hexdigest() != validated.sha256:
+        raise SourceRejected(FILE_CHANGED_MESSAGE)
+    encoded, decoded = material_webp(data, cast(ImageFormat, validated.classification.format_id), generate_preview=generate_preview)
     origin = _file_origin(
         validated,
         width=decoded.width,
         height=decoded.height,
+        stored_sha256=hashlib.sha256(encoded).hexdigest(),
         ocr_performed=False,
     )
-    ext = validated.classification.extension
     return NativeIntakePrepared(
         kind="image",
         title=_fallback_title(validated.selection.display_name, "Image"),
@@ -187,12 +192,7 @@ def prepare_image_selection(
         findings=(),
         origin=origin,
         extractor="image",
-        original=Original(
-            f"original{ext}",
-            path=validated.resolved_path,
-            expected_size=validated.size_bytes,
-            expected_sha256=validated.sha256,
-        ),
+        original=Original("image.webp", data=encoded),
         size_bytes=validated.size_bytes,
         sha256=validated.sha256,
         mime_type=decoded.mime_type,
@@ -228,8 +228,12 @@ def prepare_trusted_selection(
     if category == "image":
         return prepare_image_selection(validated, generate_preview=generate_image_preview)
 
-    if category == "pdf":
+    if category in ("pdf", "presentation"):
         data = read_bounded_bytes(validated.resolved_path, max_bytes=validated.classification.max_bytes)
+        if len(data) != validated.size_bytes or hashlib.sha256(data).hexdigest() != validated.sha256:
+            raise SourceRejected(FILE_CHANGED_MESSAGE)
+        if category == "presentation":
+            data = presentation_pdf(data, validated.classification.extension)
         origin = _file_origin(validated)
         original = Original(
             "original.pdf",
@@ -251,7 +255,7 @@ def prepare_trusted_selection(
             findings=tuple(v3.findings),
             origin=v3.origin,
             extractor=v3.extractor,
-            original=original,
+            original=v3.original or original,
             size_bytes=validated.size_bytes,
             sha256=validated.sha256,
             mime_type=validated.classification.mime_type,
@@ -315,12 +319,7 @@ def prepare_clipboard_image(
     if sniffed != expected_format:
         raise SourceRejected(f"The pasted data doesn't match a valid {expected_format.upper()} image.")
 
-    decoded = decode_image(
-        data,
-        expected_format=expected_format,
-        mime_type=normalized_mime,
-        generate_preview=generate_preview,
-    )
+    encoded, decoded = material_webp(data, expected_format, generate_preview=generate_preview)
     ext = _EXT_BY_IMAGE_FORMAT[expected_format]
     safe_base = sanitize_title(Path(file_name).stem) or "Screenshot"
     safe_name = f"{safe_base}{ext}"
@@ -330,6 +329,7 @@ def prepare_clipboard_image(
             "type": "file",
             "file_name": safe_name,
             "sha256": sha256,
+            "stored_sha256": hashlib.sha256(encoded).hexdigest(),
             "mime_type": decoded.mime_type,
             "format": decoded.format_id,
             "size_bytes": len(data),
@@ -347,7 +347,7 @@ def prepare_clipboard_image(
         findings=(),
         origin=origin,
         extractor="image",
-        original=Original(f"original{ext}", data=data),
+        original=Original("image.webp", data=encoded),
         size_bytes=len(data),
         sha256=sha256,
         mime_type=decoded.mime_type,

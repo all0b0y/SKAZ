@@ -328,6 +328,15 @@ export function SettingsModal() {
               }}
             />
           </div>
+          <select className="kb-settings__section" aria-label="Settings section" value={results ? '' : section}
+            onChange={(event) => { setQuery(''); setSection(event.target.value as typeof section); }}>
+            {results && <option value="" disabled>Search results</option>}
+            {NAV.map((group) => <optgroup key={group.group} label={group.group}>
+              {group.items.map((item) => <option key={item.id} value={item.id}>
+                {item.label}{flagged.has(item.id) ? ' · needs attention' : !updateSeen && item.id === 'conn' ? ' · update' : ''}
+              </option>)}
+            </optgroup>)}
+          </select>
           {NAV.map((g) => (
             <Fragment key={g.group}>
               <h3 className="kb-settings__group">{g.group}</h3>

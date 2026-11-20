@@ -67,6 +67,7 @@ class KbOrigin(BaseModel):
     width: int | None = None
     height: int | None = None
     sha256: str | None = None
+    display_format: Literal["document"] | None = None
 
 
 #: ``paused``: stopped at the material's wiki budget (C1-d); "Continue" is ``POST /kb/materials/{id}/ingest``.

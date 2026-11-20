@@ -1467,6 +1467,11 @@ export interface KbMaterialAdded {
   video_already_in_library?: boolean;
 }
 
+export interface KbMaterialDisplay {
+  format: "image" | "document" | "text";
+  content: string;
+}
+
 export interface KbMaterialGuard {
   material_id: string;
   excluded: KbExcludedFragment[];
@@ -1741,6 +1746,7 @@ export interface KbOrigin {
   width?: number | null;
   height?: number | null;
   sha256?: string | null;
+  display_format?: "document" | null;
 }
 
 /** A concept page that already said some of the material (each repeat links to its page). */
@@ -4009,6 +4015,13 @@ export interface KbEndpoints {
     response: KbDeletePreview;
     status: 200;
   };
+  "GET /kb/materials/{material_id}/display": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbMaterialDisplay;
+    status: 200;
+  };
   "GET /kb/materials/{material_id}/excluded": {
     path: { material_id: string };
     query: Record<string, never>;
@@ -4098,6 +4111,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbMaterialRepeats;
+    status: 200;
+  };
+  "GET /kb/materials/{material_id}/share-file": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPageFile;
     status: 200;
   };
   "PUT /kb/materials/{material_id}/topic": {

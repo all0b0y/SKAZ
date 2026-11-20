@@ -10,7 +10,7 @@ import type { NativeFailure } from '../../api/nativeLive';
 import { SignalMeter, type MeterSnapshot } from '../../audio/meter';
 import { NativeAudioWriter } from '../../audio/nativeWriter';
 import { PersistenceQueue } from '../../audio/persistenceQueue';
-import { AudioRecorder, SystemAudioUnavailable, type CaptureSources } from '../../audio/recorder';
+import { acquireSources, AudioRecorder, SystemAudioUnavailable, type CaptureSources } from '../../audio/recorder';
 
 export interface CaptureCallbacks {
   /** Real meter snapshot (~10 Hz while sound arrives; nothing during silence-free gaps). */
@@ -28,6 +28,7 @@ export interface CaptureStart {
 
 /** One recording attempt's capture. Implemented by the native pipeline; faked in tests. */
 export interface CaptureEngine {
+  prepare?(sources: CaptureSources): Promise<void>;
   start(start: CaptureStart, callbacks: CaptureCallbacks): Promise<void>;
   pause(): Promise<void>;
   resume(sources: CaptureSources): Promise<void>;
@@ -81,8 +82,10 @@ export function nativeCapture(bridge: NativeBridge): CaptureEngine {
   let offsetMs = 0;
   let unlisten: (() => void) | null = null;
   let incomplete = false;
+  let prepared: Awaited<ReturnType<typeof acquireSources>> | undefined;
 
   return {
+    async prepare(sources) { prepared = await acquireSources(sources); },
     async start({ sessionId, sources, sampleRate }, callbacks) {
       let opened = false;
       const nativeWriter = new NativeAudioWriter(api, sessionId, (info) => {
@@ -131,7 +134,9 @@ export function nativeCapture(bridge: NativeBridge): CaptureEngine {
         onSystemAudioLost: () => callbacks.onFailure('Computer sound stopped; the microphone part is saved.'),
       }, { windowSeconds: 0.1, sampleRate });
       try {
-        await recorder.start(sources);
+        const streams = prepared;
+        prepared = undefined;
+        await recorder.start(sources, streams);
       } catch (error) {
         unlisten?.();
         unlisten = null;
@@ -148,6 +153,9 @@ export function nativeCapture(bridge: NativeBridge): CaptureEngine {
       await recorder?.resume();
     },
     async stop() {
+      prepared?.mic.getTracks().forEach((track) => track.stop());
+      prepared?.system?.getTracks().forEach((track) => track.stop());
+      prepared = undefined;
       await recorder?.stop();
       const saved = await queue?.drain() ?? true;
       if (saved) {

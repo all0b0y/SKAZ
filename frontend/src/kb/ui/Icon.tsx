@@ -22,6 +22,7 @@ import { Refresh01Icon } from '@animateicons/react/huge/refresh-0-1-icon';
 import { SearchIcon } from '@animateicons/react/huge/search-icon';
 import { Settings01Icon } from '@animateicons/react/huge/settings-0-1-icon';
 import { StopIcon } from '@animateicons/react/huge/stop-icon';
+import { Share01Icon } from '@animateicons/react/huge/share-0-1-icon';
 import {
   ArrowUp, Check, SquarePen,
   AtSign, AudioWaveform, BookOpenText, Bot, ChevronLeft, ChevronRight, CircleAlert,
@@ -173,6 +174,7 @@ const HUGE = {
   pencil: Pen01Icon,
   chevronDown: ChevronDownIcon,
   stop: StopIcon,
+  share: Share01Icon,
   compass: Compass01Icon,
 } satisfies Record<string, LibraryIcon>;
 

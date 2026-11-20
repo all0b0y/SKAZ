@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMakeStudy } from '../study/makeFrom';
+import { ShareButton } from '../ui/ShareButton';
+import { MaterialContent } from './MaterialContent';
 import type { KbCorrection, KbCorrectionChange, KbJob, KbMaterial } from '../../api/kb/types.gen';
 import { errorText, KbApiError } from '../api/client';
 import { Banner, Button, Icon, IconButton, Menu, Segmented, Spinner } from '../ui';
@@ -256,6 +258,8 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             <IconButton icon="chats" label="Ask about material" disabled={!material || isWithoutSpeech(material)}
               onClick={() => material && askAbout({ type: 'material', id: material.id, title: material.title })} />
             <IconButton icon="folder" label="Move to folder" disabled={!material} onClick={() => setDialog('move')} />
+            {material && <ShareButton label="Share material" target={{ kind: 'material', id: material.id }}
+              text={() => [material.title, ...material.fragments.map((f) => f.text)].join('\n\n')} />}
           </>
         )}
         more={(
@@ -339,8 +343,10 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
               <NoSpeech material={material} onDelete={() => setDialog('delete')} />
             ) : material.kind === 'image' && material.fragments.length === 0 ? (
               material.status === 'failed' ? null
-                : material.status === 'ready' ? <ImageDetails material={material} />
+                : material.status === 'ready' ? <><MaterialContent key={material.id} id={material.id} title={material.title} /><ImageDetails material={material} /></>
                 : <p className="kb-muted">This image is being prepared.</p>
+            ) : material.origin?.display_format === 'document' && !target.seg && view === 'original' ? (
+              <MaterialContent key={material.id} id={material.id} title={material.title} />
             ) : material.fragments.length === 0 ? (
               material.status === 'failed' ? null
                 : <p className="kb-muted">{material.status === 'ready' ? 'This material has no text.' : 'The text appears here as soon as it is ready.'}</p>

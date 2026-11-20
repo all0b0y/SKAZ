@@ -114,7 +114,6 @@
   border-radius: var(--kb-r-xs);
 }
 
-.kb-attachment041-main:hover,
 .kb-attachment041-more:hover,
 .kb-attachment041-remove:hover { background: var(--kb-accent-soft); }
 .kb-attachment041-main { border-radius: var(--kb-r-xs); }
@@ -126,4 +125,3 @@
 .kb-attachment041-detail { padding-block: var(--kb-sp-6); border-top: 1px solid var(--kb-line); }
 .kb-attachment041-detail-text { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--t-sm); }
 .kb-attachment041-detail-text p { margin: 0; }
-.kb-attachment041-preview { width: 100%; max-height: 40vh; object-fit: contain; border-radius: var(--kb-r-sm); }

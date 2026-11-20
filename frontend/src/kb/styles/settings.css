@@ -110,6 +110,9 @@
 .kb-srow__warn { display: block; margin-top: var(--kb-sp-6); font-size: var(--t-xs); line-height: 1.4; }
 .kb-wiki-pick, .kb-recog { display: flex; flex-direction: column; align-items: flex-end; gap: var(--kb-sp-6); min-width: 0; max-width: 100%; }
 .kb-recog > .kb-muted, .kb-wiki-pick > .kb-inline-error { font-size: var(--t-xs); text-align: right; }
+.kb-wiki-effort { display: flex; flex-flow: column; align-items: flex-end; gap: var(--kb-sp-4); max-width: 100%; color: var(--kb-muted-strong); font-size: var(--t-xs); }
+.kb-wiki-effort .kb-seg { flex-wrap: wrap; max-width: 100%; }
+.kb-wiki-effort .kb-seg__opt { min-width: 0; }
 .kb-picker--field {
   width: 264px;
   max-width: 100%;

@@ -62,7 +62,7 @@ describe('Message field', () => {
     await user.keyboard('please{Enter}');
     await waitFor(() => expect(sentBody(fake.calls)).toBeDefined());
     expect(sentBody(fake.calls)).toMatchObject({
-      text: 'Explain @Entropy please',
+      text: 'Explain Entropy please',
       mentions: [{ type: 'page', id: 'p-entropy', title: 'Entropy' }],
     });
   });
@@ -207,18 +207,16 @@ describe('Message field', () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
     const input = await ready();
-    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
-    await user.click(screen.getByRole('menuitem', { name: 'File…' }));
+    await user.click(screen.getByRole('button', { name: 'Add files or reference' }));
+    await user.click(screen.getByRole('option', { name: 'Add files…' }));
     const chips = await screen.findByRole('list', { name: 'Draft attachments' });
     expect(within(chips).getByText('paper.pdf')).toBeInTheDocument();
     // Held out of the wiki until the message is sent: the switch decides then (decision 15).
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/materials/file', body: { path: '/Users/me/Downloads/paper.pdf', folder_id: 'inbox', to_wiki: false } })));
     // Settings → Wiki add files automatically: that is the default, and it stays switchable.
-    await user.click(within(chips).getByRole('button', { name: 'View paper.pdf' }));
-    const inWiki = within(screen.getByRole('dialog', { name: 'paper.pdf' })).getByRole('checkbox', { name: 'In wiki' });
+    const inWiki = within(chips).getByRole('checkbox', { name: 'In wiki: paper.pdf' });
     expect(inWiki).toBeChecked();
     expect(inWiki).toBeEnabled();
-    await user.keyboard('{Escape}');
     await user.click(input);
     await user.keyboard('Summarise it{Enter}');
     await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ attachments: [expect.stringMatching(/^m-new/)] }));
@@ -231,8 +229,8 @@ describe('Message field', () => {
     const { services } = renderKb({ world: chatWorld() });
     await ready();
     const before = services.library.getState().materials.length;
-    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
-    await user.click(screen.getByRole('menuitem', { name: 'File…' }));
+    await user.click(screen.getByRole('button', { name: 'Add files or reference' }));
+    await user.click(screen.getByRole('option', { name: 'Add files…' }));
     await waitFor(() => expect(services.library.getState().materials.some((m) => m.title === 'paper')).toBe(true));
     expect(services.library.getState().materials).toHaveLength(before + 1);
   });
@@ -241,83 +239,75 @@ describe('Message field', () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
     const input = await ready();
-    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
-    await user.click(screen.getByRole('menuitem', { name: 'File…' }));
+    await user.click(screen.getByRole('button', { name: 'Add files or reference' }));
+    await user.click(screen.getByRole('option', { name: 'Add files…' }));
     const chips = await screen.findByRole('list', { name: 'Draft attachments' });
     await waitFor(() => expect(fake.calls.some((c) => c.path === '/kb/materials/file')).toBe(true));
-    await user.click(within(chips).getByRole('button', { name: 'View paper.pdf' }));
-    const inWiki = within(screen.getByRole('dialog', { name: 'paper.pdf' })).getByRole('checkbox', { name: 'In wiki' });
+    const inWiki = within(chips).getByRole('checkbox', { name: 'In wiki: paper.pdf' });
     await user.click(inWiki);
     expect(inWiki).not.toBeChecked();
-    await user.keyboard('{Escape}');
     await user.click(input);
     await user.keyboard('Summarise it{Enter}');
     await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ attachments: [expect.stringMatching(/^m-new/)] }));
     expect(fake.calls.some((c) => /\/ingest$/.test(c.path))).toBe(false);
   });
 
-  it('"+" → Paste text: "In wiki" is off by default and switching it on sends the material to the wiki', async () => {
+  it('pastes a video locally and sends the selected label and timestamp', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
     const input = await ready();
-    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Paste text…' }));
-    await user.type(await screen.findByLabelText('Any text — it is saved to Materials'), 'Lecture notes about entropy');
-    await user.click(screen.getByRole('button', { name: 'Add' }));
-    const chips = await screen.findByRole('list', { name: 'Draft attachments' });
-    await user.click(within(chips).getByRole('button', { name: 'View Lecture notes about entropy' }));
-    const inWiki = within(screen.getByRole('dialog', { name: 'Lecture notes about entropy' })).getByRole('checkbox', { name: 'In wiki' });
-    expect(inWiki).not.toBeChecked();
-    await user.click(inWiki);
-    await user.keyboard('{Escape}');
-    await waitFor(() => expect(fake.calls.some((c) => c.path === '/kb/materials/text')).toBe(true));
     await user.click(input);
-    await user.keyboard('Check{Enter}');
-    await waitFor(() => expect(fake.calls.some((c) => /\/kb\/materials\/m-new\d+\/ingest/.test(c.path))).toBe(true));
+    await user.keyboard('lecture');
+    const range = document.createRange();
+    range.selectNodeContents(input);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    await user.paste('https://youtu.be/example?t=42');
+    expect(within(input).getByRole('button', { name: 'Edit link: lecture' })).toHaveAttribute('data-platform', 'YouTube');
+    expect(fake.calls.some((call) => call.path === '/kb/materials/link')).toBe(false);
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ text: '[lecture](<https://youtu.be/example?t=42>)', attachments: [] }));
   });
 
-  it('"+" → Link already in the library: the chip says so, keeps its link icon and is not added to the wiki again (Q1 n2 L2)', async () => {
-    const user = userEvent.setup();
-    const { fake } = renderKb({ world: chatWorld() });
-    const input = await ready();
-    const original = fake.bridge.request;
-    fake.bridge.request = (async (req) => {
-      const res = await original(req);
-      if (req.path !== '/kb/materials/link' || !res.ok) return res;
-      return { ...res, status: 200, data: { ...(res.data as object), already_in_library: true } };
-    }) as typeof original;
-    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Link…' }));
-    await user.type(await screen.findByLabelText('Link to an article or a video'), 'https://blog.example/boiling');
-    await user.click(screen.getByRole('button', { name: 'Add' }));
-    const chips = await screen.findByRole('list', { name: 'Draft attachments' });
-    expect(await within(chips).findByText('Already in your library')).toBeInTheDocument();
-    expect(chips.querySelector('[data-icon="link"]')).not.toBeNull();
-    await user.click(within(chips).getByRole('button', { name: 'View https://blog.example/boiling' }));
-    expect(within(screen.getByRole('dialog', { name: 'https://blog.example/boiling' })).queryByRole('checkbox', { name: 'In wiki' })).not.toBeInTheDocument();
-    await user.keyboard('{Escape}');
-    await user.click(input);
-    await user.keyboard('Summarise it{Enter}');
-    await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ attachments: [expect.any(String)] }));
-    expect(fake.calls.some((c) => /\/ingest$/.test(c.path))).toBe(false);
-  });
-
-  it('"+" → Link refuses anything but http(s)', async () => {
+  it('keeps prose, punctuation and separate destinations when a paste contains several links', async () => {
     const user = userEvent.setup();
     renderKb({ world: chatWorld() });
-    await ready();
-    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Link…' }));
-    const field = await screen.findByLabelText('Link to an article or a video');
-    // Our own message, never the browser's validation bubble in the system language (QA D14).
-    expect(field.closest('form')).toHaveAttribute('novalidate');
-    await user.type(field, 'not a link at all');
-    await user.click(screen.getByRole('button', { name: 'Add' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('http:// or https://');
-    await user.clear(field);
-    await user.type(field, 'javascript:alert(1)');
-    await user.click(screen.getByRole('button', { name: 'Add' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('http:// or https://');
+    const input = await ready();
+    await user.click(input);
+    await user.paste('Read https://example.org/notes, then https://vimeo.com/123#t=9.');
+    expect(serialize(input)).toEqual({
+      text: 'Read [notes](<https://example.org/notes>), then [Vimeo](<https://vimeo.com/123#t=9>).',
+      mentions: [], quotes: [],
+    });
+  });
+
+  it('dismisses a plus search at the caret without changing the original words', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld() });
+    const input = await ready();
+    await user.click(input);
+    await user.keyboard('draft');
+    await user.click(screen.getByRole('button', { name: 'Add files or reference' }));
+    await screen.findByRole('listbox', { name: 'References' });
+    await user.keyboard('{Escape}');
+    expect(input.textContent).toBe('draft');
+  });
+
+  it('removes a draft link without losing its edited text', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld() });
+    const input = await ready();
+    await user.click(input);
+    await user.paste('https://youtube.com/watch?v=example&t=42');
+    await user.click(within(input).getByRole('button', { name: 'Edit link: YouTube' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Edit link' }));
+    await user.clear(dialog.getByLabelText('Text'));
+    await user.type(dialog.getByLabelText('Text'), 'Lecture');
+    await user.clear(dialog.getByLabelText('Address'));
+    await user.type(dialog.getByLabelText('Address'), 'javascript:alert(1)');
+    expect(dialog.getByRole('button', { name: 'Apply' })).toBeDisabled();
+    await user.click(dialog.getByRole('button', { name: 'Remove link' }));
+    expect(serialize(input).text).toBe('Lecture');
   });
 
   it('the agent picker names the agent once when it has no model of its own (QA D13)', async () => {
@@ -386,7 +376,7 @@ describe('Editor model', () => {
     window.getSelection()?.removeAllRanges();
     insertToken(root, { kind: 'mention', ref: { type: 'page', id: 'p1', title: 'Entropy' } });
     const v = serialize(root);
-    expect(v.text).toBe('Compare @Entropy with @Entropy ');
+    expect(v.text).toBe('Compare Entropy with Entropy ');
     expect(v.mentions).toEqual([{ type: 'page', id: 'p1', title: 'Entropy' }]);
     root.remove();
   });

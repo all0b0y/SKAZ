@@ -511,15 +511,18 @@ def _preflight_source(
             intake = read_intake(files.directory)
             original_name = str(intake.get("original") or "original.pdf")
             original_path = sources.visual._authorized_service_file(files, original_name)
+            from ..knowledge.sources.document_card import CARD_NAME, MAX_CARD_BYTES, card_pages
+
             try:
-                reader = open_pdf(_read_verified_original(files, original_path, max_bytes=MAX_PDF_BYTES))
+                data = _read_verified_original(files, original_path,
+                                               max_bytes=MAX_CARD_BYTES if original_name == CARD_NAME else MAX_PDF_BYTES)
+                page_count = len(card_pages(data)) if original_name == CARD_NAME else len(open_pdf(data).pages)
             except PdfRejected as err:
                 raise VisualSourceUnsupported(
                     "pdf_render_unavailable",
                     err.message,
                     has_source_text=has_selected_text,
                 ) from err
-            page_count = len(reader.pages)
             if candidate.explicit_pages:
                 for number in candidate.explicit_pages:
                     if number < 1 or number > page_count:
@@ -559,7 +562,7 @@ def _preflight_source(
                         page_count=page_count,
                         has_source_text=True,
                     )
-            if sources.visual.pdf_renderer_known_unavailable():
+            if original_name != CARD_NAME and sources.visual.pdf_renderer_known_unavailable():
                 raise VisualSourceUnsupported(
                     "pdf_render_unavailable",
                     "SKAZ couldn't find a local renderer for the selected PDF pages.",
@@ -711,7 +714,8 @@ def _read_verified_original(files: MaterialFiles, path: Path, *, max_bytes: int)
     if not data:
         raise VisualSourceUnsupported("source_not_found", "The stored original is empty.")
     origin = files.manifest.origin
-    expected_sha = (origin.model_extra or {}).get("sha256") if origin is not None else None
+    metadata = (origin.model_extra or {}) if origin is not None else {}
+    expected_sha = metadata.get("stored_sha256", metadata.get("sha256"))
     if (
         len(data) != info.st_size
         or (info.st_size, info.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
@@ -798,7 +802,7 @@ def _prepare_local_visuals(
     query: str,
 ) -> tuple[PreparedVisual, ...]:
     from ..knowledge.sources.native_intake041.formats import MAX_PDF_BYTES
-    from ..knowledge.sources.native_intake041.images import decode_image
+    from ..knowledge.sources.native_intake041.images import material_webp
     from ..knowledge.sources.visual import (
         IMAGE_EXTENSIONS,
         MAX_IMAGE_BYTES,
@@ -807,11 +811,14 @@ def _prepare_local_visuals(
     )
 
     if candidate.source_kind == "pdf":
+        from ..knowledge.sources.document_card import CARD_NAME, MAX_CARD_BYTES
+
         pages = sources.visual.prepare_pdf_pages(
             candidate.material_id,
             pages=candidate.explicit_pages or None,
             query=query,
-            read_original=lambda files, path: _read_verified_original(files, path, max_bytes=MAX_PDF_BYTES),
+            read_original=lambda files, path: _read_verified_original(
+                files, path, max_bytes=MAX_CARD_BYTES if path.name == CARD_NAME else MAX_PDF_BYTES),
         )
         return tuple(
             _to_v4_prepared(item, visual_id=f"vis-{candidate.material_id}-p{item.page}", candidate=candidate)
@@ -831,11 +838,11 @@ def _prepare_local_visuals(
             "SKAZ can only prepare PNG, JPEG, WebP, GIF or HEIC images.",
         )
     data = _read_verified_original(files, path, max_bytes=MAX_IMAGE_BYTES)
-    original_sha256 = content_hash(data)
+    origin = files.manifest.origin
+    metadata = (origin.model_extra or {}) if origin else {}
+    original_sha256 = str(metadata.get("sha256") or content_hash(data))
     if suffix == ".heic":
-        decoded = decode_image(data, expected_format="heic", mime_type="image/heic", generate_preview=True)
-        assert decoded.preview_png is not None
-        data = decoded.preview_png
+        data, _ = material_webp(data, "heic")
     header = inspect_image_bytes(data)
     return (
         PreparedVisual(

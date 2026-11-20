@@ -46,6 +46,10 @@ export function Shell() {
   const center = useUi((s) => s.center);
   const docExpanded = useUi((s) => s.docExpanded);
   const windowWidth = useWindowWidth();
+  const compact = windowWidth <= 680;
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  useEffect(() => { setNavigationOpen(false); }, [compact, right, center]);
+  const mobileSide = compact && navigationOpen;
   const appRef = useRef<HTMLDivElement>(null);
   useReaderCloseFocus(appRef, right);
 
@@ -53,7 +57,7 @@ export function Shell() {
   // The graph asks for a wide panel (v4/v5); it still yields to the centre minimum.
   const wanted = right?.kind === 'graph' ? Math.max(rightWidth, GRAPH_W) : rightWidth;
   const layout = computeLayout({
-    windowWidth, sideOpen, sideWidth, docOpen: right !== null, docExpanded, rightWidth: wanted,
+    windowWidth, sideOpen: !compact && sideOpen, sideWidth, docOpen: right !== null, docExpanded: docExpanded || compact, rightWidth: wanted,
   });
   const { sideMax, rightMax } = resizeLimits(windowWidth, layout);
   // AnimatedList (FIX2 S-H1): only the side list shown when the app opens may stagger in.
@@ -61,9 +65,11 @@ export function Shell() {
 
   return (
     <div className="kb-app kb-reader-finish" ref={appRef}>
-      <TitleBar />
+      <TitleBar compactSide={compact ? { open: mobileSide, toggle: () => setNavigationOpen(!mobileSide) } : undefined}
+        materialActionsInSidebar={(layout.side > 0 || mobileSide) && section === 'materials'} />
       <div className="kb-body">
-        <Rail />
+        <Rail sideVisible={compact ? mobileSide : undefined} onSection={compact ? () => setNavigationOpen(true) : undefined} />
+        {mobileSide && <SidePanel width={windowWidth - 68} onNavigate={() => setNavigationOpen(false)} />}
         {layout.side > 0 && (
           <>
             <SidePanel width={layout.side} />
@@ -78,10 +84,10 @@ export function Shell() {
             />
           </>
         )}
-        <ChatCenter hidden={!layout.centerVisible || center === 'materials' || isExplore} />
-        {!isExplore && center === 'materials' && <AllMaterials hidden={!layout.centerVisible} />}
-        {isExplore && <ExploreSection hidden={!layout.centerVisible} />}
-        {right !== null && (
+        <ChatCenter hidden={mobileSide || !layout.centerVisible || center === 'materials' || isExplore} />
+        {!isExplore && center === 'materials' && <AllMaterials hidden={mobileSide || !layout.centerVisible} />}
+        {isExplore && <ExploreSection hidden={mobileSide || !layout.centerVisible} />}
+        {right !== null && !mobileSide && (
           <>
             {layout.right !== null && (
               <Resizer
@@ -94,7 +100,7 @@ export function Shell() {
                 onChange={(px) => prefs.getState().setRightWidth(px)}
               />
             )}
-            <DocPanel view={right} expanded={docExpanded} width={layout.right ?? 0} />
+            <DocPanel view={right} expanded={docExpanded || compact} width={layout.right ?? 0} />
           </>
         )}
       </div>

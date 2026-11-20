@@ -81,7 +81,7 @@ function WebSearchRequest({ chatId, part }: { chatId: string; part: KbWebSearchP
         <Button size="sm" busy={busy === 'deny'} disabled={!!busy} onClick={() => void send('deny')}>Deny</Button>
         <span className="kb-perm__spacer" />
         <Button size="sm" busy={busy === 'allow_chat'} disabled={!!busy} onClick={() => void send('allow_chat')}>Allow in this chat</Button>
-        <Button size="sm" variant="fill" busy={busy === 'allow'} disabled={!!busy} onClick={() => void send('allow')}>Allow once</Button>
+        <Button feedback size="sm" variant="fill" busy={busy === 'allow'} disabled={!!busy} onClick={() => void send('allow')}>Allow once</Button>
       </div>
       {error && <p className="kb-inline-error kb-perm__error" role="alert">{error}</p>}
     </m.section>

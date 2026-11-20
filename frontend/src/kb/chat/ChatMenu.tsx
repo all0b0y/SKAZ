@@ -2,7 +2,7 @@ import { useId, useRef, useState } from 'react';
 import type { KbChatSummary } from '../../api/kb/types.gen';
 import { Button, IconButton, Menu, Modal } from '../ui';
 import { Popover } from '../ui/Popover';
-import { useServices } from '../state/context';
+import { useServices, useUi } from '../state/context';
 import { useOpenDocument } from '../state/document';
 import { savedText } from './saved';
 
@@ -10,15 +10,18 @@ import { savedText } from './saved';
  * Chat ⋯ menu (v3): pin, rename, export .md, save to wiki as an analysis, delete. Every action
  * reports its real outcome through `onNotice` (a status line), never silently.
  */
-export function ChatMenu({ chat, onNotice, onRename, size = 'md' }: {
+export function ChatMenu({ chat, onNotice, onRename, onCloseTab, size = 'md' }: {
   chat: KbChatSummary;
   onNotice: (text: string, ms?: number) => void;
   /** Inline rename (chat header); without it a small rename field opens here. */
   onRename?: () => void;
+  onCloseTab?: () => void;
   size?: 'sm' | 'md';
 }) {
-  const { chats, bridge } = useServices();
+  const { chats, bridge, ui } = useServices();
   const open = useOpenDocument();
+  const right = useUi((s) => s.right);
+  const overview = right?.kind === 'overview' && right.chatId === chat.id;
   const anchor = useRef<HTMLButtonElement | null>(null);
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -48,9 +51,12 @@ export function ChatMenu({ chat, onNotice, onRename, size = 'md' }: {
           id: 'pin', label: chat.pinned ? 'Unpin' : 'Pin', icon: chat.pinned ? 'unpin' : 'pin',
           onSelect: async () => { const r = await chats.getState().setPinned(chat.id, !chat.pinned); if (!r.ok) onNotice(r.error); },
         },
+        ...(onRename ? [{ id: 'overview', label: overview ? 'Close the chat overview' : 'Chat overview', icon: 'panelRight' as const,
+          onSelect: () => overview ? ui.getState().closeDoc() : ui.getState().openOverview(chat.id) }] : []),
         { id: 'rename', label: 'Rename', icon: 'pencil', onSelect: () => (onRename ? onRename() : setRenaming(true)) },
         { id: 'export', label: 'Export as .md', icon: 'export', onSelect: () => void exportChat() },
         { id: 'save', label: 'Save to wiki as analysis', icon: 'saveWiki', onSelect: () => void saveToWiki() },
+        ...(onCloseTab ? [{ id: 'close-tab', label: 'Close tab', icon: 'close' as const, onSelect: onCloseTab }] : []),
         { id: 'delete', label: 'Delete', icon: 'trash', danger: true, onSelect: () => setConfirm(true) },
       ]} />
       {!onRename && (

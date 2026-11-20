@@ -14,6 +14,9 @@ dependencies = [
     "pypdf>=6.21.4",
     "readability-lxml>=0.9",
     "fsrs==6.3.2",
+    "pypdfium2>=5,<6",
+    "pillow>=12",
+    "pillow-heif>=1,<2",
 ]
 
 [project.optional-dependencies]

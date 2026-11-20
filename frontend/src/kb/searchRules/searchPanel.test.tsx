@@ -65,8 +65,8 @@ describe('Search & sources panel in the message field (N7)', () => {
     const panel = await within(composer).findByRole('dialog', { name: 'Search and sources for this chat' });
     await user.click(within(panel).getByRole('radio', { name: 'Only these' }));
     await user.click(within(panel).getByRole('button', { name: 'Add material' }));
-    await user.type(within(panel).getByRole('textbox', { name: 'Find a material or wiki page' }), 'Lecture 8');
-    await user.click(await within(panel).findByRole('button', { name: /^Lecture 8 — entropy$/ }));
+    await user.type(within(panel).getByRole('combobox', { name: 'Find a material or wiki page' }), 'Lecture 8');
+    await user.click(await within(panel).findByRole('option', { name: /^Lecture 8 — entropy$/ }));
     await user.click(within(panel).getByRole('switch', { name: 'Web · only these sites' }));
     const only = within(panel).getByRole('region', { name: 'Web · only these sites' });
     await user.click(within(only).getByRole('button', { name: 'Add site' }));
@@ -171,8 +171,8 @@ describe('Search & sources panel in the message field (N7)', () => {
     const panel = await within(composer).findByRole('dialog', { name: 'Search and sources for this chat' });
     await user.click(within(panel).getByRole('radio', { name: 'Only these' }));
     await user.click(within(panel).getByRole('button', { name: 'Add material' }));
-    await user.type(within(panel).getByRole('textbox', { name: 'Find a material or wiki page' }), 'Lecture 8');
-    await user.click(await within(panel).findByRole('button', { name: /^Lecture 8 — entropy$/ }));
+    await user.type(within(panel).getByRole('combobox', { name: 'Find a material or wiki page' }), 'Lecture 8');
+    await user.click(await within(panel).findByRole('option', { name: /^Lecture 8 — entropy$/ }));
     await user.click(within(panel).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(within(composer).queryByRole('dialog')).toBeNull());
     const put = rulesCalls(fake.calls).find(([m]) => m === 'PUT');
@@ -214,8 +214,8 @@ describe('Search & sources panel in the message field (N7)', () => {
     // Library: only one material.
     await user.click(within(panel).getByRole('radio', { name: 'Only these' }));
     await user.click(within(panel).getByRole('button', { name: 'Add material' }));
-    await user.type(within(panel).getByRole('textbox', { name: 'Find a material or wiki page' }), 'Lecture 8');
-    await user.click(await within(panel).findByRole('button', { name: /^Lecture 8 — entropy$/ }));
+    await user.type(within(panel).getByRole('combobox', { name: 'Find a material or wiki page' }), 'Lecture 8');
+    await user.click(await within(panel).findByRole('option', { name: /^Lecture 8 — entropy$/ }));
     expect(within(within(panel).getByRole('list', { name: 'Only these sources' })).getByText('Lecture 8 — entropy')).toBeInTheDocument();
 
     await user.click(within(panel).getByRole('button', { name: 'Save' }));
@@ -387,8 +387,8 @@ describe('Search & sources panel in the message field (N7)', () => {
 
     // Picking a material directly from All sources switches to Only these and undims the list.
     await user.click(within(list).getByRole('button', { name: 'Add material' }));
-    await user.type(within(list).getByRole('textbox', { name: 'Find a material or wiki page' }), 'Lecture 8');
-    await user.click(await within(list).findByRole('button', { name: /^Lecture 8 — entropy$/ }));
+    await user.type(within(list).getByRole('combobox', { name: 'Find a material or wiki page' }), 'Lecture 8');
+    await user.click(await within(list).findByRole('option', { name: /^Lecture 8 — entropy$/ }));
     expect(within(library).getByRole('radio', { name: 'Only these' })).toHaveAttribute('aria-checked', 'true');
     expect(list).not.toHaveClass('is-dim');
     expect(within(list).getByText('Lecture 8 — entropy')).toBeInTheDocument();

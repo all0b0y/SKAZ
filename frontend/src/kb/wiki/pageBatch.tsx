@@ -97,7 +97,7 @@ export function usePageSelection({ pages, resetKey, onOpen, sets }: {
 
   const overlays = (
     <>
-      <SelectionBar selection={sel} sets={sets} hintKey="list-selection" count={sel.selected.size} variant="compact" actions={actions} more={more} onClear={sel.clear} />
+      <SelectionBar entry={false} selection={sel} sets={sets} hintKey="list-selection" count={sel.selected.size} variant="compact" actions={actions} more={more} onClear={sel.clear} />
       {obsidian.message && <div className="kb-side__pad">{obsidian.message}</div>}
       {exp.dialog}
       <ShortcutsPopover open={sel.shortcutsOpen} onClose={() => sel.setShortcutsOpen(false)} anchorRef={sel.listRef}

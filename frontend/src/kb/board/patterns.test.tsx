@@ -102,10 +102,10 @@ describe('layer 3 · states are the real ones', () => {
 
     const composer = within(attached!);
     const strip = within(composer.getByRole('list', { name: 'Draft attachments' }));
-    const readyFile = strip.getByRole('button', { name: 'View Information theory ch2.pdf' });
+    const readyFile = strip.getByTitle('Information theory ch2.pdf');
     expect(readyFile).toBeVisible();
     expect(readyFile.closest('li')).toHaveAttribute('data-state', 'ready');
-    const failedFile = strip.getByRole('button', { name: 'View slides.key' });
+    const failedFile = strip.getByTitle('slides.key');
     expect(failedFile.closest('li')).toHaveAttribute('data-state', 'failed');
     expect(within(failedFile).getByText('This file type can’t be read.')).toBeVisible();
     expect(composer.getByRole('alert')).toHaveTextContent('slides.key: This file type can’t be read. Remove or replace before sending.');

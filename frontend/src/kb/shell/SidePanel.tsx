@@ -7,7 +7,8 @@ import { NotificationsFeed } from '../notifications/Feed';
 import { StudyShelf } from '../study/StudyShelf';
 import { GraphSide, WikiSide } from '../wiki/WikiSide';
 import { useLayoutEffect, useRef } from 'react';
-import { usePrefs } from '../state/context';
+import { useLibrary, usePrefs } from '../state/context';
+import { RecordControls } from '../recording/RecordControls';
 import { useMotionLevel } from '../ui/motionLevel';
 import type { Section } from '../state/prefs';
 import { GUTTER } from './layout';
@@ -32,9 +33,11 @@ const TITLES: Record<Section, string> = {
  * chat's bridge runs to the centre sheet. The graph has no rail
  * item (v39): it opens from the Wiki section; `graph` stays a section only for a saved choice.
  */
-export function SidePanel({ width }: { width: number }) {
+export function SidePanel({ width, onNavigate }: { width: number; onNavigate?: () => void }) {
   const { chats, ui } = useServices();
   const section = usePrefs((s) => s.section);
+  const libraryReady = useLibrary((s) => s.library?.state === 'ready');
+  const folderId = useLibrary((s) => s.openFolderId);
   const level = useMotionLevel();
   const body = useRef<HTMLDivElement | null>(null);
   const shownSection = useRef(section);
@@ -52,11 +55,17 @@ export function SidePanel({ width }: { width: number }) {
       <SelectionHeader className="kb-head kb-head--side">
         <h2 className="kb-side__title">{TITLES[section]}</h2>
         <span className="kb-head__spacer" />
-        {section === 'chats' && <IconButton icon="plus" label="New chat" size="sm" onClick={() => { ui.getState().showCenter('chat'); chats.getState().open(null); }} />}
+        {section === 'materials' && <IconButton icon="plus" label="Add material" size="sm"
+          aria-haspopup="dialog" disabled={!libraryReady} data-testid="add-material"
+          onClick={() => ui.getState().setAddMaterialOpen(true, folderId ? { folderId, files: [], unreadable: 0 } : undefined)} />}
+        {section === 'chats' && <IconButton icon="plus" label="New chat" size="sm" onClick={() => { ui.getState().showCenter('chat'); chats.getState().open(null); onNavigate?.(); }} />}
       </SelectionHeader>
       <div className="kb-side__body" data-section={section} ref={body}>
-        {section === 'chats' && <ChatList />}
-        {section === 'materials' && <LibraryPanel />}
+        {section === 'chats' && <ChatList onNavigate={onNavigate} />}
+        {section === 'materials' && <>
+          <div className="kb-side__record"><RecordControls /></div>
+          <LibraryPanel />
+        </>}
         {section === 'wiki' && <WikiSide />}
         {section === 'explore' && <ExploreSide />}
         {section === 'study' && <StudyShelf />}

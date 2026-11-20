@@ -23,6 +23,7 @@ describe('the material chooser offers only what the backend takes (QA B2)', () =
       ...pythonWords(intake, 'TEXT_EXTENSIONS'),
       ...pythonWords(intake, 'PDF_EXTENSIONS'),
       ...pythonWords(intake, 'DOCX_EXTENSIONS'),
+      ...pythonWords(intake, 'PRESENTATION_EXTENSIONS'),
     ];
     const images = pythonWords(intake, 'IMAGE_EXTENSIONS');
     expect([...DOCX_EXTENSIONS]).toEqual(['docx']);
@@ -46,7 +47,7 @@ describe('the material chooser offers only what the backend takes (QA B2)', () =
       expect(itemMeta(item)).toBe(UNSUPPORTED_FILE);
     }
     for (const name of ['a.wav', 'b.m4a', 'c.flac', 'd.aiff', 'e.mp4', 'f.MOV']) expect(fileItem(`/a/${name}`, name, 1).kind, name).toBe('speech');
-    for (const name of ['a.pdf', 'b.md', 'c.TXT', 'd.markdown', 'report.docx']) expect(fileItem(`/a/${name}`, name, 1).kind, name).toBe('document');
+    for (const name of ['a.pdf', 'b.md', 'c.TXT', 'd.markdown', 'report.docx', 'slides.pptx', 'talk.key']) expect(fileItem(`/a/${name}`, name, 1).kind, name).toBe('document');
     for (const name of ['photo.jpg', 'photo.jpeg', 'photo.png', 'photo.webp', 'photo.HEIC']) expect(fileItem(`/a/${name}`, name, 1).kind, name).toBe('image');
   });
 });

@@ -461,7 +461,7 @@ describe('Chats in the side panel', () => {
     expect(within(panel).getByRole('button', { name: 'Close' })).toBeInTheDocument();
   });
 
-  it('an empty chat a recording opened says what it is for (QA D9)', async () => {
+  it('a saved empty recording chat has no explanatory block or recording badge', async () => {
     const user = userEvent.setup();
     const world = chatWorld();
     const c2 = world.chats.find((c) => c.id === 'c2')!;
@@ -469,7 +469,9 @@ describe('Chats in the side panel', () => {
     renderKb({ world });
     await user.click(await within(side()).findByRole('button', { name: /What did I miss in lecture 8/ }));
     const centre = screen.getByRole('region', { name: 'Chat' });
-    expect(await within(centre).findByText('Ask about the lecture')).toBeInTheDocument();
+    await within(centre).findByRole('heading', { name: /What did I miss in lecture 8/ });
+    expect(within(centre).queryByText('Ask about the lecture', { exact: true })).toBeNull();
+    expect(within(centre).queryByText('during recording', { exact: true })).toBeNull();
   });
 
   it('Rename: leaving the field saves the change; an unchanged or empty name just closes it (QA D7)', async () => {

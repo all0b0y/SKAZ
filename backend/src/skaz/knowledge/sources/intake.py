@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from hashlib import sha256
 from pathlib import Path
 
 from ..errors import KnowledgeError
 from ..markdown.source import FragmentInput, MaterialKind, Origin
+from .document_card import CARD_NAME, build_card
 from .fragments import (
     first_words_title,
     paragraph_of_offset,
@@ -22,7 +24,6 @@ from .fragments import (
 from .guard import Finding, clean_invisible, detect_instruction
 from .html import extract_article
 from .markdown_blocks import block_of_offset, markdown_blocks
-from .pdf import extract_pdf
 from .visual import (
     MAX_IMAGE_BYTES,
     PreparedVisual,
@@ -33,6 +34,7 @@ from .visual import (
 TEXT_EXTENSIONS = frozenset({".txt", ".md", ".markdown"})
 PDF_EXTENSIONS = frozenset({".pdf"})
 DOCX_EXTENSIONS = frozenset({".docx"})
+PRESENTATION_EXTENSIONS = frozenset({".pptx", ".key"})
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".heic"})
 #: A PDF with at least this many pages is filed as a book.
 BOOK_PAGES = 100
@@ -45,7 +47,7 @@ class SourceRejected(KnowledgeError):
 
 @dataclass(frozen=True)
 class Original:
-    """The untouched input, kept in the material's ``.skaz/`` as evidence (decision 41)."""
+    """The file stored with a material. It may be a normalized representation."""
 
     name: str
     data: bytes | None = None
@@ -176,7 +178,7 @@ def prepare_text_file(data: bytes, file_name: str, *, origin: Origin) -> Prepare
 
 
 def prepare_pdf(data: bytes, *, origin: Origin, fallback: str, original: Original) -> Prepared:
-    extraction = extract_pdf(data)
+    extraction, card = build_card(data, fallback)
     kind: MaterialKind = "book" if extraction.page_count >= BOOK_PAGES else "pdf"
     return Prepared(
         kind=kind,
@@ -184,9 +186,13 @@ def prepare_pdf(data: bytes, *, origin: Origin, fallback: str, original: Origina
         fallback_title=fallback,
         fragments=to_fragments(extraction.paragraphs),
         findings=flag_instructions(extraction.findings),
-        origin=origin,
+        origin=origin.model_copy(update={
+            "sha256": (origin.model_extra or {}).get("sha256") or sha256(data).hexdigest(),
+            "stored_sha256": sha256(card).hexdigest(),
+            "display_format": "document",
+        }),
         extractor="pdf",
-        original=original,
+        original=Original(CARD_NAME, data=card),
         failure=extraction.failure,
         extra={"pages": extraction.page_count},
     )

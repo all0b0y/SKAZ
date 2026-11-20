@@ -355,13 +355,19 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(within(dialog).getByText(/^PDF · 1 B$/)).toBeInTheDocument();
     expect(within(dialog).getByRole('combobox', { name: 'Spoken language' })).toBeInTheDocument();
     const original = fake.bridge.request;
-    fake.bridge.request = (async (req) => (req.path === '/kb/materials/file'
-      ? { ok: false, status: 422, detail: 'This file type can’t be read.' }
-      : original(req))) as typeof original;
+    let finish!: () => void;
+    const conversion = new Promise<void>((resolve) => { finish = resolve; });
+    fake.bridge.request = (async (req) => {
+      if (req.path !== '/kb/materials/file') return original(req);
+      await conversion;
+      return { ok: false, status: 422, detail: 'This file type can’t be read.' };
+    }) as typeof original;
     await user.click(within(dialog).getByRole('button', { name: 'Add 2' }));
-    expect(await within(dialog).findByText('This file type can’t be read.')).toBeInTheDocument();
-    expect(within(dialog).queryByText('lecture9.m4a')).not.toBeInTheDocument();
-    expect(within(dialog).getByText('notes.pdf')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).toBeNull());
+    await user.click(screen.getByTestId('all-materials'));
+    expect(await screen.findByRole('region', { name: 'All materials' })).toBeVisible();
+    finish();
+    expect(await screen.findByText(/notes.pdf: This file type can’t be read/)).toBeVisible();
   });
 
   it('a file already in the library is not added again: the row says so and opens it (N2)', async () => {
@@ -381,10 +387,8 @@ describe('+ Material (v11, decisions 15–16)', () => {
       return { ...res, status: 200, data: { ...data, material: { ...data.material, id: there.id, title: there.title }, already_in_library: true } };
     }) as typeof original;
     await user.click(within(dialog).getByRole('button', { name: 'Add' }));
-    const note = await within(dialog).findByTestId('already-in-library');
-    expect(note).toHaveTextContent('This is already in your library · Open it');
-    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeDisabled(); // nothing left to add
-    await user.click(within(note).getByRole('button', { name: 'Open it' }));
+    expect(await screen.findByText('This is already in your library')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Open it' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
     expect(await screen.findByRole('heading', { level: 2, name: 'Lecture 8 — entropy' })).toBeInTheDocument();
   });

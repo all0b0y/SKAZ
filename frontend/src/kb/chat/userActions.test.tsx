@@ -22,6 +22,23 @@ async function openC1(world = chatWorld()) {
 }
 
 describe('Your message: Copy · Edit · Resend', () => {
+  it('shares the whole sent chat once from its header while preserving the unsent draft', async () => {
+    const { user, centre } = await openC1();
+    const editor = within(centre).getByRole('textbox', { name: 'Message' });
+    await user.click(editor);
+    await user.keyboard('PRIVATE DRAFT');
+    expect(within(centre).getAllByRole('button', { name: /Share/ })).toHaveLength(1);
+    await user.click(within(centre).getByRole('button', { name: 'Share chat' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Copy text' }));
+    await waitFor(async () => {
+      const shared = await navigator.clipboard.readText();
+      expect(shared).toContain(QUESTION);
+      expect(shared).toContain('Cross-entropy');
+      expect(shared).not.toContain('PRIVATE DRAFT');
+    });
+    expect(editor).toHaveTextContent('PRIVATE DRAFT');
+  });
+
   it('has a row of actions named “Message actions”; Copy copies the typed text and says Copied', async () => {
     const { user, question } = await openC1();
     const row = within(question).getByRole('group', { name: 'Message actions' });
@@ -89,7 +106,7 @@ describe('Your message: Copy · Edit · Resend', () => {
     await waitFor(() => expect(r.fake.calls.some((c) => /\/c1-u1\/edit$/.test(c.path))).toBe(true));
     const call = r.fake.calls.find((c) => /\/c1-u1\/edit$/.test(c.path))!;
     expect(call.body).toMatchObject({
-      text: 'Compare @Entropy with this please', mentions: [{ type: 'page', id: 'p-entropy', title: 'Entropy' }], attachments: ['m5'],
+      text: 'Compare Entropy with this please', mentions: [{ type: 'page', id: 'p-entropy', title: 'Entropy' }], attachments: ['m5'],
     });
   });
 

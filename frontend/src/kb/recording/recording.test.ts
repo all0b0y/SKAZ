@@ -64,19 +64,20 @@ describe('Capsule level bars', () => {
 });
 
 describe('Recording store over /kb/recordings and the existing capture pipeline', () => {
-  it('Record: material + session, a new chat about it, the live panel, then capture on that session', async () => {
+  it('Record: material + session, capture on that session, then the live panel', async () => {
     const { store, ui, eng, routes, fake } = setup();
     await store.getState().loadOptions();
     expect(store.getState().options).toMatchObject({ folderId: 'phys', mode: 'translation', target: 'ru' });
     await store.getState().start();
     const s = store.getState();
     expect(s.phase).toBe('recording');
-    expect(routes()).toEqual(expect.arrayContaining(['POST /kb/recordings', 'POST /kb/chats']));
+    expect(routes()).toContain('POST /kb/recordings');
+    expect(routes()).not.toContain('POST /kb/chats');
     expect(fake.calls.find((c) => c.path === '/kb/recordings')?.body).toEqual({ folder_id: 'phys' });
     expect(eng.started?.sessionId).toBe(s.sessionId);
     expect(ui.getState().right).toEqual({ kind: 'live', materialId: s.materialId });
     expect(s.view).toBe('translation');
-    await vi.waitFor(() => expect(store.getState().chatId).toMatch(/^c\d+$/));
+    expect(store.getState().chatId).toBeNull();
     expect(fake.bridge.reportCaptureState).toHaveBeenLastCalledWith({ recorderState: 'recording', pending: 0, failed: 0 });
   });
 
@@ -241,11 +242,13 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
   });
 
   it('a failed start says why and leaves nothing recording', async () => {
-    const { store, eng } = setup();
-    vi.mocked(eng.engine.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    const { store, eng, routes, ui } = setup();
+    eng.engine.prepare = vi.fn().mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
     await store.getState().start();
     expect(store.getState().phase).toBe('idle');
     expect(store.getState().startError).toMatch(/Microphone access was denied/);
+    expect(routes()).not.toContain('POST /kb/recordings');
+    expect(ui.getState().right).toBeNull();
   });
 
   it('quit barrier: stops a running recording and answers whether its audio is saved', async () => {
@@ -291,7 +294,7 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
 
   it('each refusal says what didn’t happen: start, resume, continue', async () => {
     const { store, eng } = setup();
-    vi.mocked(eng.engine.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    eng.engine.prepare = vi.fn().mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
     await store.getState().start();
     expect(store.getState().startErrorWhen).toBe('start');
     await store.getState().start();

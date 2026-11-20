@@ -31,10 +31,12 @@ from .schemas_sources import (
     KbImagePreviewRequest,
     KbLinkInfo,
     KbMaterialAdded,
+    KbMaterialDisplay,
     KbMaterialGuard,
     KbRestoredFragment,
     KbWebPageUnavailable,
 )
+from .schemas_wiki2 import KbPageFile
 
 router = APIRouter(tags=["kb"])
 NO_EMBEDDED_VIDEO = "This page has no video SKAZ can add (YouTube, VK Video, RuTube or Vimeo)."
@@ -42,6 +44,17 @@ NO_EMBEDDED_VIDEO = "This page has no video SKAZ can add (YouTube, VK Video, RuT
 
 def get_sources(request: Request) -> SourceService:
     return cast(SourceService, request.app.state.runtime.kb_sources)
+
+
+@router.get("/kb/materials/{material_id}/display")
+async def material_display(material_id: str, request: Request) -> KbMaterialDisplay:
+    kind, content = await kb_call(get_sources(request).display_content, material_id)
+    return KbMaterialDisplay.model_validate({"format": kind, "content": content})
+
+
+@router.get("/kb/materials/{material_id}/share-file")
+async def material_share_file(material_id: str, request: Request) -> KbPageFile:
+    return KbPageFile(path=str(await kb_call(get_sources(request).share_file, material_id)))
 
 
 def get_speech(request: Request) -> SpeechService:

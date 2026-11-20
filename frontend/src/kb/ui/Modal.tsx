@@ -6,6 +6,7 @@ import { AnimatePresence, m, useIsPresent } from 'motion/react';
 import { EXIT, SPRING_LARGE } from './motion';
 import { focusableIn } from './geometry';
 import { IconButton } from './Button';
+import { useMotionLevel } from './motionLevel';
 
 export interface ModalProps {
   open: boolean;
@@ -27,6 +28,7 @@ export interface ModalProps {
   testId?: string;
   /** Marks the dialog as a column for the layout audit (scripts/paneAudit.ts). */
   pane?: string;
+  followThrough?: boolean;
   /** 'dialog' focuses the window itself (its title is read first) instead of the first control. */
   initialFocus?: 'first' | 'dialog';
 }
@@ -63,8 +65,9 @@ export function Modal(props: ModalProps) {
 
 function ModalLayer({
   onClose, title, bare = false, children, className, initialFocusRef, scrim = 'normal',
-  dismissOnScrim = true, dismissOnEscape = true, testId, pane, initialFocus = 'first',
+  dismissOnScrim = true, dismissOnEscape = true, testId, pane, initialFocus = 'first', followThrough = false,
 }: ModalProps) {
+  const level = useMotionLevel();
   const titleId = useId();
   const present = useIsPresent();
   const layerRef = useRef<HTMLDivElement | null>(null);
@@ -166,9 +169,10 @@ function ModalLayer({
         data-testid={testId}
         data-pane={pane}
         onKeyDown={onKeyDown}
-        initial={{ opacity: 0, scale: 0.97, y: 8 }}
-        animate={{ opacity: 1, scale: 1, y: 0, transition: SPRING_LARGE }}
-        exit={{ opacity: 0, scale: 0.98, transition: EXIT }}
+        initial={level === 'off' ? false : { opacity: 0, scale: level === 'full' ? 0.97 : 1, y: level === 'full' ? 8 : 0 }}
+        animate={{ opacity: 1, scale: 1, y: 0, transition: level === 'off' ? { duration: 0 }
+          : followThrough && level === 'full' ? { type: 'spring', visualDuration: 0.26, bounce: 0.22 } : SPRING_LARGE }}
+        exit={{ opacity: 0, scale: level === 'full' ? 0.98 : 1, transition: level === 'off' ? { duration: 0 } : EXIT }}
       >
         {bare ? (
           <h2 id={titleId} className="kb-visually-hidden">{title}</h2>

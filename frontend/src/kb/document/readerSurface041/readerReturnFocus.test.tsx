@@ -81,7 +81,7 @@ it.each([
   expect(source).toHaveAttribute('aria-expanded', 'false');
 });
 
-it('uses the active tab when the Sources-row trigger was unmounted', async () => {
+it('uses the single chat heading when the Sources-row trigger was unmounted', async () => {
   const user = userEvent.setup();
   renderKb({ world: chatWorld() });
   await user.click(await screen.findByRole('button', { name: /Why is there a logarithm/ }));
@@ -92,7 +92,7 @@ it('uses the active tab when the Sources-row trigger was unmounted', async () =>
   await user.click(fold);
   expect(source).not.toBeInTheDocument();
   await closeReader(user);
-  expect(chat().getByRole('tab', { selected: true })).toHaveFocus();
+  expect(chat().getByRole('heading', { name: /Why is there a logarithm/ })).toHaveFocus();
 });
 
 it('keeps the new active tab and its draft when closing a reader opened from another chat', async () => {

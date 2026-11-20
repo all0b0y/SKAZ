@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from ..intake import (
+    PRESENTATION_EXTENSIONS,
     PDF_EXTENSIONS as PDF_EXTENSIONS,
 )
 from ..intake import (
@@ -23,7 +24,7 @@ AUDIO_EXTENSIONS: frozenset[str] = frozenset(
 )
 VIDEO_EXTENSIONS: frozenset[str] = frozenset({".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi"})
 SPEECH_EXTENSIONS: frozenset[str] = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
-DOCUMENT_EXTENSIONS: frozenset[str] = TEXT_EXTENSIONS | PDF_EXTENSIONS | DOCX_EXTENSIONS
+DOCUMENT_EXTENSIONS: frozenset[str] = TEXT_EXTENSIONS | PDF_EXTENSIONS | DOCX_EXTENSIONS | PRESENTATION_EXTENSIONS
 SUPPORTED_MATERIAL_EXTENSIONS: frozenset[str] = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS | SPEECH_EXTENSIONS
 
 MAX_TEXT_BYTES = 64 * 1024 * 1024
@@ -33,7 +34,7 @@ MAX_IMAGE_BYTES = 32 * 1024 * 1024
 MAX_SPEECH_BYTES = 2 * 1024 * 1024 * 1024
 HEADER_SNIFF_BYTES = 64
 
-IntakeCategory = Literal["text", "pdf", "docx", "image", "speech"]
+IntakeCategory = Literal["text", "pdf", "docx", "presentation", "image", "speech"]
 IntakeRoute = Literal["document", "image", "speech"]
 ImageFormat = Literal["jpeg", "png", "webp", "heic"]
 ContainerFormat = Literal["pdf", "zip", "jpeg", "png", "webp", "heic"]
@@ -104,6 +105,10 @@ def classify_extension(path_or_name: str | Path) -> FileClassification:
             max_bytes=MAX_PDF_BYTES,
             is_new_041=False,
         )
+    if suffix in PRESENTATION_EXTENSIONS:
+        mime = ("application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                if suffix == ".pptx" else "application/vnd.apple.keynote")
+        return FileClassification("presentation", "document", suffix[1:], suffix, mime, MAX_PDF_BYTES, True)
     if suffix in DOCX_EXTENSIONS:
         return FileClassification(
             category="docx",
@@ -181,9 +186,9 @@ def verify_magic_header(head: bytes, classification: FileClassification) -> None
         if not head.startswith(b"%PDF-"):
             raise SourceRejected("This file isn't a valid PDF document.")
         return
-    if classification.category == "docx":
+    if classification.category in ("docx", "presentation"):
         if len(head) < 4 or head[:4] not in (b"PK\x03\x04", b"PK\x05\x06"):
-            raise SourceRejected("This file isn't a valid DOCX document.")
+            raise SourceRejected(f"This file isn't a valid {classification.format_id.upper()} document.")
         return
     if classification.category == "image":
         detected = sniff_image_format(head)

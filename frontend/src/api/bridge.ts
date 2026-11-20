@@ -106,7 +106,7 @@ export interface MaterialFileChoice {
 
 /** Documents the backend reads (`sources/intake.py` PDF_EXTENSIONS | TEXT_EXTENSIONS | DOCX_EXTENSIONS). */
 export const DOCX_EXTENSIONS = ['docx'] as const;
-export const DOCUMENT_EXTENSIONS = ['pdf', 'txt', 'md', 'markdown', ...DOCX_EXTENSIONS] as const;
+export const DOCUMENT_EXTENSIONS = ['pdf', 'txt', 'md', 'markdown', ...DOCX_EXTENSIONS, 'pptx', 'key'] as const;
 /** Images the backend decodes locally (`sources/intake.py` IMAGE_EXTENSIONS). */
 export const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'heic'] as const;
 /** Audio and video the speech import takes (`speech/media.py`: the provider list + video containers). */
@@ -153,6 +153,8 @@ export interface UpdateState {
 export type ObsidianFailure = 'not_installed' | 'unavailable' | 'obsidian_running' | 'obsidian_config';
 
 export interface BridgeApi {
+  share?(item: { kind: 'text'; text: string } | { kind: 'material' | 'page'; id: string }):
+    Promise<'opened' | 'unavailable' | 'failed'>;
   /**
    * Dictation into the message field: one PCM16 mono WAV clip (≤ 120 s, ≤ 8 MB) is posted by main to
    * `POST /kb/dictation` with the run's authorization. The answer is text only.

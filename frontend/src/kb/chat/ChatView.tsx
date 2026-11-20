@@ -1,4 +1,5 @@
 import { usePageVisible } from './usePageVisible';
+import { ShareButton } from '../ui/ShareButton';
 import { useMotionLevel, useReducedMotion, useStillIndicators } from '../ui/motionLevel';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
@@ -10,7 +11,7 @@ import { Composer } from '../composer/Composer';
 import { ExternalAttachmentDropOverlay, useExternalAttachmentBoundary } from '../composer/attachmentDrafts041/boundary';
 import { NEW_CHAT_DRAFT } from '../composer/attachmentDrafts041/draft';
 import { nativeAttachmentIntake } from '../composer/attachmentDrafts041/nativeIntake';
-import { useAgents, useChats, useLibrary, usePrefs, useServices, useSettings } from '../state/context';
+import { useAgents, useChats, useLibrary, useServices, useSettings } from '../state/context';
 import { agentOf } from '../state/agents';
 import { AgentFix } from './AgentFix';
 import { useOpenDocument } from '../state/document';
@@ -20,7 +21,6 @@ import { DiscussPaperBar } from './DiscussPaperBar';
 import { useQuestionActions } from './useQuestionActions';
 import { isWaitingForUser, partsOf } from '../api/permissions';
 import { WebSearchChip } from './webSearch';
-import { ChatOverviewButton } from '../overview/ChatOverviewButton';
 import { savedText } from './saved';
 import type { KbChat } from '../../api/kb/types.gen';
 import { backgroundActivity, chatWaits, isAnswering, isLocal, type ChatsData, type ChatsStore } from '../state/chats';
@@ -33,7 +33,7 @@ import { ReplyAnchorRail, ReturnToLatest, useReplyAnchors } from './replyAnchors
 import { FindInChatPanel } from './findInChat041/FindInChatPanel';
 import { useFindInChat } from './findInChat041/useFindInChat';
 import { useAnswerFrames } from './videoFrames041/AnswerFrames';
-import { ChatTabStrip, ChatTabsEmptyState, maxScrollTop, useScopedReadingAnchor, type ChatTabItem } from '../shell/chatTabs041';
+import { ChatTabStrip, maxScrollTop, useScopedReadingAnchor, type ChatTabItem } from '../shell/chatTabs041';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
@@ -74,8 +74,7 @@ function emptyViewOf(s: ChatsData): string | null {
 interface LeaveState {
   /** The chat whose empty view is burning out, for LEAVE_MS. */
   leaving: string | null;
-  /** The chat the first message created from the new-chat view: its plate keeps the new-chat copy. */
-  bornHere: string | null;
+
 }
 
 /**
@@ -85,25 +84,17 @@ interface LeaveState {
  * question plays the transition: a system note (a model switch, Study) just ends the empty view.
  *
  * The result lives in a tiny external store set from the same chats listener, so it reaches React in
- * the same (sync) commit as the chats change itself (review F2/Q2): no frame with the plate gone or
- * reading «No messages yet», and the plate is the same node that then fades.
+ * the same commit as the first message and starts the field transition immediately.
  */
 function useFirstMessageLeave(chats: ChatsStore, reduced: boolean): LeaveState {
-  const [store] = useState(() => createStore<LeaveState>(() => ({ leaving: null, bornHere: null })));
+  const [store] = useState(() => createStore<LeaveState>(() => ({ leaving: null })));
   const reducedRef = useRef(reduced);
   reducedRef.current = reduced;
   useEffect(() => {
     let shown = emptyViewOf(chats.getState());
-    /** A chat created (not opened) while the new-chat view was on screen: the send's POST /kb/chats. */
-    let created: string | null = null;
     let timer: number | undefined;
-    const unsubscribe = chats.subscribe((s, prev) => {
+    const unsubscribe = chats.subscribe((s) => {
       const next = emptyViewOf(s);
-      if (shown === '') {
-        const fresh = Object.keys(s.chats).find((id) => !prev.chats[id]?.chat && s.chats[id]?.chat?.messages.length === 0);
-        if (fresh) created = fresh;
-      }
-      if (shown === '' && next && next === created) store.setState({ bornHere: next });
       if (shown && next === null && s.currentId === shown && s.chats[shown]?.chat?.messages[0]?.role === 'user') {
         const id = shown;
         store.setState({ leaving: id });
@@ -126,13 +117,10 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const { chats, bridge, composer, library } = useServices();
   const currentId = useChats((s) => s.currentId);
   const openTabIds = useChats((s) => s.openTabIds);
-  const lastClosedTabId = useChats((s) => s.lastClosedTabId);
-  const allTabsClosed = useChats((s) => s.allTabsClosed);
   const list = useChats((s) => s.list);
   const openChats = useChats((s) => s.chats);
   const open = useChats((s) => (s.currentId ? s.chats[s.currentId] : undefined));
   const summary = useChats((s) => (s.currentId ? s.list.find((c) => c.id === s.currentId) : undefined));
-  const sideOpen = usePrefs((s) => s.sideOpen);
   const openDoc = useOpenDocument();
   const [renaming, setRenaming] = useState(false);
   const [busy, setBusy] = useState<Record<string, string>>({});
@@ -143,21 +131,30 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const scopeRef = useRef<HTMLElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
-  const reopenBtnRef = useRef<HTMLButtonElement | null>(null);
-  const [reopenFocus, setReopenFocus] = useState<{ id: string | null; seq: number }>({ id: null, seq: 0 });
+  useLayoutEffect(() => {
+    const pane = scopeRef.current;
+    const stage = pane?.querySelector<HTMLElement>('.kb-chat__stage');
+    if (!pane || !stage || typeof ResizeObserver === 'undefined') return;
+    const resize = () => stage.style.setProperty('--composer-space',
+      `${Math.max(0, pane.getBoundingClientRect().bottom - stage.getBoundingClientRect().bottom)}px`);
+    const observer = new ResizeObserver(resize);
+    resize();
+    observer.observe(stage);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, []);
   const stick = useRef(true);
   /** A reply jump leaving the bottom zone must not resume streaming follow on its first frames. */
   const anchorFlight = useRef(false);
   const returnLanding = useRef<number | null>(null);
   const reduced = useReducedMotion() ?? false;
-  const effectiveHidden = hidden || allTabsClosed;
   const { attachmentDrafts } = composer.getState();
   const draftId = currentId ?? NEW_CHAT_DRAFT;
   const sending = useStore(attachmentDrafts, (state) => state.getDraft(draftId).sending);
   const inbox = useLibrary((state) => state.folders.find((folder) => folder.system)?.id ?? null);
   const inWiki = useSettings((state) => state.wiki.value?.auto_add_files_links ?? true);
   const attachments = useExternalAttachmentBoundary({
-    chatId: effectiveHidden || sending ? null : draftId,
+    chatId: hidden || sending ? null : draftId,
     store: attachmentDrafts,
     intake: nativeAttachmentIntake(bridge.nativeIntake, inbox, () => { void library.getState().loadContent(); }),
     inWiki,
@@ -181,19 +178,19 @@ export function ChatView({ hidden }: { hidden: boolean }) {
     };
   }, []);
   const find = useFindInChat({
-    chatId: effectiveHidden ? null : currentId, scopeRef, scrollRef, reducedMotion: reduced, beforeOpen: stopReturnForFind,
+    chatId: hidden ? null : currentId, scopeRef, scrollRef, reducedMotion: reduced, beforeOpen: stopReturnForFind,
   });
   const findingChat = useRef<string | null>(null);
   // Decision 32: the main field is still only at «off» or the system's reduced motion; at «calm» it
   // keeps answering clicks and only its background drift stops.
   const fieldStill = useStillIndicators();
   const fieldCalm = useMotionLevel() === 'calm';
-  const { leaving, bornHere } = useFirstMessageLeave(chats, reduced);
+  const { leaving } = useFirstMessageLeave(chats, reduced);
   const leavingHere = !!currentId && leaving === currentId;
 
   const chat = open?.chat ?? null;
   const lastCompletedId = chat?.messages.filter((message) => message.role === 'assistant' && message.state === 'done').at(-1)?.id;
-  const answerFrames = useAnswerFrames(effectiveHidden ? null : chat?.id ?? null, lastCompletedId);
+  const answerFrames = useAnswerFrames(hidden ? null : chat?.id ?? null, lastCompletedId);
   const background = backgroundActivity(open);
   const activeWorking = background ? background.state === 'answering' : isAnswering(chat);
   const activeWaiting = background ? !!background.waiting_for_user : !!chat && chatWaits(chat, open?.stalePermissionIds);
@@ -206,7 +203,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   // B1 (decision 04): the marker follows the reading position; only explicit navigation ever moves
   // the view. While the find panel is open A4 owns the viewport, and a hidden chat pane owns
   // nothing at all — both freeze the keys and the explicit jumps (the marker keeps following).
-  const anchors = useReplyAnchors(scrollRef, replyIds, { reducedMotion: reduced, frozen: effectiveHidden || find.isOpen });
+  const anchors = useReplyAnchors(scrollRef, replyIds, { reducedMotion: reduced, frozen: hidden || find.isOpen });
   // B1/A4 composition: the find's active match points into one reply — consumed as a notification
   // only. A4 owns exact-match scrolling, so B1 never queues a jump of its own, not even for a
   // repeated match inside the same reply; the marker syncs from the viewport as it stands.
@@ -218,7 +215,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const tabItems = useMemo<ChatTabItem[]>(() => openTabIds.map((id) => {
     const itemSummary = list.find((c) => c.id === id);
     const itemChat = openChats[id]?.chat ?? null;
-    const isActive = id === currentId && !allTabsClosed;
+    const isActive = id === currentId;
     const hasLocalStream = !!itemChat?.messages.some((m) => isLocal(m.id) && m.role === 'assistant' && m.state === 'streaming');
     return {
       id,
@@ -236,19 +233,15 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       unread: itemSummary?.unread ?? itemChat?.unread ?? false,
       pinned: (isActive ? itemChat?.pinned : itemSummary?.pinned) ?? itemSummary?.pinned ?? itemChat?.pinned ?? false,
     };
-  }), [openTabIds, list, openChats, currentId, allTabsClosed, activeWorking, activeWaiting]);
-  const lastClosedTitle = useMemo(() => {
-    if (!lastClosedTabId) return null;
-    return list.find((c) => c.id === lastClosedTabId)?.title ?? openChats[lastClosedTabId]?.chat?.title ?? null;
-  }, [lastClosedTabId, openChats, list]);
+  }), [openTabIds, list, openChats, currentId, activeWorking, activeWaiting]);
   // Decision 25: switching chats, the thread follows the tab's direction; the title crossfades.
-  useFollowSwitch(currentId, effectiveHidden, scrollRef, titleRef);
+  useFollowSwitch(currentId, hidden, scrollRef, titleRef);
 
   const readingAnchor = useScopedReadingAnchor({
     chatId: currentId,
     scrollRef,
     ready: !!chat && chat.messages.length > 0 && !leavingHere,
-    hidden: effectiveHidden,
+    hidden: hidden,
     pauseCapture: find.isOpen,
     stickRef: stick,
     captureOptions: {
@@ -277,8 +270,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
 
   const pageVisible = usePageVisible();
   useEffect(() => {
-    if (!effectiveHidden && pageVisible && currentId && summary?.unread) void chats.getState().markRead(currentId);
-  }, [chats, currentId, summary?.unread, effectiveHidden, pageVisible]);
+    if (!hidden && pageVisible && currentId && summary?.unread) void chats.getState().markRead(currentId);
+  }, [chats, currentId, summary?.unread, hidden, pageVisible]);
 
   // A notice or an error belongs to the chat it was about (QA D10).
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -309,7 +302,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const captureReadingPosition = readingAnchor.captureNow;
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el || !currentId || effectiveHidden || find.isOpen) return;
+    if (!el || !currentId || hidden || find.isOpen) return;
     const onScrollEnd = () => {
       const landing = returnLanding.current;
       returnLanding.current = null;
@@ -325,7 +318,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       returnLanding.current = null;
       el.removeEventListener('scrollend', onScrollEnd);
     };
-  }, [captureReadingPosition, currentId, effectiveHidden, find.isOpen]);
+  }, [captureReadingPosition, currentId, hidden, find.isOpen]);
 
   // A newly opened transcript can receive its first layout after its messages commit.
   const lastReply = replyIds.at(-1);
@@ -333,10 +326,10 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const viewportHeight = anchors.state.view?.viewportHeight;
   // Find controls the viewport until it restores the starting position on close.
   useLayoutEffect(() => {
-    const closedFindHere = !effectiveHidden && findingChat.current !== null && findingChat.current === currentId && !find.isOpen;
+    const closedFindHere = !hidden && findingChat.current !== null && findingChat.current === currentId && !find.isOpen;
     findingChat.current = find.isOpen ? currentId : null;
     const el = scrollRef.current;
-    if (!el || effectiveHidden || find.isOpen) return;
+    if (!el || hidden || find.isOpen) return;
     // B1: find gave the viewport back — any anchor flight from before it opened is over, and the
     // position A4 restored decides the stick again (A4 owns the restore; B1 clears only its guard).
     if (closedFindHere) { anchorFlight.current = false; stick.current = nearBottom(el); }
@@ -345,7 +338,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
     else if (stick.current && !el.querySelector('.kb-thought__earlier-trigger[aria-expanded="true"]')) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [chat?.messages, replyLayoutReady, viewportHeight, leavingHere, currentId, effectiveHidden, find.isOpen]);
+  }, [chat?.messages, replyLayoutReady, viewportHeight, leavingHere, currentId, hidden, find.isOpen]);
 
   const act = async (message: KbMessage, what: 'regenerate' | 'resume' | 'save') => {
     if (!currentId || busy[message.id]) return;
@@ -381,14 +374,17 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   // CHAT-BACKDROP-SPEC: a chat with messages has the backdrop instead — never both: it comes when the
   // first message's burn-out has ended, and moves only while an answer is being written.
   const showBackdrop = !showField && !!chat && chat.messages.length > 0;
-  const newCopy = !currentId || (currentId === bornHere && !recording);
   const enter = leavingHere ? (reduced ? ' kb-chat__messages--fade' : ' kb-chat__messages--enter') : '';
   // F3: no text over the burning field — only the rising question until the burn-out ends; the
   // answer (and «Writing an answer…») appears once the thread is on its solid ground again.
   const messages = chat ? (leavingHere ? chat.messages.slice(0, 1) : chat.messages) : [];
 
-  const showTabs = openTabIds.length > 0 || allTabsClosed;
-
+  const showTabs = openTabIds.length > 1 || (!currentId && openTabIds.length > 0);
+  const closeTab = (id: string) => {
+    if (id === currentId) readingAnchor.captureNow(id);
+    chats.getState().closeTab(id);
+    if (openTabIds.length <= 2) requestAnimationFrame(() => titleRef.current?.focus({ preventScroll: true }));
+  };
   return (
     <section ref={scopeRef} className="kb-center" data-pane="center" aria-label="Chat" hidden={hidden} {...attachments.paneHandlers}>
       <SelectionProvider chatId={currentId}>
@@ -412,31 +408,33 @@ export function ChatView({ hidden }: { hidden: boolean }) {
                 if (currentId && id !== currentId) readingAnchor.captureNow(currentId);
                 chats.getState().selectTab(id);
               }}
-              onClose={(id) => {
-                if (id === currentId) readingAnchor.captureNow(currentId);
-                chats.getState().closeTab(id);
-              }}
-              onEmptyFocus={() => reopenBtnRef.current?.focus({ preventScroll: true })}
-              focusTabId={reopenFocus.id}
-              focusSeq={reopenFocus.seq}
+              onClose={closeTab}
             />
-            {!allTabsClosed && <h1 className="kb-visually-hidden" ref={titleRef}>{title}</h1>}
+            <h1 className="kb-visually-hidden" ref={titleRef}>{title}</h1>
           </>
         ) : (
           <>
-            <h1 className="kb-head__title" ref={titleRef}>{title}</h1>
+            <h1 className="kb-head__title" ref={titleRef} tabIndex={-1}>
+              {currentId && (activeWorking || activeWaiting) && <i
+                className={`kb-chattabs__dot kb-chattabs__dot--${activeWaiting ? 'waiting' : 'working'}`}
+                aria-label={activeWaiting ? 'Waiting for you' : 'Working'} />}{title}
+            </h1>
             <span className="kb-head__spacer" />
           </>
         )}
-        {recording && <span className="kb-tag kb-tag--static">during recording</span>}
         {chat && <WebSearchChip chatId={chat.id} messages={chat.messages} />}
-        {chat && <ChatOverviewButton chatId={chat.id} />}
-        {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)} />}
+        {summary && <ShareButton label="Share chat" text={async () => {
+          const result = await chats.getState().exportChat(summary.id);
+          if (!result.ok) throw new Error(result.error);
+          return result.value.markdown;
+        }} />}
+        {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)}
+          onCloseTab={!showTabs && currentId ? () => closeTab(currentId) : undefined} />}
       </header>
       {notice && <p className="kb-notice" role="status">{notice}</p>}
-      <div className="kb-chat__workspace" hidden={allTabsClosed}>
-      <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!effectiveHidden} reduced={fieldStill} calm={fieldCalm}>
-      {showBackdrop && <ChatBackdrop working={activeWorking} active={!effectiveHidden} reduced={reduced} />}
+      <div className="kb-chat__workspace">
+      <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={fieldStill} calm={fieldCalm}>
+      {showBackdrop && <ChatBackdrop working={activeWorking} active={!hidden} reduced={reduced} />}
       <div className="kb-chat__scroll" ref={scrollRef} role="log" aria-label="Conversation" aria-live="off"
         data-anchors="true" tabIndex={currentId ? 0 : undefined}>
         {currentId && open?.load === 'loading' && !chat && <div className="kb-chat__wait"><Spinner label="Opening the chat" /></div>}
@@ -480,20 +478,6 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       <ReturnToLatest visible={!find.isOpen && anchors.state.showReturn} onReturn={anchors.returnToLatest} />
       <FindInChatPanel find={find} />
       </DitherStage>
-      {showField && (
-        // FX §5: what the empty chat is for, on a solid plate above the field — never on the canvas.
-        // An empty chat a recording opened (QA D9) says so instead of a blank page.
-        <div className="kb-chat__plate" data-leaving={leavingHere ? 'true' : undefined} aria-hidden={leavingHere || undefined}>
-          <p className="kb-chat__plate-title">{newCopy ? 'Ask about your materials' : recording ? 'Ask about the lecture' : 'No messages yet'}</p>
-          <p className="kb-chat__plate-text">
-            {newCopy
-              ? 'Answers cite the exact moments of your recordings and the pages of your documents. Type @ to point at a page, a material or a chat.'
-              : recording
-                ? 'Questions here are answered from what has been recognised so far. Type @ to point at a page or a material.'
-                : 'Ask about your materials. Type @ to point at a page, a material or a chat.'}
-          </p>
-        </div>
-      )}
       {discussFinding && !discussFinding.material_id && (
         <DiscussPaperBar
           finding={discussFinding}
@@ -503,22 +487,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         />
       )}
       </div>
-      {allTabsClosed && (
-        <ChatTabsEmptyState
-          ref={reopenBtnRef}
-          canReopen={lastClosedTabId !== null}
-          lastClosedTitle={lastClosedTitle}
-          sidebarHidden={!sideOpen}
-          autoFocusReopen
-          onReopenLast={() => {
-            const reopened = chats.getState().reopenLastTab();
-            if (reopened) setReopenFocus((f) => ({ id: reopened, seq: f.seq + 1 }));
-          }}
-          onNewChat={() => chats.getState().open(null)}
-        />
-      )}
-      <Composer chatId={currentId} active={!effectiveHidden} handleImagePaste={attachments.handlePaste}
-        placeholder={(activeWaiting ? waitingHint(chat) : null) ?? (recording ? 'Ask about the lecture · @ to reference' : 'Ask about your materials · @ to reference')} />
+      <Composer chatId={currentId} active={!hidden} handleImagePaste={attachments.handlePaste}
+        placeholder={(activeWaiting ? waitingHint(chat) : null) ?? (recording ? 'Ask about the lecture · @ to reference' : 'Write a message… · @ to reference')} />
       <ExternalAttachmentDropOverlay visible={attachments.over} />
       </SelectionProvider>
     </section>

@@ -206,14 +206,16 @@ export interface PopoverProps {
   scope?: 'pane' | 'window';
   /** GlideSelect (B1): one highlight glides between `.kb-menu__item` rows. Default: on for menus. */
   glide?: boolean;
+  followThrough?: boolean;
 }
 
 /** Floating panel anchored to a trigger. Stays inside the trigger's column; Escape/outside click close it. */
 export function Popover({
   open, onClose, anchorRef, placement = 'bottom-start', label, role = 'dialog', children, className,
-  autoFocus = true, onKeyDown, width, scope = 'pane', glide = role === 'menu',
+  autoFocus = true, onKeyDown, width, scope = 'pane', glide = role === 'menu', followThrough = false,
 }: PopoverProps) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const level = useMotionLevel();
   const { glideRef, handlers: glideHandlers, reset: resetGlide } = useGlide(glide, open);
   if (!open) resetGlide();
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -230,6 +232,7 @@ export function Popover({
       // offsetWidth/Height: the laid-out size, not the size mid entry animation (scale).
       const size = { width: pop.offsetWidth || pop.getBoundingClientRect().width, height: pop.offsetHeight || pop.getBoundingClientRect().height };
       const next = placePopup(a, size, placement, boundaryFor(anchor, { placement, scope }));
+      pop.style.transformOrigin = `${Math.max(0, Math.min(size.width, a.left + a.width / 2 - next.left))}px ${a.top >= next.top + size.height / 2 ? 'bottom' : 'top'}`;
       setPos((now) => (now && now.left === next.left && now.top === next.top ? now : next));
     };
     place();
@@ -282,9 +285,10 @@ export function Popover({
           style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, width }}
           onKeyDown={handleKey}
           {...glideHandlers}
-          initial={{ opacity: 0, y: -4, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1, transition: SPRING_SMALL }}
-          exit={{ opacity: 0, transition: EXIT }}
+          initial={level === 'off' ? false : { opacity: 0, scale: level === 'full' ? (followThrough ? 0.92 : 0.98) : 1 }}
+          animate={{ opacity: 1, scale: 1, pointerEvents: 'auto', transition: level === 'off' ? { duration: 0 } : followThrough && level === 'full'
+            ? { type: 'spring', visualDuration: 0.24, bounce: 0.22 } : SPRING_SMALL }}
+          exit={{ opacity: 0, pointerEvents: 'none', transition: level === 'off' ? { duration: 0 } : EXIT }}
         >
           {glide && <span ref={glideRef} className="kb-glide" aria-hidden="true" />}
           {children}
@@ -314,10 +318,11 @@ export interface MenuProps {
   items: ReadonlyArray<MenuItem>;
   placement?: Placement;
   className?: string;
+  followThrough?: boolean;
 }
 
 /** Action menu (role="menu"): arrows move, Enter/Space choose, Escape closes and returns focus. */
-export function Menu({ open, onClose, anchorRef, label, items, placement = 'bottom-end', className }: MenuProps) {
+export function Menu({ open, onClose, anchorRef, label, items, placement = 'bottom-end', className, followThrough }: MenuProps) {
   const id = useId();
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -336,7 +341,7 @@ export function Menu({ open, onClose, anchorRef, label, items, placement = 'bott
   };
 
   return (
-    <Popover open={open} onClose={onClose} anchorRef={anchorRef} label={label} role="menu" placement={placement}
+    <Popover open={open} onClose={onClose} anchorRef={anchorRef} label={label} role="menu" placement={placement} followThrough={followThrough}
       className={className ? `kb-menu ${className}` : 'kb-menu'} onKeyDown={move}>
       <div ref={listRef} className="kb-menu__list">
         {items.map((item) => (

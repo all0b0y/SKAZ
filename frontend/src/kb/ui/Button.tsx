@@ -1,6 +1,8 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
 import { Tooltip } from './Tooltip';
+import { m } from 'motion/react';
+import { useMotionLevel } from './motionLevel';
 import { StippleRing } from '../fx/stipple/StippleWork';
 import type { Placement } from './geometry';
 
@@ -13,6 +15,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   icon?: IconName;
   /** Feedback counter for the icon (see `Icon`'s `play`): each change plays its motion once. */
   iconPlay?: number;
+  feedback?: boolean;
   /** Shown instead of the label's icon while a real request runs; the button stays the same size. */
   busy?: boolean;
   children?: ReactNode;
@@ -24,14 +27,14 @@ function cx(...parts: Array<string | false | null | undefined>): string {
 
 /** Text button. `fill` = primary (graphite fill), `outline`, `quiet` (text only), `danger` (outlined red). */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = 'outline', size = 'md', icon, iconPlay, busy = false, className, children, type = 'button', ...rest },
+  { variant = 'outline', size = 'md', icon, iconPlay, busy = false, feedback = false, className, children, type = 'button', ...rest },
   ref,
 ) {
   return (
     <button
       ref={ref}
       type={type}
-      className={cx('kb-btn', `kb-btn--${variant}`, `kb-btn--${size}`, className)}
+      className={cx('kb-btn', `kb-btn--${variant}`, `kb-btn--${size}`, feedback && 'kb-action-feedback', className)}
       aria-busy={busy || undefined}
       {...rest}
     >
@@ -62,6 +65,9 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
   ref,
 ) {
   const px = size === 'sm' ? 14 : size === 'lg' ? 18 : 16;
+  const full = useMotionLevel() === 'full';
+  const expanded = rest['aria-expanded'] === true;
+  const menuIcon = icon === 'more' || icon === 'plus' && rest['aria-haspopup'] === 'menu';
   const button = (
     <button
       ref={ref}
@@ -70,7 +76,13 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       className={cx('kb-iconbtn', `kb-iconbtn--${size}`, active && 'is-active', className)}
       {...rest}
     >
-      <Icon name={icon} size={px} play={iconPlay} />
+      {menuIcon || icon === 'share' ? (
+        <m.span style={{ display: 'inline-flex' }} animate={{ rotate: full && expanded ? (icon === 'plus' ? 45 : 90) : 0 }}
+          whileTap={full ? { scaleX: 1.08, scaleY: 0.91 } : undefined}
+          transition={{ type: 'spring', stiffness: 500, damping: 30 }}>
+          <Icon name={icon} size={px} play={iconPlay} />
+        </m.span>
+      ) : <Icon name={icon} size={px} play={iconPlay} />}
       {badge}
     </button>
   );

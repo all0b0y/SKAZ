@@ -68,7 +68,8 @@ async function activityHost({ refusedSend, initialPermission, beforeSwitch, deci
   } });
   const side = within(screen.getByRole('region', { name: 'Chats' }));
   await user.click(await side.findByRole('button', { name: lecture }));
-  expect(within(tab(lecture)).getByLabelText(initialPermission ? 'Waiting for you' : 'Working')).toBeVisible();
+  const heading = screen.getByRole('heading', { name: lecture });
+  expect(within(heading).getByLabelText(initialPermission ? 'Waiting for you' : 'Working')).toBeVisible();
   expect(details.length).toBeGreaterThan(0);
   const stopped = details.at(-1)!;
   await beforeSwitch?.(user);
@@ -289,8 +290,10 @@ it.each([
   await user.click(side.getByRole('button', { name: paper }));
   await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Draft for paper');
   await user.click(screen.getByRole('button', { name: 'Close tab: Transformer paper review' }));
-  await user.click(screen.getByRole('button', { name: /Close tab: What did I miss/ }));
-  expect(screen.getByRole('button', { name: 'Reopen last chat' })).toHaveFocus();
+  const chatView = within(screen.getByRole('region', { name: 'Chat' }));
+  await user.click(chatView.getByRole('button', { name: /More for “What did I miss/ }));
+  await user.click(screen.getByRole('menuitem', { name: 'Close tab' }));
+  expect(screen.getByRole('heading', { name: 'New chat' })).toBeVisible();
   await user.click(side.getByRole('button', { name: /All chats/ }));
   const all = within(screen.getByRole('region', { name: 'All chats' }));
   await user.click(await all.findByRole('button', { name: new RegExp('More for “' + deleted) }));
@@ -299,8 +302,7 @@ it.each([
   await screen.findByText('Chat deleted.');
   await user.click(all.getByRole('button', { name: 'Back to the chat' }));
   expect(services.chats.getState().closedTabHistory).toEqual([retained]);
-  const reopen = screen.getByRole('button', { name: 'Reopen last chat' });
-  await user.click(reopen);
-  expect(tab(title)).toHaveFocus();
+  await user.click(side.getByRole('button', { name: title }));
+  expect(screen.getByRole('heading', { name: title })).toBeVisible();
   expect(screen.getByRole('textbox', { name: 'Message' })).toHaveTextContent(draft);
 });

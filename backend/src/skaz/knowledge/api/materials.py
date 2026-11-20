@@ -116,6 +116,7 @@ def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, fold
             width=detail.origin.get("width"),
             height=detail.origin.get("height"),
             sha256=detail.origin.get("sha256"),
+            display_format=detail.origin.get("display_format"),
         )
     fragments: list[KbFragment]
     if corrections is None:  # no wiki service (tests of the index alone): the recognised text as is

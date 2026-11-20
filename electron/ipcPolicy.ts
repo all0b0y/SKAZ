@@ -54,6 +54,7 @@ const ROUTES: readonly Route[] = [
   { method: 'DELETE', pattern: /^\/kb\/folders\/[^/]+$/ },
   { method: 'GET', pattern: /^\/kb\/materials$/ },
   { method: 'GET', pattern: /^\/kb\/materials\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/materials\/[^/]+\/display$/ },
   { method: 'GET', pattern: /^\/kb\/notifications$/ },
   // Package 2, U2 (chat, composer, ⌘K, notifications, settings, first launch). Ids are one segment;
   // engines and key providers are fixed lists. No route here takes a file path except the composer's

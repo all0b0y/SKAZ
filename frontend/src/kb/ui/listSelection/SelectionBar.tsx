@@ -180,7 +180,7 @@ export function SelectionBar({ count, selection, entry = true, sets = [], hintKe
   );
   return <>
     <SelectionFeedback feedback={selection?.feedback ?? null} />
-    {header ? (header.host ? createPortal(controls, header.host) : null) : controls}
+    {(entry || active) && (header ? (header.host ? createPortal(controls, header.host) : null) : controls)}
   </>;
 }
 

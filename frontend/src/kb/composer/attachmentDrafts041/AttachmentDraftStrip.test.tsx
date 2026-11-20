@@ -31,8 +31,8 @@ describe('attachment draft strip', () => {
       attachment('broken', { state: 'failed', materialId: null, error: 'The file is empty.' }),
     ]} />);
     const strip = within(screen.getByRole('list', { name: 'Draft attachments' }));
-    expect(strip.getByRole('button', { name: 'View broken.docx' })).toBeVisible();
-    expect(strip.queryByRole('button', { name: 'View second.docx' })).toBeNull();
+    expect(strip.getByTitle('broken.docx')).toBeVisible();
+    expect(strip.queryByTitle('second.docx')).toBeNull();
     expect(screen.getByRole('alert')).toHaveTextContent('broken.docx: The file is empty. Remove or replace before sending.');
 
     fireEvent.click(strip.getByRole('button', { name: 'Show all 4 attachments' }));
@@ -96,7 +96,7 @@ describe('attachment draft strip', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove third.docx' }));
     expect(trigger).not.toBeInTheDocument();
     fireEvent.keyDown(dialog, { key: 'Escape' });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'View first.docx' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Remove first.docx' })).toHaveFocus());
   });
 
   it('creates a local thumbnail URL and releases it when its attachment leaves the strip', async () => {

@@ -111,6 +111,7 @@ export function PanelFrameButtons({ closeLabel = 'Close document', expandable = 
       {children}
       {expandable && (
         <IconButton
+          className="kb-panel-expand"
           icon={expanded ? 'collapse' : 'expand'}
           label={expanded ? 'Back to side panel' : 'Expand to the centre'}
           aria-pressed={expanded}

@@ -17,9 +17,8 @@ export interface AttachmentDraftStripProps {
   readOnly?: boolean;
 }
 
-function AttachmentThumbnail({ item, large = false }: { item: DraftAttachment; large?: boolean }) {
+function AttachmentThumbnail({ item }: { item: DraftAttachment }) {
   const blob = item.state === 'ready' && item.thumbnail?.type.startsWith('image/') ? item.thumbnail : undefined;
-  const previewUnavailable = item.state === 'ready' && item.previewUnavailable;
   const [url, setUrl] = useState<{ blob: Blob; src: string } | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => {
@@ -31,14 +30,8 @@ function AttachmentThumbnail({ item, large = false }: { item: DraftAttachment; l
 
   const src = url && url.blob === blob && failed !== url.src ? url.src : null;
   if (src) return (
-    <img className={large ? 'kb-attachment041-preview' : 'kb-attachment041-thumb'} src={src}
-      alt={large ? `Preview of ${item.name}` : ''} onError={() => setFailed(src)} />
+    <img className="kb-attachment041-thumb" src={src} alt="" onError={() => setFailed(src)} />
   );
-  if (large) {
-    if (!blob && !previewUnavailable) return null;
-    const unavailable = previewUnavailable || failed === url?.src || typeof URL.createObjectURL !== 'function';
-    return <p className="kb-attachment041-meta">{unavailable ? 'Preview unavailable.' : 'Loading preview…'}</p>;
-  }
   return <Icon name={item.source === 'link' ? 'link' : item.source === 'text' ? 'text' : 'materials'} size={16} />;
 }
 
@@ -51,15 +44,14 @@ function attachmentStatus(item: DraftAttachment): string | null {
 
 /** Key the strip by the active draft ID so an open detail follows the originating chat only. */
 export function AttachmentDraftStrip({ items, onRemove, onToggleWiki, renderName, focusEditor, onReplace, onResolveVideo, readOnly }: AttachmentDraftStripProps) {
-  const [view, setView] = useState<{ key?: string } | null>(null);
+  const [overflowOpen, setOverflowOpen] = useState(false);
   const [visible, setVisible] = useState(2);
   const rowRef = useRef<HTMLUListElement | null>(null);
   const detailsRef = useRef<HTMLUListElement | null>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
   const removedKey = useRef<string | null>(null);
   const noticeId = useId();
-  const selected = items.find((item) => item.key === view?.key);
-  const modalOpen = view !== null && items.length > 0;
+  const modalOpen = overflowOpen && items.length > 0;
   const video = items.find((item) => item.state === 'confirming');
   const videoReplacement = items.find((item) => item.state === 'confirming' && item.replaceKey)?.key;
 
@@ -94,18 +86,18 @@ export function AttachmentDraftStrip({ items, onRemove, onToggleWiki, renderName
     else focusEditor?.();
   }, [modalOpen, focusEditor]);
 
-  useEffect(() => { if (!items.length) setView(null); }, [items.length]);
+  useEffect(() => { if (!items.length) setOverflowOpen(false); }, [items.length]);
   // A video picked from the details dialog needs its next action in the composer.
-  useEffect(() => { if (videoReplacement) setView(null); }, [videoReplacement]);
+  useEffect(() => { if (videoReplacement) setOverflowOpen(false); }, [videoReplacement]);
   if (!items.length) return null;
 
   const ordered = [...items.filter((item) => item.state === 'failed'), ...items.filter((item) => item.state !== 'failed')];
   const hiddenCount = Math.max(0, items.length - visible);
   const blocker = attachmentSendBlocker(items);
   const failed = items.some((item) => item.state === 'failed');
-  const openView = (button: HTMLButtonElement, key?: string) => {
+  const openView = (button: HTMLButtonElement) => {
     opener.current = button;
-    setView({ key });
+    setOverflowOpen(true);
   };
   const removeButton = (item: DraftAttachment) => (
     <button type="button" className="kb-attachment041-remove" aria-label={`Remove ${item.name}`} disabled={readOnly} onClick={() => {
@@ -123,15 +115,20 @@ export function AttachmentDraftStrip({ items, onRemove, onToggleWiki, renderName
         return (
           <li key={item.key} className="kb-attachment041-chip" data-state={item.state}>
             {renderName?.(item) ?? (
-              <button type="button" className="kb-attachment041-main" aria-haspopup="dialog"
-                aria-label={`View ${item.name}`} title={item.name} onClick={(event) => openView(event.currentTarget, item.key)}>
+              <span className="kb-attachment041-main" title={item.name}>
                 <AttachmentThumbnail item={item} />
                 <span className="kb-attachment041-text">
                   <span>{item.name}</span>
                   {status && <small className="kb-attachment041-meta">{status}</small>}
                 </span>
-              </button>
+              </span>
             )}
+            {!item.text && canAddAttachmentToWiki(item) && <label className="kb-attachment__wiki">
+              <input type="checkbox" aria-label={`In wiki: ${item.name}`} checked={item.inWiki} disabled={readOnly}
+                onChange={() => onToggleWiki(item.key)} />In wiki</label>}
+            {item.state === 'failed' && onReplace && item.source === 'file' &&
+              <Button size="sm" disabled={readOnly || items.some((entry) => entry.replaceKey === item.key)}
+                onClick={() => onReplace(item.key)} aria-label={`Replace ${item.name}`}>Replace file</Button>}
             {removeButton(item)}
           </li>
         );
@@ -169,15 +166,15 @@ export function AttachmentDraftStrip({ items, onRemove, onToggleWiki, renderName
     {blocker && !video && (
       <p className="kb-attachment041-blocker" role={failed ? 'alert' : 'status'} title={blocker}>{blocker}</p>
     )}
-    <Modal open={modalOpen} onClose={() => setView(null)} title={selected?.name ?? 'Attachments'} className="kb-attachment041-dialog">
+    <Modal open={modalOpen} onClose={() => setOverflowOpen(false)} title="Attachments" className="kb-attachment041-dialog">
       <ul ref={detailsRef} className="kb-attachment041-details" aria-label="Attachments" tabIndex={-1}>
-        {(selected ? [selected] : items).map((item) => {
+        {items.map((item) => {
           const status = attachmentStatus(item);
           return (
             <li key={item.key} className="kb-attachment041-detail" data-state={item.state}>
-              {!selected && <AttachmentThumbnail item={item} />}
+              <AttachmentThumbnail item={item} />
               <div className="kb-attachment041-detail-text">
-                {!selected && (renderName?.(item) ?? <strong>{item.name}</strong>)}
+                {renderName?.(item) ?? <strong>{item.name}</strong>}
                 {status && <p className="kb-attachment041-meta">{status}</p>}
                 {canAddAttachmentToWiki(item) && (
                   <label className="kb-attachment__wiki">
@@ -195,11 +192,6 @@ export function AttachmentDraftStrip({ items, onRemove, onToggleWiki, renderName
           );
         })}
       </ul>
-      {selected && <AttachmentThumbnail key={selected.key} item={selected} large />}
-      {selected && items.length > 1 && <Button size="sm" variant="outline" onClick={() => {
-        setView({});
-        detailsRef.current?.focus({ preventScroll: true });
-      }}>All attachments</Button>}
     </Modal>
   </>;
 }

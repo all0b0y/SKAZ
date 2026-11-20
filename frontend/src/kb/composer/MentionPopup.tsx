@@ -59,7 +59,7 @@ export function useMentions(query: string | null): { options: MentionOption[]; l
   useEffect(() => {
     if (query === null) { setState({ options: [], loading: false, error: null }); return undefined; }
     let live = true;
-    setState((s) => ({ ...s, loading: true }));
+    setState({ options: [], loading: true, error: null });
     const timer = window.setTimeout(() => {
       client.call('GET /kb/mentions', { query: { q: query, limit: 8 } }).then(
         (res) => { if (live) setState({ options: mentionOptions(res, lookup.current), loading: false, error: null }); },
@@ -71,13 +71,14 @@ export function useMentions(query: string | null): { options: MentionOption[]; l
   return state;
 }
 
-export function MentionPopup({ id, options, active, loading, error, onPick, onHover }: {
+export function MentionPopup({ id, options, active, loading, error, onPick, onHover, onFiles }: {
   id: string;
   options: MentionOption[];
   active: number;
   loading: boolean;
   error: string | null;
   onPick: (option: MentionOption) => void;
+  onFiles?: () => void;
   onHover: (index: number) => void;
 }) {
   // Bug 8 (2026-10-26): ↑/↓ move the highlight; the highlighted row stays on screen (as in ⌘K, L5).
@@ -88,11 +89,17 @@ export function MentionPopup({ id, options, active, loading, error, onPick, onHo
   return (
     <div className="kb-mentions" data-testid="mention-popup">
       {error && <p className="kb-mentions__note" role="status">{error}</p>}
-      {!error && options.length === 0 && (
+      {!error && !onFiles && options.length === 0 && (
         <p className="kb-mentions__note" role="status">{loading ? 'Looking…' : 'Nothing found. Keep typing or press Escape.'}</p>
       )}
       <ul id={id} role="listbox" aria-label="References" className="kb-mentions__list">
-        {options.map((o, i) => {
+        {onFiles && <li id={`${id}-0`} role="option" aria-selected={active === 0}
+          className={`kb-mentions__item${active === 0 ? ' is-active' : ''}`}
+          onMouseDown={(event) => event.preventDefault()} onClick={onFiles} onMouseEnter={() => onHover(0)}>
+          <Icon name="upload" size={14} />Add files…
+        </li>}
+        {options.map((o, position) => {
+          const i = position + (onFiles ? 1 : 0);
           const head = o.group !== lastGroup ? o.group : null;
           lastGroup = o.group;
           return (

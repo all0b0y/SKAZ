@@ -1,18 +1,21 @@
 """A saved scan stays available for explicit visual turns through the default routes."""
 
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
+from unittest.mock import Mock
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from PIL import Image
 
 from skaz.knowledge.library.library import INBOX_ID
+from skaz.knowledge.sources import document_card
 from skaz.runtime import Runtime
 from tests.knowledge.chat_support import connect
 from tests.knowledge.ingest_support import settle
 from tests.knowledge.pdf_fixtures import glyph_line, line, make_pdf
-from tests.knowledge.test_source_visual import make_png
 from tests.knowledge.test_visual_transport041_wiring import _setup_routing_matrix
 
 SCAN_PAGE = b"q 612 0 0 792 0 0 cm /Im1 Do Q\n"
@@ -27,7 +30,7 @@ async def test_saved_scan_and_duplicate_can_send_one_selected_page(
     await connect(kb_client, runtime)
     engines = _setup_routing_matrix(runtime)
     path = tmp_path / "scan.pdf"
-    data = make_pdf([SCAN_PAGE, SCAN_PAGE], image=True)
+    data = make_pdf([SCAN_PAGE, SCAN_PAGE.replace(b"612 ", b"550 ")], image=True)
     path.write_bytes(data)
     fingerprint = sha256(data).hexdigest()
     intake = {
@@ -49,13 +52,8 @@ async def test_saved_scan_and_duplicate_can_send_one_selected_page(
     assert duplicate.json()["material"]["id"] == material_id
     assert duplicate.json()["saved_pdf_page_count"] == 2
 
-    rendered: list[int] = []
-
-    def render(_page_pdf: bytes, page: int) -> bytes:
-        rendered.append(page)
-        return make_png()
-
-    monkeypatch.setattr(runtime.kb_sources.visual, "page_renderer", render)
+    render = Mock(wraps=document_card.card_page_png)
+    monkeypatch.setattr(document_card, "card_page_png", render)
     chat = await kb_client.post("/kb/chats", json={"engine": "claude_code", "model": "sonnet"})
     assert chat.status_code == 201, chat.text
     chat_id = chat.json()["id"]
@@ -72,21 +70,29 @@ async def test_saved_scan_and_duplicate_can_send_one_selected_page(
     assert refused.status_code == 422 and refused.json()["code"] == "VISUAL_UNSUPPORTED"
     text_only = await kb_client.post(route, json={**body, "text_only": True})
     assert text_only.status_code == 422 and text_only.json()["code"] == "VISUAL_TEXT_ONLY_UNAVAILABLE"
-    assert rendered == [] and engines["claude_code"].turns == []
+    render.assert_not_called()
+    assert engines["claude_code"].turns == []
 
     body["text"] = "Describe page 2"
     preflight = await kb_client.post("/kb/chats/visual-preflight", json={"chat_id": chat_id, **body})
     assert preflight.status_code == 200 and preflight.json()["supported"], preflight.text
     assert not preflight.json()["text_only_available"]
-    assert rendered == [] and engines["claude_code"].turns == []
+    render.assert_not_called()
+    assert engines["claude_code"].turns == []
     sent = await kb_client.post(route, json=body)
     assert sent.status_code == 202, sent.text
     await settle(lambda: runtime.kb_chats.state_of(chat_id) == "idle")
     (turn,) = engines["claude_code"].turns
     (visual,) = turn.visuals
-    assert rendered == [2]
+    render.assert_called_once()
+    assert render.call_args.args[1] == 2
     assert visual.locator.material_id == material_id and visual.locator.page == 2
-    assert visual.approved_bytes == make_png()
+    with Image.open(BytesIO(visual.approved_bytes)) as image:
+        assert image.format == "PNG"
+        # Both pages contain a grey scan. Only page 2 has a white right margin.
+        grey = image.getpixel((image.width // 2, image.height // 2))
+        assert all(120 <= channel <= 136 for channel in grey)
+        assert image.getpixel((image.width - 3, image.height // 2)) == (255, 255, 255)
     jobs = await kb_client.get("/kb/jobs", params={"material_id": material_id})
     assert jobs.status_code == 200 and jobs.json() == []
 
@@ -104,12 +110,13 @@ async def test_scan_duplicate_requires_an_intact_saved_original(
     added = await kb_client.post("/kb/materials/file", json=body)
     assert added.status_code == 201, added.text
     material_id = added.json()["material"]["id"]
-    original, = runtime.kb.require().root.rglob("original.pdf")
+    original, = runtime.kb.require().root.rglob(document_card.CARD_NAME)
     if changed_original == "missing":
         original.unlink()
     else:
-        modified = data.replace(b"612 0 0 792", b"611 0 0 792")
-        assert modified != data and len(modified) == len(data)
+        saved_card = original.read_bytes()
+        modified = saved_card.replace(b'data-width="612', b'data-width="611', 1)
+        assert modified != saved_card and len(modified) == len(saved_card)
         original.write_bytes(modified)
     duplicate = await kb_client.post("/kb/materials/file", json=body)
     assert duplicate.status_code == 200, duplicate.text

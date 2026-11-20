@@ -176,7 +176,7 @@ describe('AnimatedList: the first load of the side list', () => {
     const mats = await screen.findByRole('region', { name: 'Materials' });
     await within(mats).findByRole('button', { name: /^All materials/ });
     await waitFor(() => expect(entrances().length).toBeGreaterThan(0));
-    expect(entrances()[0]!.el).toHaveTextContent('Add material');
+    expect(entrances()[0]!.el).toHaveTextContent('Recent');
   });
 
   it('the wiki list, when the app opens on it, enters the same way; folded sections take no part', async () => {

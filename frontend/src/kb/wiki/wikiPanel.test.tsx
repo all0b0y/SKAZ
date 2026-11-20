@@ -110,7 +110,7 @@ describe('Selecting several wiki pages (0.3.1 F4)', () => {
     expect(within(side).getByRole('button', { name: 'Index' }).closest('[data-sel-id]')).toBeNull();
   });
 
-  it('Choose focuses the visible Recent copy, never its inert kind-group duplicate', async () => {
+  it('keyboard selection uses the visible Recent copy when its kind group is folded', async () => {
     const user = userEvent.setup();
     const { fake } = await wikiPanel();
     const side = screen.getByRole('region', { name: 'Wiki' });
@@ -121,8 +121,8 @@ describe('Selecting several wiki pages (0.3.1 F4)', () => {
     await user.click(within(side).getByRole('button', { name: /^Concepts/ }));
     expect(grid.closest('[inert]')).not.toBeNull();
     const visibleCopy = within(recent).getByRole('button', { name: concept.title });
-    await user.click(within(side).getByRole('button', { name: 'Select items' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Choose…' }));
+    expect(within(side).queryByRole('button', { name: 'Select items' })).toBeNull();
+    visibleCopy.focus();
     expect(visibleCopy).toHaveFocus();
     await user.keyboard(' ');
     expect(within(side).getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();

@@ -76,9 +76,9 @@ async function attachScan(user: ReturnType<typeof userEvent.setup>, source: 'pic
       dataTransfer: { types: ['Files'], files: [new File([header], fileName)] },
     });
   } else {
-    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
-    const menu = await screen.findByRole('menu', { name: 'Add to the question' });
-    await user.click(within(menu).getByRole('menuitem', { name: 'File…' }));
+    await user.click(screen.getByRole('button', { name: 'Add files or reference' }));
+    const menu = await screen.findByRole('listbox', { name: 'References' });
+    await user.click(within(menu).getByRole('option', { name: 'Add files…' }));
   }
 }
 
@@ -102,11 +102,9 @@ describe('scans on the production chat attachment host', () => {
     expect(JSON.parse(String(host.fetchFixture.mock.calls[0]![1]!.body))).toMatchObject({
       path: filePath, selection_source: source, expected_size: header.byteLength, to_wiki: false,
     });
-    const attachment = screen.getByRole('button', { name: 'View scan.pdf' });
-    await user.click(attachment);
-    const details = screen.getByRole('dialog', { name: fileName });
-    expect(within(details).queryByRole('checkbox', { name: 'In wiki' })).toBeNull();
-    await user.keyboard('{Escape}');
+    const attachment = screen.getByTitle(fileName).closest('li')!;
+    expect(within(attachment).queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByRole('dialog', { name: fileName })).toBeNull();
     expect(await screen.findByText('Specify PDF pages')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Continue with text only' })).toBeNull();
     await user.click(send());

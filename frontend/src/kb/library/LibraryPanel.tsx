@@ -140,7 +140,6 @@ function Overview() {
   const contentError = useLibrary((s) => s.contentError);
   const { library: store } = useServices();
   const [creating, setCreating] = useState(false);
-  const setAddOpen = useUi((s) => s.setAddMaterialOpen);
   const showCenter = useUi((s) => s.showCenter);
   const allOpen = useUi((s) => s.center === 'materials');
   const host = useRef<HTMLDivElement | null>(null);
@@ -158,11 +157,6 @@ function Overview() {
 
   return (
     <div className="kb-side__scroll" ref={host}>
-      <button type="button" className="kb-row kb-row--action" aria-haspopup="dialog" data-entrance="" onClick={() => setAddOpen(true)}>
-        <Icon name="plus" size={16} className="kb-row__icon" />
-        <span className="kb-row__text">Add material</span>
-      </button>
-
       {contentLoad === 'error' && (
         <div className="kb-side__pad">
           <Banner tone="error" title="Couldn’t load materials."

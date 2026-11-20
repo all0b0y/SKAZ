@@ -487,13 +487,12 @@ export function createChatsStore(client: KbClient): ChatsStore {
         const nextOpenIds = s.openTabIds.filter((x) => x !== chatId);
         const nextActiveId = wasActive ? adj.nextActiveId : s.currentId;
         const nextHistory = [...s.closedTabHistory.filter((x) => x !== chatId), chatId];
-        const nextAllClosed = wasActive ? nextOpenIds.length === 0 : s.allTabsClosed;
         set({
           openTabIds: nextOpenIds,
           currentId: nextActiveId,
           closedTabHistory: nextHistory,
           lastClosedTabId: chatId,
-          allTabsClosed: nextAllClosed,
+          allTabsClosed: false,
         });
         if (wasActive && nextActiveId && !get().chats[nextActiveId]) void get().load(nextActiveId);
         return {

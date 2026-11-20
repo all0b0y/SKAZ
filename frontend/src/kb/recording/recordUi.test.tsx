@@ -48,14 +48,14 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     expect(within(menu).queryByRole('combobox', { name: 'Translate into' })).not.toBeInTheDocument();
   });
 
-  it('Record turns into the red-timer capsule, opens the live panel and a chat about the recording', async () => {
-    const { user, bar, record, fake, eng, services } = await start();
+  it('Record turns into the red-timer capsule, opens the live panel without creating a chat', async () => {
+    const { user, bar, record, fake, eng } = await start();
     const asked = vi.fn();
     window.addEventListener('kb:open-chat', asked as EventListener);
     await user.click(record);
     const capsule = await within(bar).findByRole('button', { name: /^Recording 00:00, folder Physics/ });
     expect(capsule).toHaveClass('kb-cap--rec');
-    expect(fake.calls.find((c) => c.method === 'POST' && c.path === '/kb/chats')?.body).toEqual({ recording_material_id: services.recording.getState().materialId });
+    expect(fake.calls.find((c) => c.method === 'POST' && c.path === '/kb/chats')).toBeUndefined();
     const live = await screen.findByRole('complementary', { name: 'Live recording' });
     expect(within(live).getByRole('heading', { level: 2, name: 'Recording 15 Oct, 09:00' })).toBeInTheDocument();
     // Bars: still in silence, the real level when there is sound — never animated by CSS.

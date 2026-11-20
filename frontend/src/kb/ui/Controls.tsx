@@ -98,8 +98,9 @@ export function Segmented<T extends string>({ value, options, onChange, label, d
     const dy = fromBtn.offsetTop - toBtn.offsetTop;
     el.getAnimations?.().forEach((a) => a.cancel());
     el.animate([
-      { transform: `translate(${dx}px, ${dy}px)`, width: `${fromW}px` },
-      { transform: 'translate(0px, 0px)', width: `${toW}px` },
+      { transform: `translate(${dx}px, ${dy}px) scale(${fromW / toW}, 1)`, transformOrigin: 'left center' },
+      { transform: `translate(${dx * 0.35}px, ${dy * 0.35}px) scale(1.06, .93)`, transformOrigin: 'left center', offset: 0.55 },
+      { transform: 'translate(0px, 0px) scale(1, 1)', transformOrigin: 'left center' },
     ], { duration: SEG_SPRING.duration, easing: SEG_SPRING.easing });
   }, [value, level]);
   const enabled = options.filter((o) => !o.disabled && !disabled);
@@ -127,7 +128,7 @@ export function Segmented<T extends string>({ value, options, onChange, label, d
             role="radio"
             aria-checked={selected}
             aria-label={o.name}
-            tabIndex={selected ? 0 : -1}
+            tabIndex={(enabled.some((option) => option.value === value) ? selected : o.value === enabled[0]?.value) ? 0 : -1}
             disabled={disabled || o.disabled}
             className={`kb-seg__opt${selected ? ' is-on' : ''}`}
             onClick={() => onChange(o.value)}

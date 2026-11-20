@@ -54,6 +54,7 @@ export function useReaderCloseFocus(appRef: RefObject<HTMLElement | null>, right
     const chat = app?.querySelector<HTMLElement>('[data-pane="center"][aria-label="Chat"]');
     if (chats.getState().currentId === chatId && chat?.contains(trigger) && focusVisible(trigger)) return;
     if (focusVisible(chat?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'), true)) return;
+    if (focusVisible(chat?.querySelector<HTMLElement>('.kb-head__title[tabindex]'), true)) return;
     if (focusVisible(chat?.querySelector<HTMLElement>('[role="log"]'), true)) return;
     if (focusVisible(chat, true)) return;
     focusVisible(app?.querySelector<HTMLElement>('[data-pane="rail"] [aria-current="page"]'), true);

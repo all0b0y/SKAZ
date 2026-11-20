@@ -69,6 +69,10 @@ function WikiSearch() {
     return () => { live = false; window.clearTimeout(timer); };
   }, [client, q]);
 
+  useEffect(() => {
+    document.getElementById(`${listId}-${active}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [active, hits, listId]);
+
   const open = (hit: Hit) => openDocument({ type: 'page', id: hit.pageId, block_id: hit.blockId });
   const list = hits ?? [];
   return (

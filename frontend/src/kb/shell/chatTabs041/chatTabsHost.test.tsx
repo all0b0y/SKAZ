@@ -118,17 +118,14 @@ describe('Chat tabs mounted in the production Shell & ChatView', () => {
     await user.click(screen.getByRole('button', { name: 'Hide side panel' }));
     expect(screen.queryByRole('region', { name: 'Chats' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Close tab: Why is there a logarithm in the loss?' }));
-    expect(screen.getByTestId('chat-tab-strip')).toHaveTextContent('No open chats');
-    expect(screen.getByRole('region', { name: 'No open chats' })).toBeInTheDocument();
-    const reopen = screen.getByRole('button', { name: 'Reopen last chat' });
-    expect(reopen).toHaveFocus();
-    expect(screen.getAllByTestId('composer')).toHaveLength(1);
-
-    // Reopen last chat even with hidden sidebar -> c1 returns without deleting or duplicating.
-    await user.click(reopen);
-    expect(services.chats.getState().currentId).toBe('c1');
-    expect(within(screen.getByRole('tablist', { name: 'Open chats' })).getAllByRole('tab')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: /More for “Why is there a logarithm/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Close tab' }));
+    expect(screen.getByRole('heading', { name: 'New chat' })).toBeVisible();
+    const editor = screen.getByRole('textbox', { name: 'Message' });
+    await user.type(editor, 'Fresh draft');
+    expect(editor).toHaveTextContent('Fresh draft');
+    expect(services.chats.getState().currentId).toBeNull();
+    expect(services.chats.getState().lastClosedTabId).toBe('c1');
   });
 
   it('preserves distinct per-chat reading positions across A->B->A, hidden pane, deletion fallback, and late data', async () => {

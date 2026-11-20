@@ -21,11 +21,8 @@ export const BACKDROP_WORK_ALPHA = 0.06;
 /** Noise frequency per css px. */
 export const BACKDROP_NOISE_SCALE = 0.011;
 
-/**
- * The message column as chat.css lays it out: `.kb-chat__messages` has 22 px side padding and the
- * answer's parts are at most 760 px wide (`.kb-msg--assistant > *`), left-aligned — not centred.
- */
-export const CHAT_COLUMN = { padX: 22, max: 760 } as const;
+/** Centred 48 rem reading column with the same gutters as the conversation. */
+export const CHAT_COLUMN = { padX: 22, max: 768 } as const;
 /** column(): 0 from 24 px inside the column's edge, 1 by 56 px outside it (the mock's smoothstep). */
 export const COLUMN_EDGE = { inside: 24, outside: 56 } as const;
 /** Inside the column the level keeps a quarter («Keep text clear»). */
@@ -77,7 +74,7 @@ export interface ColumnBand { left: number; right: number }
 
 /** The message column of an area `w` css px wide. */
 export function columnBand(w: number): ColumnBand {
-  const left = Math.min(CHAT_COLUMN.padX, w / 2);
+  const left = Math.max((w - CHAT_COLUMN.max) / 2, Math.min(CHAT_COLUMN.padX, w / 2));
   return { left, right: left + Math.max(0, Math.min(CHAT_COLUMN.max, w - 2 * CHAT_COLUMN.padX)) };
 }
 

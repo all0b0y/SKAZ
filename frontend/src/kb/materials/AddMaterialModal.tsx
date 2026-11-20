@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { errorText } from '../api/client';
+import { FailureFeedback } from '../ui/FailureFeedback';
 import { Banner, Button, Icon, IconButton, Modal, Segmented, Switch, TextField } from '../ui';
 import { languageName } from '../material/MaterialView';
 import { useAgents, useLibrary, useServices, useSettings, useUi } from '../state/context';
@@ -228,15 +229,36 @@ export function AddMaterialModal() {
     const known: Record<string, { openId: string; text: string }> = { ...already };
     const left: AddItem[] = items.filter((i) => broken(i) || already[i.id]);
     let added = 0;
-    for (const item of sendable) {
+    const background = sendable.filter((item) => item.type === 'file' && /\.pdf$/i.test(item.name)
+      || item.type === 'link' && item.info?.kind === 'pdf');
+    const options = { folderId: target, language: language || null, translate, toWiki: wikiOn,
+      importSelection: bridge.nativeIntake?.importSelection };
+    if (background.length) {
+      ui.getState().showToast({ text: 'Importing PDF in the background…' });
+      void (async () => {
+        const results: string[] = [];
+        let problem = false;
+        let openId: string | undefined;
+        for (const item of background) {
+          try {
+            const made = await submitItem(client, item, options);
+            openId = made[0]?.materialId;
+            results.push(addedNote(made)?.text ?? `Added ${itemTitle(item)}`);
+            void library.getState().loadContent();
+          } catch (error) {
+            problem = true;
+            results.push(`${itemTitle(item)}: ${errorText(error)}`);
+          }
+        }
+        const id = openId;
+        ui.getState().showToast({ text: results.join(' · '), tone: problem ? 'problem' : 'done',
+          action: id && !problem && background.length === 1
+            ? { label: 'Open it', run: () => ui.getState().openDocument({ type: 'material', id }) } : undefined });
+      })();
+    }
+    for (const item of sendable.filter((item) => !background.includes(item))) {
       try {
-        const made = await submitItem(client, item, {
-          folderId: target,
-          language: language || null,
-          translate,
-          toWiki: wikiOn,
-          importSelection: bridge.nativeIntake?.importSelection,
-        });
+        const made = await submitItem(client, item, options);
         const note = addedNote(made);
         if (made.some((m) => !m.existing)) added += 1;
         if (note) {
@@ -264,7 +286,7 @@ export function AddMaterialModal() {
 
   return (
     <Modal open={open} onClose={() => setOpen(false)} title="Add material" className="kb-addmat" testId="add-material-dialog" pane="add-material"
-      initialFocusRef={pasteRef}>
+      initialFocusRef={pasteRef} followThrough>
       <div className="kb-modal__body kb-addmat__body">
         <div
           className={`kb-drop${dragging ? ' is-over' : ''}`}
@@ -286,6 +308,7 @@ export function AddMaterialModal() {
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addPaste(); } }} />
           <Button size="sm" variant="quiet" disabled={!paste.trim()} onClick={addPaste}>Add to list</Button>
         </div>
+        <p className="kb-muted">Added materials are saved in your library on this computer.</p>
         {items.length > 0 && (
           <ul className="kb-aq" aria-label="To add">
             {items.map((item) => (
@@ -395,16 +418,16 @@ export function AddMaterialModal() {
           data-testid={localVideo ? 'local-video-audio-only' : undefined}>
           {localVideo && LOCAL_VIDEO_AUDIO_ONLY_NOTICE}
         </p>
-        {Object.keys(errors).length > 0 && (noneAdded
+        {Object.keys(errors).length > 0 && <FailureFeedback attempt={errors}>{noneAdded
           ? <Banner tone="error" title="None of these were added.">Fix or remove them and try again.</Banner>
           : <Banner tone="error" title="Some materials weren’t added.">The others were. Fix or remove these and try again.</Banner>
-        )}
+        }</FailureFeedback>}
       </div>
       <div className="kb-modal__foot">
         <span className="kb-muted">{sendable.length ? `${sendable.length} ${sendable.length === 1 ? 'material' : 'materials'}` : ''}</span>
         <span className="kb-head__spacer" />
         <Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>
-        <Button variant="fill" busy={busy} disabled={!ready} aria-describedby={localVideo ? 'kb-add-video-notice' : undefined}
+        <Button feedback variant="fill" busy={busy} disabled={!ready} aria-describedby={localVideo ? 'kb-add-video-notice' : undefined}
           onClick={() => void submit()}>
           {creating && pendingNew ? `Create «${typed}» and add ${sendable.length}` : sendable.length > 1 ? `Add ${sendable.length}` : 'Add'}
         </Button>

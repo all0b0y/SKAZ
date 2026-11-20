@@ -66,8 +66,8 @@ async function openA(user: ReturnType<typeof userEvent.setup>) {
 }
 
 async function pickFiles(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
-  await user.click(within(await screen.findByRole('menu', { name: 'Add to the question' })).getByRole('menuitem', { name: 'File…' }));
+  await user.click(screen.getByRole('button', { name: 'Add files or reference' }));
+  await user.click(within(await screen.findByRole('listbox', { name: 'References' })).getByRole('option', { name: 'Add files…' }));
 }
 
 const videoPrompt = (name: string) => screen.findByRole('group', { name: `Import audio from ${name}` });
@@ -163,28 +163,24 @@ describe('attachments in the production chat', () => {
         fireEvent.drop(conversation(), { dataTransfer });
       }
     }
-    const imageButton = await within(row()).findByRole('button', { name: `View ${imageName}` });
-    expect(imageButton.closest('li')).toHaveAttribute('data-state', 'adding');
-    await user.click(imageButton);
-    const details = () => within(screen.getByRole('dialog', { name: imageName }));
-    expect.soft(details().queryByRole('checkbox', { name: 'In wiki' })).toBeNull();
+    const imageChip = (await within(row()).findByTitle(imageName)).closest('li')!;
+    expect(imageChip).toHaveAttribute('data-state', 'adding');
+    const details = () => within(imageChip);
+    expect.soft(details().queryByRole('checkbox', { name: /^In wiki/ })).toBeNull();
     await act(async () => finishImage.resolve());
-    await waitFor(() => expect(imageButton.closest('li')).toHaveAttribute('data-state', 'ready'));
+    await waitFor(() => expect(imageChip).toHaveAttribute('data-state', 'ready'));
     const savedImage = draft().getDraft('c1').attachments[0];
     expect(savedImage).toMatchObject({ materialId: imageId, thumbnail: { type: 'image/png' } });
     expect.soft(savedImage?.inWiki).toBe(hasText);
-    if (hasText) expect(details().getByRole('checkbox', { name: 'In wiki' })).toBeChecked();
-    else expect.soft(details().queryByRole('checkbox', { name: 'In wiki' })).toBeNull();
-    await user.keyboard('{Escape}');
+    if (hasText) expect(details().getByRole('checkbox', { name: /^In wiki/ })).toBeChecked();
+    else expect.soft(details().queryByRole('checkbox', { name: /^In wiki/ })).toBeNull();
     if (document !== 'none') {
-      await user.click(within(row()).getByRole('button', { name: `View ${documentName}` }));
-      const wiki = within(screen.getByRole('dialog', { name: documentName })).getByRole('checkbox', { name: 'In wiki' });
+      const wiki = within(row()).getByRole('checkbox', { name: `In wiki: ${documentName}` });
       expect(wiki).toBeChecked();
       if (document === 'opt-out') {
         await user.click(wiki);
         expect(wiki).not.toBeChecked();
       }
-      await user.keyboard('{Escape}');
     }
     if (source === 'drop') {
       // Simulate a stale checked value arriving after eligibility was resolved.
@@ -322,7 +318,7 @@ describe('attachments in the production chat', () => {
     const image = new File([bytes], 'sample-chart.heic', { type: 'image/heic' });
     Object.defineProperty(image, 'arrayBuffer', { value: async () => bytes.buffer });
     fireEvent.paste(editor(), { clipboardData: { getData: () => '', items: [], files: [image] } });
-    const card = await within(row()).findByRole('button', { name: 'View sample-chart.heic' });
+    const card = await within(row()).findByTitle('sample-chart.heic');
     await waitFor(() => expect(card.closest('li')).toHaveAttribute('data-state', 'ready'));
     const [item] = services.composer.getState().attachmentDrafts.getState().getDraft('c1').attachments;
     expect(item).toMatchObject({ materialId: 'pasted-chart', state: 'ready' });
@@ -330,10 +326,11 @@ describe('attachments in the production chat', () => {
     if (available) {
       expect(item?.thumbnail).toMatchObject({ type: 'image/png', size: png.byteLength });
     } else {
-      await user.click(card);
-      const detail = within(screen.getByRole('dialog', { name: image.name }));
-      await waitFor(() => expect(detail.getByText('Preview unavailable.')).toBeVisible());
+      expect(item?.thumbnail).toBeFalsy();
+      expect(card.querySelector('img')).toBeNull();
     }
+    await user.click(card);
+    expect(screen.queryByRole('dialog', { name: image.name })).toBeNull();
     expect(fetchFixture).toHaveBeenCalledTimes(2);
     expect(fetchFixture).toHaveBeenLastCalledWith(
       'http://127.0.0.1:5432/kb/materials/image-preview',
@@ -497,8 +494,7 @@ describe('attachments in the production chat', () => {
     fireEvent.drop(conversation(), { dataTransfer: dropData('broken.docx', 'notes.docx') });
     await screen.findByText(/broken.docx: SKAZ couldn’t read/);
     const replace = async () => {
-      await user.click(within(row()).getByRole('button', { name: 'View broken.docx' }));
-      await user.click(within(screen.getByRole('dialog', { name: 'broken.docx' })).getByRole('button', { name: 'Replace broken.docx' }));
+      await user.click(within(row()).getByRole('button', { name: 'Replace broken.docx' }));
       return within(await videoPrompt('replacement.mp4'));
     };
     await user.click((await replace()).getByRole('button', { name: 'Cancel' }));
@@ -567,12 +563,9 @@ describe('attachments in the production chat', () => {
     expect(outbound(fake.calls)).toEqual([]);
     expect(row()).toHaveTextContent('Screenshot.png');
 
-    await user.click(within(row()).getByRole('button', { name: 'View unreadable.docx' }));
-    const dialog = screen.getByRole('dialog', { name: 'unreadable.docx' });
-    await user.click(within(dialog).getByRole('button', { name: 'Replace unreadable.docx' }));
+    await user.click(within(row()).getByRole('button', { name: 'Replace unreadable.docx' }));
     await waitFor(() => expect(row()).toHaveTextContent('fixed.docx'));
     expect(row()).not.toHaveTextContent('unreadable.docx');
-    await user.keyboard('{Escape}');
     expect(outbound(fake.calls)).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() => expect(outbound(fake.calls)).toEqual([

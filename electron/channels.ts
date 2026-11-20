@@ -22,6 +22,7 @@ export const CHANNELS = {
   // Knowledge interface bridge (API-B2 §5).
   dictate: 'kb:dictate',
   saveTextFile: 'app:save-text-file',
+  share: 'app:share',
   chooseMaterialFiles: 'app:choose-material-files',
   chooseMaterialBatch: 'app:choose-material-batch',
   droppedMaterialFiles: 'app:dropped-material-files',

@@ -663,6 +663,7 @@ class PdfExtraction:
     page_count: int
     #: Set when the PDF can't give any text; the material is created as ``failed`` with this reason.
     failure: str | None = None
+    scan_pages: tuple[int, ...] = ()
 
 
 _HYPHENATED = re.compile(r"(\w)-$")
@@ -772,6 +773,7 @@ def extract_pdf(data: bytes) -> PdfExtraction:
     shaped: list[Shape] = []
     findings: list[Finding] = []
     any_visible = any_hidden = False
+    scan_pages: list[int] = []
     title: str | None = None
     for number, page in enumerate(reader.pages):
         try:
@@ -808,6 +810,8 @@ def extract_pdf(data: bytes) -> PdfExtraction:
             raise PdfRejected(f"SKAZ can't read page {number + 1} of this PDF.") from error
         findings.extend(_unreadable_finding(text, number + 1) for text in visible.unreadable)
         cleaned = clean_invisible(visible.text, page=number + 1)
+        if not cleaned.text.strip() and analysis.image_coverage >= OCR_IMAGE_COVERAGE and not analysis.hidden_count:
+            scan_pages.append(number + 1)
         findings.extend(cleaned.findings)
         blocks = [part for part in re.split(r"\n\s*\n", cleaned.text) if part.strip()]
         # Cleaning removes characters, not lines; should a block go anyway, the roles are not guessed.
@@ -824,4 +828,4 @@ def extract_pdf(data: bytes) -> PdfExtraction:
     failure = None
     if not any_visible:
         failure = ONLY_HIDDEN_TEXT if any_hidden else NO_TEXT_LAYER
-    return PdfExtraction(title, paragraphs, findings, len(reader.pages), failure)
+    return PdfExtraction(title, paragraphs, findings, len(reader.pages), failure, tuple(scan_pages))

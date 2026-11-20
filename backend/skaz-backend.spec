@@ -31,6 +31,9 @@ hiddenimports = [
 # "dependency missing" instead of failing.
 datas = []
 binaries = []
+for module in ("pypdfium2", "pypdfium2_raw", "pillow_heif"):
+    datas += collect_data_files(module)
+    binaries += collect_dynamic_libs(module)
 for module in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers", "huggingface_hub"):
     if find_spec(module) is None:
         continue

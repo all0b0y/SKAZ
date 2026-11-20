@@ -5,9 +5,12 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, BinaryIO, Literal
+
+from PIL import Image, ImageOps
+from pillow_heif import register_heif_opener
 
 from ..intake import SourceRejected
 from .formats import ImageFormat, sniff_image_format
@@ -17,6 +20,8 @@ MAX_IMAGE_HEIGHT = 16_384
 MAX_IMAGE_PIXELS = 64_000_000
 MAX_PREVIEW_EDGE = 512
 MAX_PREVIEW_BYTES = 2 * 1024 * 1024
+
+register_heif_opener(thumbnails=False)
 
 
 class ImageCodecUnavailable(SourceRejected):
@@ -90,6 +95,39 @@ def _scaled_size(width: int, height: int, max_edge: int) -> tuple[int, int]:
     return out_w, out_h
 
 
+def material_webp(
+    data: bytes, expected_format: ImageFormat, *, generate_preview: bool = False,
+) -> tuple[bytes, DecodedImageInfo]:
+    """Decode the primary still at its native size and apply the source orientation once."""
+    if sniff_image_format(data[:64]) != expected_format:
+        raise SourceRejected("The image content does not match its file type.")
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            _validate_dimensions(*source.size)
+            image = ImageOps.exif_transpose(source)
+            width, height = image.size
+            mode = "RGBA" if image.has_transparency_data else "RGB"
+            output = io.BytesIO()
+            if (expected_format == "webp" and source.getexif().get(274, 1) == 1
+                    and not getattr(source, "is_animated", False)):
+                encoded = data
+            else:
+                image.convert(mode).save(output, format="WEBP", quality=88, method=4,
+                                         lossless=expected_format in ("png", "webp"))
+                encoded = output.getvalue()
+            media = {"jpeg": "image/jpeg", "png": "image/png", "heic": "image/heic", "webp": "image/webp"}
+            info = DecodedImageInfo(expected_format, media[expected_format], width, height, mode)
+            if generate_preview:
+                thumbnail = image.convert(mode)
+                thumbnail.thumbnail((MAX_PREVIEW_EDGE, MAX_PREVIEW_EDGE), Image.Resampling.LANCZOS)
+                preview = io.BytesIO()
+                thumbnail.save(preview, format="PNG")
+                info = replace(info, preview_png=preview.getvalue())
+            return encoded, info
+    except (OSError, ValueError, Image.DecompressionBombError) as error:
+        raise SourceRejected(f"This {expected_format.upper()} image is damaged and can't be decoded.") from error
+
+
 def _encode_preview_png(av_module: Any, frame: Any, *, max_edge: int) -> bytes:
     out_w, out_h = _scaled_size(frame.width, frame.height, max_edge)
     rgb = frame.reformat(width=out_w, height=out_h, format="rgb24")
@@ -154,7 +192,7 @@ def decode_image(
                 frame = decoded
                 break
             if frame is None:
-                raise SourceRejected("This image could not be decoded.")
+                raise SourceRejected("This image is damaged and can't be decoded.")
             _validate_dimensions(frame.width, frame.height)
             pixel_format = frame.format.name
             preview = (

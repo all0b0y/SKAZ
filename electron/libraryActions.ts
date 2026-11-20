@@ -73,14 +73,16 @@ export async function resolveTarget(target: unknown, deps: LibraryActionDeps, ex
     const root = await libraryRoot(deps);
     return root ? { path: root, directory: true } : null;
   }
-  if (t.kind === 'page') {
+  if (t.kind === 'page' || t.kind === 'material') {
     if (typeof t.id !== 'string' || !PAGE_ID.test(t.id)) return null;
     const root = await libraryRoot(deps);
     if (!root) return null;
-    const file = await deps.getJson(`/kb/wiki/pages/${t.id}/file`) as { path?: unknown } | null;
+    const route = t.kind === 'page' ? `/kb/wiki/pages/${t.id}/file` : `/kb/materials/${t.id}/share-file`;
+    const file = await deps.getJson(route) as { path?: unknown } | null;
     if (!file || typeof file.path !== 'string' || !path.isAbsolute(file.path)) return null;
     const real = deps.realPath(file.path);
-    if (!real || !isInside(root, real) || !deps.isFile(real) || !real.toLowerCase().endsWith('.md')) return null;
+    if (!real || !isInside(root, real) || !deps.isFile(real)) return null;
+    if (t.kind === 'page' && !real.toLowerCase().endsWith('.md')) return null;
     return { path: real, directory: false };
   }
   if (t.kind === 'export') {

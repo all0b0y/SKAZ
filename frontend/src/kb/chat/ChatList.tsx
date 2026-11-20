@@ -39,13 +39,14 @@ export function useOpenChatKey(): string | null {
 }
 
 /** Left panel → Chats: new chat, pinned, by date (a few), "All chats · N" (decision v2/v16). */
-export function ChatList() {
+export function ChatList({ onNavigate }: { onNavigate?: () => void } = {}) {
   const list = useChats((s) => s.list);
   const load = useChats((s) => s.listLoad);
   const error = useChats((s) => s.listError);
   const center = useUi((s) => s.center);
   const { chats } = useServices();
-  const openChat = useOpenChat();
+  const navigate = useOpenChat();
+  const openChat = (id: string | null) => { navigate(id); onNavigate?.(); };
   const showCenter = useUi((s) => s.showCenter);
   const { pinned, rest, groups } = sideChats(list);
   const { sel, overlays } = useChatSelection({ chats: [...pinned, ...rest], onOpen: openChat });

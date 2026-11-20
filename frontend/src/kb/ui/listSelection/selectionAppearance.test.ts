@@ -12,7 +12,7 @@ describe('Decision 31 selection appearance', () => {
     expect(selection).toMatch(/\.kb-selbox\s*\{[^}]*border-radius: var\(--kb-r-2xs\)/);
   });
 
-  it('does not paint selected row backgrounds over the current/open surface', () => {
+  it('highlights selected rows using the theme accent with a distinct checked marker', () => {
     const painted: string[] = [];
     for (const file of readdirSync(styles).filter((f) => f.endsWith('.css'))) {
       const css = readFileSync(resolve(styles, file), 'utf8');
@@ -22,6 +22,8 @@ describe('Decision 31 selection appearance', () => {
         }
       }
     }
-    expect(painted).toEqual([]);
+    expect(painted).toHaveLength(1);
+    expect(painted[0]).toMatch(/^selection\.css:/);
+    expect(selection).toMatch(/tr\[data-sel-id\]\[aria-selected='true'\] > td\s*\{\s*background: color-mix\(in srgb, var\(--kb-accent\)/);
   });
 });

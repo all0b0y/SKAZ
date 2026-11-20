@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { EditLink } from './EditLink';
+import { draftLink } from './inlineLinks';
 import { useMentionDrop } from './MentionDrop';
 import type { KbMessageInput, KbOpenContext, KbQuote, KbRef, KbVisualPreflightResponse } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
@@ -10,9 +12,9 @@ import { partsOf } from '../api/permissions';
 import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
 import { AgentPicker, EffortPicker } from './AgentPicker';
 import { ChatSearchButton } from '../searchRules/ChatSearchPanel';
-import { addMaterial, attachmentKey, AttachButton, isSpeechFile, type Attachment } from './Attach';
+import { addMaterial, attachmentKey, isSpeechFile } from './Attach';
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
-import { clearEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
+import { clearEditor, insertText, insertToken, isEmpty, markGone, pasteLink, mentionAtCaret, serialize, type MentionMatch } from './editor';
 import { MentionPopup, useMentions, type MentionOption } from './MentionPopup';
 import { isLongPaste, PastedCard, pastedName } from './PastedText';
 import { QuickQuestions } from './QuickQuestions';
@@ -117,11 +119,14 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
   const services = useServices();
   const { bridge, client, chats } = services;
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const [editingLink, setEditingLink] = useState<HTMLButtonElement | null>(null);
+  const plusTrigger = useRef<Text | undefined>(undefined);
   const listId = useId();
   const [empty, setEmpty] = useState(true);
   const [mention, setMention] = useState<MentionMatch | null>(null);
   const [active, setActive] = useState(0);
   const [sendPlay, replaySend] = useIconPlay();
+  const [stopPlay, replayStop] = useIconPlay();
   const [dictation, setDictation] = useState<Dictation>({ phase: 'idle' });
   const [hover, setHover] = useState<{ text: string; left: number; top: number } | null>(null);
   const [fallbacksByDraft, setFallbacksByDraft] = useState<DraftFallbackMap>({});
@@ -196,7 +201,7 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
     setDraftSnapshot({ text: serialized.text, mentions: serialized.mentions, quotes: serialized.quotes });
     const m = mentionAtCaret(root);
     setMention(m);
-    if (!m) setActive(0);
+    setActive((current) => m ? current : 0);
   }, []);
 
   useEffect(() => {
@@ -206,6 +211,7 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
   useLayoutEffect(() => {
     const root = editorRef.current;
     if (!root) return;
+    setEditingLink(null);
     draftKey.current = key;
     lastPaste.current = null;
     root.replaceChildren(...(drafts.get(key) ?? []));
@@ -260,36 +266,11 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
   const inboxId = folders.find((f) => f.system)?.id ?? null;
   // QA B7: a material made from an attachment is in Inbox at once — the Materials panel shows it.
   const materialSaved = () => { void services.library.getState().loadContent(); };
-  const saveMaterial = (source: 'file' | 'link' | 'text', value: string, folderId: string) =>
+  const saveMaterial = (source: 'file' | 'text', value: string, folderId: string) =>
     addMaterial(client, source, value, folderId).then((added) => {
       materialSaved();
       return added;
     });
-
-  const addAttachments = (items: Array<{ source: Exclude<Attachment['source'], 'file'>; name: string; value: string; materialId?: string }>) => {
-    if (!canChangeDraft()) return;
-    for (const item of items) {
-      const key = attachmentKey();
-      // Decision 15: the default comes from Settings → Wiki; the user may switch it either way.
-      const inWiki = wiki ? (item.source === 'text' ? wiki.auto_add_text : wiki.auto_add_files_links) : item.source !== 'text';
-      setAttachments((list) => [...list, {
-        key, name: item.name, source: item.source, state: item.materialId ? 'ready' : 'adding', materialId: item.materialId ?? null, error: null, inWiki,
-        materialReady: true,
-      }]);
-      if (item.materialId) continue;
-      if (!inboxId) {
-        setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'failed', error: 'Connect the library first.' } : a)));
-        continue;
-      }
-      if (item.source === 'existing') continue;
-      saveMaterial(item.source, item.value, inboxId).then(
-        (added) => setAttachments((list) => list.map((a) => (a.key === key
-          ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready, ...(added.existing ? { alreadyInLibrary: true } : {}) }
-          : a))),
-        (e: unknown) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'failed', error: errorText(e) } : a))),
-      );
-    }
-  };
 
   const chooseFiles = async (replaceKey?: string) => {
     if (!canChangeDraft() || choosingFiles.current.has(key)) return;
@@ -450,7 +431,10 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
     const root = editorRef.current;
     if (!root || !recId || !paneActive || sending || quickReason) return;
     if (!attachments.some((a) => a.materialId === recId)) {
-      addAttachments([{ source: 'existing', name: recTitle ?? 'Recording', value: recId, materialId: recId }]);
+      setAttachments((list) => [...list, {
+        key: attachmentKey(), name: recTitle ?? 'Recording', source: 'existing', state: 'ready',
+        materialId: recId, materialReady: true, error: null, inWiki: wiki?.auto_add_files_links ?? true,
+      }]);
     }
     root.focus({ preventScroll: true });
     const selection = window.getSelection();
@@ -658,22 +642,28 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== editorRef.current || event.nativeEvent.isComposing) return;
     if (lastPaste.current && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       pasteAsText(lastPaste.current);
       return;
     }
-    if (mention && (mentions.options.length > 0)) {
-      if (event.key === 'ArrowDown') { event.preventDefault(); setActive((i) => (i + 1) % mentions.options.length); return; }
-      if (event.key === 'ArrowUp') { event.preventDefault(); setActive((i) => (i - 1 + mentions.options.length) % mentions.options.length); return; }
+    if (popupOpen) {
+      const count = mentions.options.length + (filesAvailable ? 1 : 0);
+      if (count && event.key === 'ArrowDown') { event.preventDefault(); setActive((i) => (i + 1) % count); return; }
+      if (count && event.key === 'ArrowUp') { event.preventDefault(); setActive((i) => (i - 1 + count) % count); return; }
+      if (event.key === 'Tab' && !count) { dismissMention(); return; }
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault();
-        const option = mentions.options[Math.min(active, mentions.options.length - 1)];
-        if (option) pickMention(option);
+        if (filesAvailable && active === 0) pickFiles();
+        else {
+          const option = mentions.options[active - (filesAvailable ? 1 : 0)];
+          if (option) pickMention(option);
+        }
         return;
       }
     }
-    if (popupOpen && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMention(null); return; }
+    if (popupOpen && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismissMention(); return; }
     if (selection && event.key === 'Escape') { event.preventDefault(); clearSelection(); return; }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -687,6 +677,11 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
     // Only plain text comes in: no foreign markup in the field.
     event.preventDefault();
     const text = event.clipboardData.getData('text/plain');
+    if (!isLongPaste(text) && editorRef.current && pasteLink(editorRef.current, text)) {
+      lastPaste.current = null;
+      refresh();
+      return;
+    }
     if (isLongPaste(text)) {
       // Too long for the field: a "Pasted text" card, like "+" → Paste text ("In wiki" off — decision 15).
       const key = attachmentKey();
@@ -754,9 +749,31 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
   const canEdit = paneActive && !sending;
   const placeholderShown = empty && dictation.phase === 'idle';
   const hint = selection ? 'Ask about the selection…' : placeholder;
+  const filesAvailable = !!(bridge.nativeIntake || bridge.chooseMaterialFiles)
+    && (mention?.query.toLowerCase().trim().split(/\s+/).every((word) => 'add files upload'.includes(word)) ?? false);
   // A query of several words stays a mention only while something matches; otherwise it is just text.
-  const popupOpen = mention !== null && (!mention.query.includes(' ') || mentions.loading || mentions.options.length > 0);
+  const popupOpen = mention !== null && (!mention.query.includes(' ') || filesAvailable || mentions.loading || mentions.options.length > 0);
+  const clearTrigger = () => {
+    if (!mention) return;
+    const start = plusTrigger.current === mention.node && mention.start === 1 && mention.node.data.startsWith(' @')
+      ? 0 : mention.start;
+    mention.node.deleteData(start, mention.end - start);
+    plusTrigger.current = undefined;
+    refresh();
+  };
+  const dismissMention = () => {
+    if (mention && !mention.query && plusTrigger.current === mention.node) clearTrigger();
+    setMention(null);
+  };
+  const pickFiles = () => {
+    if (!mention || !canChangeDraft()) return;
+    clearTrigger();
+    void chooseFiles();
+  };
   const canSend = !empty || attachments.some((a) => a.state === 'ready' || a.text !== undefined);
+  const showMic = dictation.phase !== 'idle' || (!answering && !canSend && !sending);
+  const stopMessage = answering && streaming && !isLocal(streaming.id) && !(questionWaits && canSend)
+    ? streaming.id : null;
   const focusEditor = useCallback(() => editorRef.current?.focus({ preventScroll: true }), []);
   const toggleWiki = (itemKey: string) => {
     if (canChangeDraft()) {
@@ -797,7 +814,7 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
         )}
         {popupOpen && (
           <MentionPopup id={listId} options={mentions.options} active={active} loading={mentions.loading} error={mentions.error}
-            onPick={pickMention} onHover={setActive} />
+            onPick={pickMention} onHover={setActive} onFiles={filesAvailable ? pickFiles : undefined} />
         )}
         <AttachmentDraftStrip key={key} items={paneActive ? attachments : []} readOnly={sending} focusEditor={focusEditor}
           onReplace={bridge.nativeIntake ? (itemKey) => void chooseFiles(itemKey) : undefined}
@@ -819,10 +836,14 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
             aria-label="Message"
             aria-placeholder={hint}
             aria-controls={popupOpen ? listId : undefined}
-            aria-activedescendant={popupOpen && mentions.options.length ? `${listId}-${active}` : undefined}
+            aria-activedescendant={popupOpen && (mentions.options.length || filesAvailable) ? `${listId}-${active}` : undefined}
             aria-autocomplete="list"
             data-testid="message-input"
-            onInput={() => { lastPaste.current = null; refresh(); }}
+            onClick={(event) => {
+              const link = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-url]');
+              if (link && canEdit) setEditingLink(link);
+            }}
+            onInput={() => { lastPaste.current = null; setActive(0); refresh(); }}
             onKeyUp={(e) => { if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') refresh(); }}
             onMouseUp={refresh}
             onKeyDown={onKeyDown}
@@ -832,26 +853,45 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
             onMouseLeave={() => setHover(null)}
           />
         </div>
+        {canEdit && editingLink && <EditLink link={{ url: editingLink.dataset.url!, label: editingLink.textContent ?? '' }}
+          close={() => setEditingLink(null)} apply={(label, url) => {
+            if (!canChangeDraft() || !editorRef.current?.contains(editingLink)) return;
+            editingLink.replaceWith(url ? draftLink({ label, url }) : document.createTextNode(label));
+            setEditingLink(null);
+            editorRef.current.focus();
+            refresh();
+          }} />}
         {hover && (
           <div className="kb-tooltip kb-tooltip--quote" role="tooltip" style={{ left: hover.left, top: Math.max(8, hover.top - 8), transform: 'translateY(-100%)' }}>
             {hover.text}
           </div>
         )}
         <div className="kb-composer__bar">
-          <AttachButton key={key} onAdd={addAttachments} disabled={!paneActive || sending}
-            onChooseFiles={bridge.nativeIntake || bridge.chooseMaterialFiles ? () => void chooseFiles() : undefined} />
+          <IconButton icon="plus" label="Add files or reference" aria-haspopup="listbox" aria-expanded={popupOpen}
+            disabled={!canEdit} onMouseDown={(event) => event.preventDefault()} onClick={() => {
+              const root = editorRef.current;
+              if (!root) return;
+              root.focus();
+              if (popupOpen) { dismissMention(); return; }
+              if (!mentionAtCaret(root)) {
+                const selection = root.ownerDocument.getSelection();
+                if (selection?.rangeCount && root.contains(selection.focusNode)) selection.collapseToEnd();
+                plusTrigger.current = insertText(root, '@');
+              }
+              refresh();
+            }} />
           <ChatSearchButton chatId={chatId} />
           <span className="kb-composer__spacer" />
           {dictation.phase === 'recording' && (
             <span className="kb-dictating" role="status"><span className="kb-dictating__dot" aria-hidden="true" />Listening</span>
           )}
-          <AgentPicker choice={choice} existingChat={chatId !== null} openRequest={pickerOpenSeq}
-            onChoose={chooseAgent} />
           {choice && model && (
             <EffortPicker efforts={model.efforts} value={choice.effort ?? model.default_effort}
               onChange={(effort) => chooseAgent({ ...choice, effort })} />
           )}
-          {bridge.dictate ? (
+          <AgentPicker choice={choice} existingChat={chatId !== null} openRequest={pickerOpenSeq}
+            onChoose={chooseAgent} />
+          {showMic && (bridge.dictate ? (
             <IconButton icon="mic" label={dictation.phase === 'recording' ? 'Stop dictation' : dictation.phase === 'transcribing' ? 'Recognising…' : 'Dictate'}
               aria-pressed={dictation.phase === 'recording'} active={dictation.phase === 'recording'}
               className={dictation.phase === 'recording' ? 'kb-mic is-on' : 'kb-mic'}
@@ -860,12 +900,12 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
             <Tooltip text="Dictation isn’t available in this window" placement="top" describes>
               <button type="button" className="kb-iconbtn kb-iconbtn--md" aria-label="Dictate" aria-disabled="true"><Icon name="mic" size={16} /></button>
             </Tooltip>
-          )}
-          {answering && streaming && chatId && !isLocal(streaming.id) && !(questionWaits && canSend) ? (
+          ))}
+          {!showMic && (stopMessage && chatId ? (
             <Tooltip text="Stop the answer" placement="top">
               <button type="button" className="kb-send is-stop" aria-label="Stop the answer"
-                onClick={async () => { const r = await chats.getState().stop(chatId, streaming.id); if (!r.ok) setError(r.error); }}>
-                <Icon name="stop" size={12} />
+                onClick={async () => { replayStop(); const r = await chats.getState().stop(chatId, stopMessage); if (!r.ok) setError(r.error); }}>
+                <Icon name="stop" size={12} play={stopPlay} />
               </button>
             </Tooltip>
           ) : (
@@ -875,7 +915,7 @@ export function Composer({ chatId, placeholder, active: paneActive = true, handl
                 <Icon name="send" size={14} play={sendPlay} />
               </button>
             </Tooltip>
-          )}
+          ))}
         </div>
         {error && (
           <p className="kb-composer__error" role="alert">

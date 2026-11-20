@@ -48,8 +48,8 @@ const render = (w: number, h: number, s: BackdropState, ink = INK, accent = ACCE
 };
 
 describe('backdrop: the «keep text clear» column', () => {
-  it('is the answer column of chat.css: 22 px in from the left, at most 760 px wide', () => {
-    expect(columnBand(1100)).toEqual({ left: CHAT_COLUMN.padX, right: CHAT_COLUMN.padX + CHAT_COLUMN.max });
+  it('is the answer column of chat.css: centred with 22 px minimum gutters', () => {
+    expect(columnBand(1100)).toEqual({ left: (1100 - CHAT_COLUMN.max) / 2, right: (1100 + CHAT_COLUMN.max) / 2 });
     expect(columnBand(500)).toEqual({ left: 22, right: 478 }); // narrower than 760 + padding: the whole width
   });
 

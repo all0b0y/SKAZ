@@ -1,19 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react';
 import { SPEECH_EXTENSIONS } from '../../api/bridge';
-import type { KbRef } from '../../api/kb/types.gen';
-import type { MaterialKind } from '../api/names';
-import { errorText, type KbClient } from '../api/client';
-import { Button, Icon, IconButton, Menu } from '../ui';
-import { Popover } from '../ui/Popover';
-import { useLibrary, useServices } from '../state/context';
+import type { KbClient } from '../api/client';
 
-/**
- * "+" in the message field (v3, decision 15): a file, a link, pasted text or one of my materials.
- * New attachments are saved to Materials (Inbox when no folder is chosen — decision 16)
- * through the existing material routes, held out of the wiki (``to_wiki: false``); "In wiki" starts
- * from Settings → Wiki (decision 15) and stays the user's to switch until the message is sent, when a
- * ticked one is added (an import once it is processed).
- */
 export interface Attachment {
   key: string;
   name: string;
@@ -37,7 +24,7 @@ export function isSpeechFile(name: string): boolean {
 }
 
 /** Create the material for one attachment, kept out of the wiki until the message is sent. */
-export async function addMaterial(client: KbClient, source: 'file' | 'link' | 'text', value: string, folderId: string): Promise<{ id: string; ready: boolean; existing?: boolean }> {
+export async function addMaterial(client: KbClient, source: 'file' | 'text', value: string, folderId: string): Promise<{ id: string; ready: boolean; existing?: boolean }> {
   const hold = { folder_id: folderId, to_wiki: false };
   if (source === 'file') {
     if (isSpeechFile(value)) {
@@ -48,136 +35,9 @@ export async function addMaterial(client: KbClient, source: 'file' | 'link' | 't
     // N2: the same file already in the library — that material, attached as an existing one (no second ingest).
     return { id: res.material.id, ready: res.material.status === 'ready', existing: res.already_in_library === true };
   }
-  if (source === 'link') {
-    const res = await client.call('POST /kb/materials/link', { body: { url: value, ...hold } });
-    return { id: res.material.id, ready: res.material.status === 'ready', existing: res.already_in_library === true };
-  }
   const res = await client.call('POST /kb/materials/text', { body: { text: value, ...hold } });
   return { id: res.material.id, ready: res.material.status === 'ready' };
 }
 
 let seq = 0;
 export const attachmentKey = () => `att-${++seq}`;
-
-type Mode = null | 'link' | 'text' | 'materials';
-
-export function AttachButton({ onAdd, onChooseFiles, disabled }: {
-  onAdd: (items: Array<{ source: Exclude<Attachment['source'], 'file'>; name: string; value: string; materialId?: string }>) => void;
-  onChooseFiles?: () => void;
-  disabled: boolean;
-}) {
-  const anchor = useRef<HTMLButtonElement | null>(null);
-  const [menu, setMenu] = useState(false);
-  const [mode, setMode] = useState<Mode>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const fileAvailable = !!onChooseFiles;
-
-  return (
-    <>
-      <IconButton ref={anchor} icon="plus" label="Add a file, link or text" aria-haspopup="menu" aria-expanded={menu || mode !== null}
-        disabled={disabled} onClick={() => { setError(null); setMenu((v) => !v); }} tooltipPlacement="top-start" />
-      <Menu open={menu} onClose={() => setMenu(false)} anchorRef={anchor} label="Add to the question" placement="top-start" items={[
-        { id: 'file', label: 'File…', icon: 'upload', disabled: !fileAvailable, note: fileAvailable ? undefined : 'not available here', onSelect: () => onChooseFiles?.() },
-        { id: 'link', label: 'Link…', icon: 'link', onSelect: () => setMode('link') },
-        { id: 'text', label: 'Paste text…', icon: 'text', onSelect: () => setMode('text') },
-        { id: 'materials', label: 'From my materials…', icon: 'materials', onSelect: () => setMode('materials') },
-      ]} />
-      <Popover open={mode !== null} onClose={() => setMode(null)} anchorRef={anchor} placement="top-start" width={340}
-        label={mode === 'link' ? 'Add a link' : mode === 'text' ? 'Paste text' : 'From my materials'} className="kb-attachpop">
-        {mode === 'link' && <LinkForm onDone={(url) => { setMode(null); onAdd([{ source: 'link', name: url, value: url }]); }} />}
-        {mode === 'text' && <TextForm onDone={(text) => { setMode(null); onAdd([{ source: 'text', name: firstLine(text), value: text }]); }} />}
-        {mode === 'materials' && <MaterialPicker onDone={(ref) => { setMode(null); onAdd([{ source: 'existing', name: ref.title, value: ref.id, materialId: ref.id }]); }} />}
-        {error && <p className="kb-inline-error" role="alert">{error}</p>}
-      </Popover>
-    </>
-  );
-}
-
-const firstLine = (text: string) => {
-  const line = text.trim().split('\n')[0] ?? '';
-  return line.length > 40 ? `${line.slice(0, 40)}…` : line || 'Pasted text';
-};
-
-function LinkForm({ onDone }: { onDone: (url: string) => void }) {
-  const [url, setUrl] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const id = useId();
-  const submit = () => {
-    const value = url.trim();
-    try {
-      const parsed = new URL(value);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error();
-    } catch {
-      setError('Enter a web address that starts with http:// or https://');
-      return;
-    }
-    onDone(value);
-  };
-  return (
-    // noValidate: the field's own message (below) instead of the browser's bubble in the system language (QA D14).
-    <form className="kb-attachform" noValidate onSubmit={(e) => { e.preventDefault(); submit(); }}>
-      <label htmlFor={id} className="kb-attachform__label">Link to an article or a video</label>
-      <input id={id} className="kb-attachform__input" type="url" placeholder="https://" value={url}
-        onChange={(e) => { setUrl(e.target.value); setError(null); }} aria-invalid={error ? true : undefined} />
-      {error && <p className="kb-inline-error kb-inline-error--flat" role="alert">{error}</p>}
-      <div className="kb-attachform__foot"><Button size="sm" variant="fill" type="submit" disabled={!url.trim()}>Add</Button></div>
-    </form>
-  );
-}
-
-function TextForm({ onDone }: { onDone: (text: string) => void }) {
-  const [text, setText] = useState('');
-  const id = useId();
-  return (
-    <form className="kb-attachform" onSubmit={(e) => { e.preventDefault(); if (text.trim()) onDone(text); }}>
-      <label htmlFor={id} className="kb-attachform__label">Any text — it is saved to Materials</label>
-      <textarea id={id} className="kb-attachform__input kb-attachform__area" rows={5} value={text} onChange={(e) => setText(e.target.value)} />
-      <div className="kb-attachform__foot"><Button size="sm" variant="fill" type="submit" disabled={!text.trim()}>Add</Button></div>
-    </form>
-  );
-}
-
-function MaterialPicker({ onDone }: { onDone: (ref: KbRef) => void }) {
-  const { client } = useServices();
-  const materials = useLibrary((s) => s.materials);
-  const [q, setQ] = useState('');
-  const [found, setFound] = useState<KbRef[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const id = useId();
-  useEffect(() => {
-    if (!q.trim()) { setFound(null); return undefined; }
-    let live = true;
-    const t = window.setTimeout(() => {
-      client.call('GET /kb/mentions', { query: { q: q.trim(), limit: 8 } }).then(
-        (res) => { if (live) { setFound(res.materials); setError(null); } },
-        (e: unknown) => { if (live) setError(errorText(e)); },
-      );
-    }, 120);
-    return () => { live = false; window.clearTimeout(t); };
-  }, [client, q]);
-  const list: KbRef[] = found ?? materials.slice(0, 8).map((m) => ({ type: 'material', id: m.id, title: m.title }));
-  return (
-    <div className="kb-attachform">
-      <label htmlFor={id} className="kb-visually-hidden">Find a material</label>
-      <div className="kb-attachform__search">
-        <Icon name="search" size={14} />
-        <input id={id} className="kb-attachform__input kb-attachform__input--bare" placeholder="Find a material" value={q} onChange={(e) => setQ(e.target.value)} />
-      </div>
-      {error && <p className="kb-inline-error kb-inline-error--flat" role="alert">{error}</p>}
-      <ul className="kb-attachform__list" aria-label="Materials">
-        {list.length === 0 && <li className="kb-muted kb-attachform__empty">{q ? 'Nothing found.' : 'No materials yet.'}</li>}
-        {list.map((m) => (
-          <li key={m.id}>
-            <button type="button" className="kb-row" onClick={() => onDone(m)}>
-              <Icon name="pdf" size={14} className="kb-row__icon" />
-              <span className="kb-row__text">{m.title}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-export type { MaterialKind };

@@ -343,7 +343,7 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen }: {
 
   const overlays = (
     <>
-      <SelectionBar selection={sel} sets={sets} hintKey="list-selection" count={sel.selected.size} variant={variant} actions={barActions.bar} more={barActions.more} onClear={sel.clear} />
+      <SelectionBar entry={false} selection={sel} sets={sets} hintKey="list-selection" count={sel.selected.size} variant={variant} actions={barActions.bar} more={barActions.more} onClear={sel.clear} />
       <MoveToMenu open={moveIds !== null} onClose={() => setMoveIds(null)} anchorRef={anchor} count={moveIds?.length ?? 0}
         onPick={(folderId) => { const list = pick(moveIds ?? []); setMoveIds(null); void batch.move(list, folderId).then(keepSkipped); }} />
       <DeleteMaterialsDialog list={pick(deleteIds ?? [])} open={deleteIds !== null} onClose={() => setDeleteIds(null)} onDone={keepSkipped} />

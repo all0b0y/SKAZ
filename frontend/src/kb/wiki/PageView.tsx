@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DeckPage, TestPage } from '../study/DeckPage';
 import { useMakeStudy } from '../study/makeFrom';
+import { ShareButton } from '../ui/ShareButton';
 import type { KbBlock, KbJob, KbPage } from '../../api/kb/types.gen';
 import { errorText, KbApiError } from '../api/client';
 import { AnswerMarkdown, type InAppLink } from '../ui/AnswerMarkdown';
@@ -460,6 +461,8 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
                 })}>Transcript</Button>
             )}
             <WikiTermsButton />
+            {page && <ShareButton label="Share page" target={{ kind: 'page', id: page.id }}
+              text={() => [page.title, ...page.blocks.map((b) => b.text)].join('\n\n')} />}
             <IconButton icon="chats" label="Ask about page" disabled={!page}
               onClick={() => page && askAbout({ type: 'page', id: page.id, title: page.title })} />
             {page?.kind !== 'deck' && page?.kind !== 'test' && (

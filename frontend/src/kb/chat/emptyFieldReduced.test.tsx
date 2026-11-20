@@ -56,7 +56,7 @@ describe('Empty chat field with reduced motion (FX global rules)', () => {
     vi.restoreAllMocks();
     expect(field()).toBeNull();
     // The waiting mark is still there, as a still frame beside the words.
-    const wait = within(centre()).getByText('Writing an answer…');
+    const wait = within(centre()).getByText('Writing an answer…').closest('[role="status"]')!;
     expect(wait.querySelector('canvas.kb-msg__think')).toHaveAttribute('aria-hidden', 'true');
   });
 });

@@ -4,7 +4,7 @@ import type { EngineId } from '../api/names';
 import { ENGINE_NAME, agentOf } from '../state/agents';
 import { useAgents, useServices, useSettings } from '../state/context';
 import { modelName } from '../composer/modelCatalog';
-import { AgentPicker, effortLabel } from '../composer/AgentPicker';
+import { AgentPicker, EffortPicker, effortLabel } from '../composer/AgentPicker';
 import { Button } from '../ui';
 
 const short = (engine: EngineId) => ENGINE_NAME[engine].replace(' Agent', '');
@@ -24,7 +24,7 @@ function described(wiki: KbWikiSettings, agents: KbAgents): { engine: EngineId |
 /**
  * Settings → Models → Wiki model (models screen v2, variant A): one picker button like the message
  * field's, on the label's line. Choosing another agent's model brings back the reasoning last chosen
- * for it; the menu shows each agent's last model. Reasoning sits at the bottom of the same menu.
+ * for it; reasoning stays beside the chosen model in the settings row.
  * Hints and warnings live under the label (`WikiModelNote`). Chats never change this profile.
  */
 export function WikiModelRow({ label }: { label: string }) {
@@ -57,7 +57,7 @@ export function WikiModelRow({ label }: { label: string }) {
   const model = chosen?.models.find((m) => m.id === value.wiki_model);
   const { engine, parts } = described(value, agents);
   return (
-    <span className="kb-wiki-pick" aria-busy={busy}>
+    <div className="kb-wiki-pick" aria-busy={busy}>
       {error && <span className="kb-inline-error kb-inline-error--flat" role="alert">{error}</span>}
       <AgentPicker existingChat={false}
         choice={value.wiki_engine ? { engine: value.wiki_engine, model: value.wiki_model, effort: value.wiki_effort } : null}
@@ -74,9 +74,15 @@ export function WikiModelRow({ label }: { label: string }) {
           buttonLabel: `${label}: ${parts.join(', ')}`, buttonText: parts.join(' · '),
           topItems: [{ id: 'default', label: 'Default agent’s own setting', checked: !value.wiki_engine,
             onPick: () => void save({ wiki_engine: null }) }],
-          reasoning: model ? { efforts: model.efforts, value: value.wiki_effort, onChange: (e) => void save({ wiki_effort: e }) } : undefined,
         }} />
-    </span>
+      {model && model.efforts.length > 0 && (
+        <div className="kb-wiki-effort">
+          <span>Reasoning</span>
+          <EffortPicker efforts={model.efforts} value={value.wiki_effort ?? model.default_effort}
+            onChange={(effort) => { if (!busy) void save({ wiki_effort: effort }); }} />
+        </div>
+      )}
+    </div>
   );
 }
 

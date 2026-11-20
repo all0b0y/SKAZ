@@ -27,6 +27,11 @@ class _Request(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class KbMaterialDisplay(BaseModel):
+    format: Literal["image", "document", "text"]
+    content: str
+
+
 class KbAddText(_Request):
     #: Any length; long text is split into paragraph fragments.
     text: str = Field(min_length=1)

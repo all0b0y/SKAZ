@@ -258,7 +258,7 @@ describe('Window shell', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Create library' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Library' })).not.toBeInTheDocument());
     const side = screen.getByRole('region', { name: 'Materials' });
-    expect(await within(side).findByText('Inbox')).toBeInTheDocument();
+    expect(await within(side).findByRole('button', { name: /^Inbox/ })).toBeInTheDocument();
   });
 });
 

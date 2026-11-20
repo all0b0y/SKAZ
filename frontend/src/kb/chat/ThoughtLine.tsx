@@ -354,7 +354,10 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
             <div className="kb-thought__head">
               {/* FX §7: «Connecting nodes» beside the words; the canvas is decorative, the text is the status.
                   One live region for the whole stream, so the words can go without remounting it. */}
-              <p className="kb-msg__wait" role="status"><ConnectIndicator className="kb-msg__think" />{head}</p>
+              <p className="kb-msg__wait" role="status">
+                <ConnectIndicator className="kb-msg__think" />
+                {head === 'Writing an answer…' ? <span className="kb-visually-hidden">{head}</span> : head}
+              </p>
               <Elapsed className="kb-thought__time" role="timer" from={start} />
             </div>
           )}

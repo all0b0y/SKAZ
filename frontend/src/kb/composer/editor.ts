@@ -4,6 +4,8 @@
 
 import type { KbQuote, KbRef } from '../../api/kb/types.gen';
 
+import { addressRuns, draftLink, inlineLinkMatches, linkMarkdown, webAddress } from './inlineLinks';
+
 export type Token = { kind: 'mention'; ref: KbRef } | { kind: 'quote'; quote: KbQuote };
 
 export interface EditorValue {
@@ -26,7 +28,7 @@ export function quoteLabel(text: string): string {
 
 /** What a token stands for inside the message text sent to the agent. */
 export function tokenText(token: Token): string {
-  return token.kind === 'mention' ? `@${token.ref.title}` : `“${quoteLabel(token.quote.text)}”`;
+  return token.kind === 'mention' ? token.ref.title : `“${quoteLabel(token.quote.text)}”`;
 }
 
 function iconFor(token: Token): string {
@@ -64,7 +66,7 @@ function readToken(el: HTMLElement): Token | null {
 
 const BLOCKS = new Set(['DIV', 'P']);
 
-/** Text (tokens written as `@Title` / `“quote…”`) and the referenced items, in order, deduplicated. */
+/** Text (tokens written as `Title` / `“quote…”`) and the referenced items, in order, deduplicated. */
 export function serialize(root: HTMLElement): EditorValue {
   let text = '';
   const mentions: KbRef[] = [];
@@ -74,7 +76,9 @@ export function serialize(root: HTMLElement): EditorValue {
       if (child.nodeType === Node.TEXT_NODE) {
         text += (child.nodeValue ?? '').replace(/\u00a0/g, ' ').replace(/\u200b/g, '');
       } else if (child instanceof HTMLElement) {
-        if (child.dataset.token) {
+        if (child.dataset.url && webAddress(child.dataset.url)) {
+          text += linkMarkdown({ label: child.textContent ?? '', url: child.dataset.url });
+        } else if (child.dataset.token) {
           const token = readToken(child);
           if (!token) continue;
           text += tokenText(token);
@@ -189,8 +193,25 @@ export function insertToken(root: HTMLElement, token: Token, replace?: MentionMa
   placeCaretAfter(space);
 }
 
+export function pasteLink(root: HTMLElement, text: string): boolean {
+  const runs = addressRuns(text);
+  if (runs.every((run) => typeof run === 'string')) return false;
+  const range = caretRange(root);
+  if (!root.contains(range.endContainer)) return false;
+  const selected = range.toString();
+  const single = runs.length === 1 && typeof runs[0] !== 'string' && !range.cloneContents().querySelector('[data-token]');
+  const nodes = runs.map((run) => typeof run === 'string' ? document.createTextNode(run)
+    : draftLink({ ...run, label: single && selected.trim() ? selected : run.label }));
+  const fragment = document.createDocumentFragment();
+  fragment.append(...nodes);
+  range.deleteContents();
+  range.insertNode(fragment);
+  placeCaretAfter(nodes[nodes.length - 1]!);
+  return true;
+}
+
 /** Insert plain text at the caret (dictation, a pasted question). */
-export function insertText(root: HTMLElement, value: string): void {
+export function insertText(root: HTMLElement, value: string): Text | undefined {
   if (!value) return;
   const range = caretRange(root);
   range.deleteContents();
@@ -199,7 +220,12 @@ export function insertText(root: HTMLElement, value: string): void {
   const lead = before && !/\s$/.test(before) ? ' ' : '';
   const node = document.createTextNode(`${lead}${value}`);
   range.insertNode(node);
-  placeCaretAfter(node);
+  range.setStart(node, node.length);
+  range.collapse(true);
+  const selection = root.ownerDocument.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return node;
 }
 
 export function clearEditor(root: HTMLElement): void {
@@ -208,18 +234,24 @@ export function clearEditor(root: HTMLElement): void {
 
 /**
  * A sent message's text cut into plain runs and its tokens, in order: each mention/quote is found
- * where it stands in the text (`@Title`, `“quote…”`), once. The bubble draws it; Edit refills a field.
+ * where it stands in the text (`Title`, legacy `@Title`, or `“quote…”`), once. The bubble draws it; Edit refills a field.
  */
 export function inputPieces(input: { text: string; mentions: readonly KbRef[]; quotes: readonly KbQuote[] }): Array<string | Token> {
   const marks: Array<{ at: number; len: number; token: Token }> = [];
   const used = new Set<number>();
+  const links = [...inlineLinkMatches(input.text)];
+
   const find = (token: Token) => {
-    const needle = tokenText(token);
+    const label = tokenText(token);
+    if (!label) return;
+    // Existing messages used the command prefix for mentions.
+    const needle = token.kind === 'mention' && input.text.includes(`@${label}`) ? `@${label}` : label;
     let from = 0;
     for (;;) {
       const at = input.text.indexOf(needle, from);
       if (at < 0) return;
-      if (![...used].some((u) => u >= at && u < at + needle.length)) {
+      if (!links.some((link) => link.start < at + needle.length && link.end > at)
+        && ![...used].some((u) => u >= at && u < at + needle.length)) {
         for (let i = at; i < at + needle.length; i += 1) used.add(i);
         marks.push({ at, len: needle.length, token });
         return;
@@ -244,7 +276,8 @@ export function inputPieces(input: { text: string; mentions: readonly KbRef[]; q
 /** Put a sent message back into an editor: its text with its mentions and quotes as tokens. */
 export function fillEditor(root: HTMLElement, input: Parameters<typeof inputPieces>[0]): void {
   const doc = root.ownerDocument;
-  root.replaceChildren(...inputPieces(input).map((piece) => (typeof piece === 'string' ? doc.createTextNode(piece) : tokenElement(piece, doc))));
+  root.replaceChildren(...inputPieces(input).map((piece) =>
+    typeof piece === 'string' ? doc.createTextNode(piece) : tokenElement(piece, doc)));
 }
 
 /** The caret at the end of an editor's content (Edit opens with it after the last word). */
