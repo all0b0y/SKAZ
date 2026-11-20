@@ -10,7 +10,6 @@ from typing import Literal, cast
 from ...markdown.source import FragmentInput, Origin
 from ..fragments import sanitize_title, to_fragments
 from ..guard import Finding
-from ..presentation import presentation_pdf
 from ..intake import (
     Original,
     Prepared,
@@ -19,9 +18,10 @@ from ..intake import (
     prepare_pdf,
     prepare_text_file,
 )
+from ..presentation import presentation_pdf
 from .docx import extract_docx
 from .formats import MAX_IMAGE_BYTES, ImageFormat, sniff_image_format
-from .images import MAX_PREVIEW_EDGE, DecodedImageInfo, decode_image, material_webp
+from .images import MAX_PREVIEW_EDGE, DecodedImageInfo, material_webp
 from .trusted import (
     FILE_CHANGED_MESSAGE,
     TrustedFileSelection,
@@ -141,30 +141,17 @@ def decode_verified_image(
     generate_preview: bool = False,
     max_preview_edge: int = MAX_PREVIEW_EDGE,
 ) -> DecodedImageInfo:
-    """Decode an image over a single open handle verified against ``validated`` before and after."""
-    image_format = cast(ImageFormat, validated.classification.format_id)
-    try:
-        with validated.resolved_path.open("rb") as handle:
-            verify_handle_version(
-                handle,
-                expected_size=validated.size_bytes,
-                expected_sha256=validated.sha256,
-            )
-            decoded = decode_image(
-                handle,
-                expected_format=image_format,
-                mime_type=validated.classification.mime_type,
-                generate_preview=generate_preview,
-                max_preview_edge=max_preview_edge,
-            )
-            verify_handle_version(
-                handle,
-                expected_size=validated.size_bytes,
-                expected_sha256=validated.sha256,
-            )
-            return decoded
-    except OSError as error:
-        raise SourceRejected("This file doesn't exist any more or can't be opened.") from error
+    """Decode the same bounded bytes that passed trusted selection verification."""
+    data = read_bounded_bytes(validated.resolved_path, max_bytes=validated.classification.max_bytes)
+    if len(data) != validated.size_bytes or hashlib.sha256(data).hexdigest() != validated.sha256:
+        raise SourceRejected(FILE_CHANGED_MESSAGE)
+    _, decoded = material_webp(
+        data,
+        cast(ImageFormat, validated.classification.format_id),
+        generate_preview=generate_preview,
+        max_preview_edge=max_preview_edge,
+    )
+    return decoded
 
 
 def prepare_image_selection(
@@ -176,7 +163,11 @@ def prepare_image_selection(
     data = read_bounded_bytes(validated.resolved_path, max_bytes=validated.classification.max_bytes)
     if len(data) != validated.size_bytes or hashlib.sha256(data).hexdigest() != validated.sha256:
         raise SourceRejected(FILE_CHANGED_MESSAGE)
-    encoded, decoded = material_webp(data, cast(ImageFormat, validated.classification.format_id), generate_preview=generate_preview)
+    encoded, decoded = material_webp(
+        data,
+        cast(ImageFormat, validated.classification.format_id),
+        generate_preview=generate_preview,
+    )
     origin = _file_origin(
         validated,
         width=decoded.width,

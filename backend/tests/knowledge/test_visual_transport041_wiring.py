@@ -676,7 +676,9 @@ async def test_preflight_send_text_only_and_revalidation_over_chat_api(
     await settle(lambda: runtime.kb_chats.state_of(chat_id) == "idle")
     claude_turn = engines["claude_code"].turns[-1]
     assert len(claude_turn.visuals) == 1
-    assert claude_turn.visuals[0].approved_bytes == png_bytes
+    image_dir = runtime.kb_sources.visual._material_files(img_mat.material_id).directory
+    saved_image = image_dir / ".skaz" / "image.webp"
+    assert claude_turn.visuals[0].approved_bytes == saved_image.read_bytes()
     assert claude_turn.visuals[0].engine == "claude_code"
     assert claude_turn.visuals[0].model_id == "sonnet"
 
@@ -745,7 +747,7 @@ async def test_preflight_send_text_only_and_revalidation_over_chat_api(
 
     # 8. Corrupted / mismatched image bytes fail closed via origin.sha256 check
     img_dir = runtime.kb_sources.visual._material_files(img_mat.material_id).directory
-    (img_dir / ".skaz" / "original.png").write_bytes(make_png(4, 3, color=(200, 10, 10)))
+    (img_dir / ".skaz" / "image.webp").write_bytes(make_png(4, 3, color=(200, 10, 10)))
     corrupt_res = await kb_client.post(
         f"/kb/chats/{chat_id}/messages",
         json={"text": "Inspect corrupted chart", "attachments": [img_mat.material_id]},
@@ -898,6 +900,7 @@ async def test_pdf_preflight_returns_typed_refusal_on_source_error(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["image", "heic", "pdf"])
+@pytest.mark.usefixtures("legacy_pdf_intake")
 async def test_adapter_receives_pixels_from_the_verified_snapshot(
     kb_client: httpx.AsyncClient,
     runtime: Runtime,
@@ -921,17 +924,19 @@ async def test_adapter_receives_pixels_from_the_verified_snapshot(
         source = tmp_path / "sample-chart.heic"
         source.write_bytes(original)
         material = runtime.kb_sources.add_file(source, INBOX_ID)
-        pixels = runtime.kb_sources.preview_trusted_image(source)
         replaced = b"Changed after the snapshot"
-        name = "original.heic"
+        name = "image.webp"
     else:
         original = pixels
         material = runtime.kb_sources.add_clipboard_image(
             original, INBOX_ID, mime_type="image/png", file_name="chart.png",
         )
         replaced = make_png(color=(160, 40, 90))
-        name = "original.png"
+        name = "image.webp"
     path = runtime.kb_sources.visual._material_files(material.material_id).directory / ".skaz" / name
+    if kind != "pdf":
+        pixels = path.read_bytes()
+        assert pixels[:4] == b"RIFF" and pixels[8:12] == b"WEBP"
     load = visual_runtime._read_verified_original
     reads: list[Path] = []
     started = threading.Event()
@@ -972,7 +977,6 @@ async def test_adapter_receives_pixels_from_the_verified_snapshot(
     await settle(lambda: runtime.kb_chats.state_of(chat_id) == "idle")
     assert reads == [path]
     assert path.read_bytes() == replaced
-    assert pixels.startswith(b"\x89PNG")
     (visual,) = engines["claude_code"].turns[-1].visuals
     assert visual.approved_bytes == pixels
     assert visual.locator.source_sha256 == hashlib.sha256(original).hexdigest()
@@ -1109,6 +1113,7 @@ async def test_scope_denied_scanned_pdf_without_visual_cue_is_refused(
     ("pdf_render_unavailable", "PDF pages are unavailable", True),
     ("video_frames_unsupported", "Video frames are unavailable", True),
 ])
+@pytest.mark.usefixtures("legacy_pdf_intake")
 async def test_source_preflight_refusals_explain_the_actual_problem(
     kb_client: httpx.AsyncClient,
     runtime: Runtime,
@@ -1218,6 +1223,7 @@ async def test_plain_text_preflight_does_not_report_verified_image_support(
         [line("Chart caption", 690), b""], "Inspect the chart caption", 1, True, id="implicit-page",
     ),
 ])
+@pytest.mark.usefixtures("legacy_pdf_intake")
 async def test_pdf_renderer_refusal_with_explicit_text_only_retry(
     kb_client: httpx.AsyncClient,
     runtime: Runtime,

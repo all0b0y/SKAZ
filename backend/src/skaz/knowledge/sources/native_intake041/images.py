@@ -96,7 +96,11 @@ def _scaled_size(width: int, height: int, max_edge: int) -> tuple[int, int]:
 
 
 def material_webp(
-    data: bytes, expected_format: ImageFormat, *, generate_preview: bool = False,
+    data: bytes,
+    expected_format: ImageFormat,
+    *,
+    generate_preview: bool = False,
+    max_preview_edge: int = MAX_PREVIEW_EDGE,
 ) -> tuple[bytes, DecodedImageInfo]:
     """Decode the primary still at its native size and apply the source orientation once."""
     if sniff_image_format(data[:64]) != expected_format:
@@ -119,13 +123,19 @@ def material_webp(
             info = DecodedImageInfo(expected_format, media[expected_format], width, height, mode)
             if generate_preview:
                 thumbnail = image.convert(mode)
-                thumbnail.thumbnail((MAX_PREVIEW_EDGE, MAX_PREVIEW_EDGE), Image.Resampling.LANCZOS)
+                edge = min(max_preview_edge, MAX_PREVIEW_EDGE)
+                thumbnail.thumbnail((edge, edge), Image.Resampling.LANCZOS)
                 preview = io.BytesIO()
                 thumbnail.save(preview, format="PNG")
-                info = replace(info, preview_png=preview.getvalue())
+                preview_bytes = preview.getvalue()
+                if len(preview_bytes) > MAX_PREVIEW_BYTES:
+                    raise SourceRejected("Generated image preview exceeds SKAZ's size limit.")
+                info = replace(info, preview_png=preview_bytes)
             return encoded, info
     except (OSError, ValueError, Image.DecompressionBombError) as error:
-        raise SourceRejected(f"This {expected_format.upper()} image is damaged and can't be decoded.") from error
+        raise SourceRejected(
+            f"This {expected_format.upper()} image is damaged and can't be decoded."
+        ) from error
 
 
 def _encode_preview_png(av_module: Any, frame: Any, *, max_edge: int) -> bytes:

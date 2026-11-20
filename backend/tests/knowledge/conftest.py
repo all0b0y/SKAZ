@@ -10,7 +10,11 @@ import pytest
 
 from skaz.app import create_app
 from skaz.config import AppConfig
+from skaz.knowledge.markdown.source import Origin
 from skaz.knowledge.service import KnowledgeService
+from skaz.knowledge.sources.fragments import to_fragments
+from skaz.knowledge.sources.intake import BOOK_PAGES, Original, Prepared, flag_instructions
+from skaz.knowledge.sources.pdf import extract_pdf
 from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN
 
@@ -20,6 +24,27 @@ def documents(tmp_path: Path) -> Path:
     path = tmp_path / "Documents"
     path.mkdir()
     return path
+
+
+@pytest.fixture
+def legacy_pdf_intake(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Persist a pre-card PDF using the usual service and library transaction."""
+    def prepare(data: bytes, *, origin: Origin, fallback: str, original: Original) -> Prepared:
+        extracted = extract_pdf(data)
+        return Prepared(
+            kind="book" if extracted.page_count >= BOOK_PAGES else "pdf",
+            title=extracted.title,
+            fallback_title=fallback,
+            fragments=to_fragments(extracted.paragraphs),
+            findings=flag_instructions(extracted.findings),
+            origin=origin,
+            extractor="pdf",
+            original=original,
+            failure=extracted.failure,
+            extra={"pages": extracted.page_count},
+        )
+
+    monkeypatch.setattr("skaz.knowledge.sources.service.prepare_pdf", prepare)
 
 
 @pytest.fixture

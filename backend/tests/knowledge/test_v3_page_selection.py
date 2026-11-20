@@ -63,11 +63,11 @@ async def test_routed_explicit_pages(
     material = runtime.kb_sources.add_file(path, INBOX_ID)
     rendered: list[int] = []
 
-    def render(_page_pdf: bytes, number: int) -> bytes:
+    def render(_pages: list[object], number: int) -> bytes:
         rendered.append(number)
         return make_png()
 
-    monkeypatch.setattr(runtime.kb_sources.visual, "page_renderer", render)
+    monkeypatch.setattr("skaz.knowledge.sources.document_card.card_page_png", render)
     chat = await kb_client.post("/kb/chats", json={"engine": "claude_code", "model": "sonnet"})
     chat_id = chat.json()["id"]
     body = {"text": query, "attachments": [material.material_id]}

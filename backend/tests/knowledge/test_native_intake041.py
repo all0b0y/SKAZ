@@ -125,8 +125,13 @@ def test_real_disk_backed_image_fixtures_decode_including_heic(tmp_path: Path) -
         assert prepared.to_wiki is False
         assert prepared.fragments == ()
         assert prepared.mime_type == expected_mime
-        assert prepared.original.path == fixture_path.resolve()
-        assert prepared.original.data is None  # no unnecessary byte copy in Original
+        stored = prepared.original.data
+        assert prepared.original.name == "image.webp"
+        assert stored and sniff_image_format(stored[:64]) == "webp"
+        assert prepared.original.path is None
+        assert prepared.origin.model_extra is not None
+        assert prepared.origin.model_extra["sha256"] == hashlib.sha256(fixture_path.read_bytes()).hexdigest()
+        assert prepared.origin.model_extra["stored_sha256"] == hashlib.sha256(stored).hexdigest()
         assert prepared.image_metadata is not None
         assert prepared.image_metadata.width == 64
         assert prepared.image_metadata.height == 48

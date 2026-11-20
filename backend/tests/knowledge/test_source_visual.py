@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import shutil
 import struct
@@ -173,6 +174,7 @@ def test_source_image_preparation_and_authorized_paths(sources: SourceService, t
     assert exc_info.value.reason == "oversized_image"
 
 
+@pytest.mark.usefixtures("legacy_pdf_intake")
 def test_pdf_on_demand_pages_prioritize_explicit_numbers_and_keep_no_permanent_pngs(
     ready: KnowledgeService, tmp_path: Path
 ) -> None:
@@ -569,6 +571,7 @@ def mixed_pdf() -> bytes:
     ("missing", True), ("missing", False), ("failed", True), ("no-output", True), ("truncated", True),
     ("timeout", True),
 ])
+@pytest.mark.usefixtures("legacy_pdf_intake")
 def test_pdf_render_unavailable_keeps_page_provenance_and_text_availability(
     sources: SourceService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     mixed_pdf: bytes, renderer: str, has_text: bool,
@@ -620,29 +623,25 @@ def test_pdf_render_unavailable_keeps_page_provenance_and_text_availability(
 def test_pdf_render_matches_entire_mixed_page(
     sources: SourceService, tmp_path: Path, mixed_pdf: bytes,
 ) -> None:
-    sips = shutil.which("sips") or "/usr/bin/sips"
-    if not os.access(sips, os.X_OK):
-        pytest.skip("Requires the macOS sips PDF renderer")
+    import pypdfium2 as pdfium  # type: ignore[import-untyped]
+    from PIL import Image
+
     original = tmp_path / "mixed.pdf"
     original.write_bytes(mixed_pdf)
     added = sources.add_file(original, INBOX_ID)
     (page,) = sources.prepare_pdf_pages(added.material_id, pages=[1])
-    assert (page.width, page.height) == (612, 792)
     assert page.locator.page == 1 and page.locator.source_sha256 == hashlib.sha256(mixed_pdf).hexdigest()
 
-    # Compare every pixel with a direct render of the original, including the heading and the small logo.
-    prepared = tmp_path / "prepared.png"
-    prepared.write_bytes(page.data)
-
-    def bitmap(source: Path) -> bytes:
-        output = source.with_suffix(".bmp")
-        subprocess.run(
-            [sips, "-s", "format", "bmp", str(source), "--out", str(output)],
-            check=True, capture_output=True, timeout=15,
-        )
-        return output.read_bytes()
-
-    assert bitmap(prepared) == bitmap(original)
+    # Every pixel must match the source page, with the heading and the logo in place.
+    with pdfium.PdfDocument(mixed_pdf) as document:
+        reference = document[0].render(scale=2.5)
+        try:
+            expected = reference.to_pil().convert("RGB")
+            with Image.open(io.BytesIO(page.data)) as actual:
+                assert actual.size == expected.size == (1530, 1980)
+                assert actual.convert("RGB").tobytes() == expected.tobytes()
+        finally:
+            reference.close()
     assert list(material_dir(sources.kb, added.material_id).rglob("*.png")) == []
 
 
@@ -652,9 +651,9 @@ def test_pdf_render_refuses_symlinked_original(
     path = tmp_path / "original.pdf"
     path.write_bytes(mixed_pdf)
     added = sources.add_file(path, INBOX_ID)
-    # Replacing .skaz/original.pdf with a symlink is refused as "unauthorized_path".
+    # Replacing the stored document with a symlink is refused as "unauthorized_path".
     mat_dir = material_dir(sources.kb, added.material_id)
-    orig = mat_dir / ".skaz" / "original.pdf"
+    orig = mat_dir / ".skaz" / "material.html"
     outside = tmp_path / "outside.pdf"
     outside.write_bytes(mixed_pdf)
     orig.unlink()

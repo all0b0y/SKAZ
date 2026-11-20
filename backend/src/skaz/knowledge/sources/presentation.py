@@ -33,7 +33,8 @@ on run argv
             end if
             if deck is missing value then error "Could not open the selected presentation."
             try
-                export deck to outputFile as PDF with properties {export style:IndividualSlides, all stages:false, skipped slides:true}
+                set exportOptions to {export style:IndividualSlides, all stages:false, skipped slides:true}
+                export deck to outputFile as PDF with properties exportOptions
             on error errMsg
                 close deck saving no
                 error errMsg

@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import Literal
 
 from ..intake import (
-    PRESENTATION_EXTENSIONS,
     PDF_EXTENSIONS as PDF_EXTENSIONS,
 )
 from ..intake import (
-    TEXT_EXTENSIONS as TEXT_EXTENSIONS,
+    PRESENTATION_EXTENSIONS,
+    SourceRejected,
 )
 from ..intake import (
-    SourceRejected,
+    TEXT_EXTENSIONS as TEXT_EXTENSIONS,
 )
 
 DOCX_EXTENSIONS: frozenset[str] = frozenset({".docx"})
@@ -24,7 +24,9 @@ AUDIO_EXTENSIONS: frozenset[str] = frozenset(
 )
 VIDEO_EXTENSIONS: frozenset[str] = frozenset({".mp4", ".m4v", ".mov", ".mkv", ".webm", ".avi"})
 SPEECH_EXTENSIONS: frozenset[str] = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
-DOCUMENT_EXTENSIONS: frozenset[str] = TEXT_EXTENSIONS | PDF_EXTENSIONS | DOCX_EXTENSIONS | PRESENTATION_EXTENSIONS
+DOCUMENT_EXTENSIONS: frozenset[str] = (
+    TEXT_EXTENSIONS | PDF_EXTENSIONS | DOCX_EXTENSIONS | PRESENTATION_EXTENSIONS
+)
 SUPPORTED_MATERIAL_EXTENSIONS: frozenset[str] = DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS | SPEECH_EXTENSIONS
 
 MAX_TEXT_BYTES = 64 * 1024 * 1024

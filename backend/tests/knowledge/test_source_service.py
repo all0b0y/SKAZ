@@ -195,15 +195,22 @@ def test_pdf_file_with_hidden_layer_and_instruction(sources: SourceService, tmp_
     assert result.title == "Physics Notes" and result.status == "ready"
     detail = sources.kb.material(result.material_id)
     # N2: the file's SHA-256 is kept with its origin (an exact duplicate is found before ingest).
-    assert detail.kind == "pdf" and detail.origin == {"type": "file", "url": None, "file_name": "physics.pdf",
-                                                     "sha256": hashlib.sha256(data).hexdigest()}
+    card = material_dir(sources.kb, result.material_id) / ".skaz" / "material.html"
+    assert detail.kind == "pdf" and detail.origin == {
+        "type": "file",
+        "url": None,
+        "file_name": "physics.pdf",
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "stored_sha256": hashlib.sha256(card.read_bytes()).hexdigest(),
+        "display_format": "document",
+    }
     assert all("Note to AI" not in f.text for f in detail.fragments)
     assert [f.page for f in detail.fragments] == [1, 1, 2]
     report = sources.guard_report(result.material_id)
     [finding] = report.hidden
     assert finding.kind == "hidden_pdf_text" and finding.page == 1 and finding.instruction is True
     assert [(item.seg, item.location.page) for item in report.excluded] == [(3, 2)]
-    assert (material_dir(sources.kb, result.material_id) / ".skaz" / "original.pdf").read_bytes() == data
+    assert "Note to AI" not in card.read_text()
 
 
 def test_scanned_pdf_becomes_a_failed_material_with_the_reason(

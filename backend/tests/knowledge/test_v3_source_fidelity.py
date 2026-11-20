@@ -27,6 +27,7 @@ from tests.knowledge.test_source_visual import make_png, material_dir
 @pytest.mark.parametrize("hidden", [
     b"(ten spaces) Tj", b"[(ten) -180 (spaces)] TJ", b'22 TL 3 2 (label) "',
 ])
+@pytest.mark.usefixtures("legacy_pdf_intake")
 def test_mixed_text_geometry(ready: KnowledgeService, tmp_path: Path, hidden: bytes) -> None:
     # Font, spacing, glyph advances and line origin all affect the next visible text.
     pdf = make_pdf([b"BT /F1 12 Tf 72 690 Td 3 Tr " + hidden
@@ -100,6 +101,7 @@ async def test_frame_identity(ready: KnowledgeService, action: str) -> None:
 
 @pytest.mark.skipif(shutil.which("sips") is None, reason="Requires the local macOS PDF rasterizer")
 @pytest.mark.parametrize(("alpha", "expected_success"), [(0.0, True), (0.045, False)])
+@pytest.mark.usefixtures("legacy_pdf_intake")
 def test_filtered_ink_requires_pixel_agreement(
     ready: KnowledgeService, tmp_path: Path, alpha: float, expected_success: bool,
 ) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import AsyncIterator
 from io import BytesIO
 from types import SimpleNamespace
@@ -108,7 +109,7 @@ def test_bibliography_is_not_an_abstract() -> None:
 
 
 @pytest.mark.parametrize("mime", ["application/pdf", "application/octet-stream"])
-async def test_pdf_is_saved_with_original_and_page_text(
+async def test_pdf_is_saved_with_provenance_and_page_text(
     parts: SimpleNamespace, network: SimpleNamespace, mime: str,
 ) -> None:
     url = RECORD + "/files/paper.pdf"
@@ -131,8 +132,10 @@ async def test_pdf_is_saved_with_original_and_page_text(
     assert material.fragments[0].page == 1
     assert "Measured expert routing" in material.fragments[0].text
     assert material.origin is not None and material.origin["content"] == "pdf"
-    originals = list(parts.kb.require().root.rglob("original.pdf"))
-    assert len(originals) == 1 and originals[0].read_bytes() == raw
+    (card,) = parts.kb.require().root.rglob("material.html")
+    assert material.origin["sha256"] == hashlib.sha256(raw).hexdigest()
+    assert material.origin["stored_sha256"] == hashlib.sha256(card.read_bytes()).hexdigest()
+    assert 'data-page="1"' in card.read_text()
     assert events[0].to_wiki is False
     assert network.requests[0].url.host == "198.18.0.8"  # checked fake-IP, pinned by SafeFetcher
     assert network.requests[0].headers["host"] == "zenodo.org"

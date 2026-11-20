@@ -22,7 +22,7 @@ from typing import cast
 import pypdfium2 as pdfium  # type: ignore[import-untyped]
 import pypdfium2.raw as raw  # type: ignore[import-untyped]
 from lxml import etree  # type: ignore[import-untyped]
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 from .fragments import Paragraph
 from .guard import clean_invisible
@@ -30,6 +30,7 @@ from .pdf import PdfExtraction, PdfRejected, extract_pdf, open_pdf, pdf_raster_i
 
 CARD_NAME = "material.html"
 MAX_CARD_BYTES = 64 * 1024 * 1024
+MAX_PAGE_EDGE = 2400
 _PDFIUM_LOCK = threading.Lock()  # PDFium is not reentrant even across documents.
 Box = tuple[float, float, float, float]
 _CAPTION = re.compile(r"^(?:fig(?:ure)?\.?|рис(?:унок)?\.?|table|таблица)\s*[\dIVX]", re.I)
@@ -45,6 +46,7 @@ class VisualPage:
     scan: bool = False
     whole: bool = False
     blocked: bool = False
+    raster: bytes | None = None
 
 
 def _union(boxes: Sequence[Box]) -> Box:
@@ -73,7 +75,7 @@ def _webp(image: Image.Image, *, photo: bool) -> bytes:
 
 def _bitmap(page: pdfium.PdfPage) -> Image.Image:
     width, height = page.get_size()
-    scale = min(2.5, 2400 / max(width, height))
+    scale = min(2.5, MAX_PAGE_EDGE / max(width, height))
     bitmap = page.render(scale=scale)
     try:
         return cast(Image.Image, bitmap.to_pil()).convert("RGB")
@@ -138,16 +140,16 @@ def _visual_page(display: bytes, comparisons: Sequence[bytes]) -> VisualPage:
         ):
             complex_page = True
         result.whole = complex_page or result.scan
-        if result.whole:
-            regions = [(full, result.scan)]
-        if not regions and not comparisons:
-            return result
         rendered = _bitmap(page)
         for comparison in comparisons:
             with pdfium.PdfDocument(comparison) as filtered:
                 if _bitmap(filtered[0]).tobytes() != rendered.tobytes():
                     result.blocked = True
                     return result
+        result.raster = _webp(rendered, photo=result.scan)
+        if result.whole:
+            result.figures.append((full, result.raster))
+            return result
         sx, sy = rendered.width / width, rendered.height / height
         for box, photo in regions:
             crop = (
@@ -165,6 +167,7 @@ def _visual_pages(data: bytes) -> list[VisualPage]:
     reader = open_pdf(data)
     pages: list[VisualPage] = []
     encoded_bytes = 0
+    optional_bytes = 0
     for number in range(1, len(reader.pages) + 1):
         display, *checks = pdf_raster_inputs(reader, number)
         try:
@@ -172,6 +175,10 @@ def _visual_pages(data: bytes) -> list[VisualPage]:
         except (pdfium.PdfiumError, ValueError, RuntimeError) as exc:
             raise PdfRejected(f"Could not read the layout of page {number}.") from exc
         encoded_bytes += sum(len(content) for _, content in page.figures)
+        if page.raster is not None and not page.whole:
+            optional_bytes += len(page.raster)
+            if optional_bytes * 4 // 3 >= MAX_CARD_BYTES:
+                page.raster = None
         if encoded_bytes * 4 // 3 >= MAX_CARD_BYTES:
             raise PdfRejected("The illustrated material exceeds the local import size limit.")
         pages.append(page)
@@ -282,15 +289,16 @@ def _in_reading_order(blocks: list[CardBlock], width: float) -> list[CardBlock]:
 
 def build_card(data: bytes, fallback: str) -> tuple[PdfExtraction, bytes]:
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="skaz-pdf-visual") as work:
-        visuals = work.submit(_visual_pages, data)
+        visual_task = work.submit(_visual_pages, data)
         extraction, recognized = _read_text(data)
-        pages = visuals.result()
+        pages = visual_task.result()
     title = escape(extraction.title or fallback)
     output = [
         f'<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>'
         '<meta name="viewport" content="width=device-width, initial-scale=1"><style>'
         "body{font:1rem/1.55 system-ui;max-width:58rem;margin:auto;padding:1rem;color-scheme:light dark}"
-        "section{border-block-start:1px solid #8886;margin-block:1rem}figure{margin:1rem 0}svg{max-width:100%;height:auto}"
+        "section{border-block-start:1px solid #8886;margin-block:1rem}"
+        "figure{margin:1rem 0}svg{max-width:100%;height:auto}"
         "summary{cursor:pointer}p{white-space:pre-wrap}</style></head><body>"
     ]
     assets: dict[str, bytes] = {}
@@ -359,20 +367,33 @@ def build_card(data: bytes, fallback: str) -> tuple[PdfExtraction, bytes]:
                     paragraphs.append(block.paragraph)
         output.append("</section>")
     output.append('<svg width="0" height="0" aria-hidden="true"><defs>')
-    for asset, image in assets.items():
-        with Image.open(io.BytesIO(image)) as decoded:
-            w, h = decoded.size
-        output.append(
-            f'<image id="asset-{asset}" width="{w}" height="{h}" href="data:image/webp;base64,'
-            f'{base64.b64encode(image).decode("ascii")}"/>'
-        )
-    output.append("</defs></svg></body></html>")
-    card = "".join(output).encode()
-    if len(card) > MAX_CARD_BYTES:
+    output.extend(_asset_markup("asset-" + asset, image) for asset, image in assets.items())
+    base = "".join(output).encode()
+    end = b"</defs></svg></body></html>"
+    remaining = MAX_CARD_BYTES - len(base) - len(end)
+    if remaining < 0:
         raise PdfRejected("The illustrated material exceeds the local import size limit.")
+
+    # The reading layout gets the existing storage budget first. A complete visual that does not
+    # fit is unavailable for model input, but the document and its searchable text can still be saved.
+    visuals: list[bytes] = []
+    for number, page in enumerate(pages, 1):
+        if page.raster is not None and not page.whole:
+            visual_markup = _asset_markup(f"page-visual-{number}", page.raster).encode()
+            if len(visual_markup) <= remaining:
+                visuals.append(visual_markup)
+                remaining -= len(visual_markup)
+    card = b"".join((base, *visuals, end))
     return replace(
         extraction, paragraphs=paragraphs, failure=None if paragraphs else extraction.failure
     ), card
+
+
+def _asset_markup(asset_id: str, image: bytes) -> str:
+    with Image.open(io.BytesIO(image)) as decoded:
+        w, h = decoded.size
+    encoded = base64.b64encode(image).decode("ascii")
+    return f'<image id="{asset_id}" width="{w}" height="{h}" href="data:image/webp;base64,{encoded}"/>'
 
 
 def card_pages(data: bytes) -> list[etree._Element]:
@@ -384,31 +405,40 @@ def card_pages(data: bytes) -> list[etree._Element]:
     return pages
 
 
+def _page_visual_asset(page: etree._Element) -> str | None:
+    # Existing cards already render a whole scan or complex page as a single figure.
+    # Partial figures and the HTML transcription cannot reconstruct the original typography.
+    bounds = _box((0, 0, float(page.attrib["data-width"]), float(page.attrib["data-height"])))
+    figures = page.findall("figure")
+    if len(figures) == 1 and figures[0].get("data-box") == bounds:
+        asset = figures[0].get("data-asset")
+        return asset if isinstance(asset, str) else None
+    return None
+
+
 def card_page_png(pages: list[etree._Element], number: int) -> bytes:
     page = pages[number - 1]
     if page.get("data-blocked") == "1":
         raise PdfRejected(f"SKAZ can't faithfully render page {number} with its hidden text.")
-    width, height = float(page.attrib["data-width"]), float(page.attrib["data-height"])
-    scale = min(2.0, 2400 / max(width, height))
-    canvas = Image.new("RGB", (max(1, round(width * scale)), max(1, round(height * scale))), "white")
-    brush = ImageDraw.Draw(canvas)
-    assets = {el.get("id"): el for el in page.getroottree().getroot().iter("image")}
-    for el in page:
-        if not el.get("data-box"):
-            continue
-        x, y, r, b = (round(float(n) * scale) for n in el.attrib["data-box"].split(","))
-        if el.tag == "figure":
-            href = assets[f"asset-{el.attrib['data-asset']}"].attrib["href"]
-            with Image.open(io.BytesIO(base64.b64decode(href.split(",", 1)[1], validate=True))) as image:
-                canvas.paste(image.resize((max(1, r - x), max(1, b - y)), Image.Resampling.LANCZOS), (x, y))
-        elif el.get("data-text") and el.text:
-            size = max(9, min(80, b - y))
-            font: ImageFont.FreeTypeFont | ImageFont.ImageFont
-            try:
-                font = ImageFont.truetype("Arial.ttf", size)
-            except OSError:
-                font = ImageFont.load_default(size=size)
-            brush.text((x, y), el.text, font=font, fill="black")
-    out = io.BytesIO()
-    canvas.save(out, "PNG")
-    return out.getvalue()
+    try:
+        asset = _page_visual_asset(page)
+        ids = {f"page-visual-{number}"}
+        if asset:
+            ids.add(f"asset-{asset}")
+        href = next(
+            (el.get("href", "") for el in page.getroottree().getroot().iter("image") if el.get("id") in ids),
+            "",
+        )
+        prefix = "data:image/webp;base64,"
+        if not href.startswith(prefix):
+            raise PdfRejected(
+                f"Page {number} has no stored full-page image. Attach the page as an image to use it."
+            )
+        with Image.open(io.BytesIO(base64.b64decode(href[len(prefix):], validate=True))) as image:
+            if image.format != "WEBP" or max(image.size) > MAX_PAGE_EDGE + 1:
+                raise ValueError("Invalid page image")
+            out = io.BytesIO()
+            image.convert("RGB").save(out, "PNG")
+            return out.getvalue()
+    except (OSError, KeyError, ValueError, Image.DecompressionBombError) as error:
+        raise PdfRejected(f"Could not read the stored image for page {number}.") from error

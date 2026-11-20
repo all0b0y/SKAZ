@@ -109,17 +109,15 @@ async def _exercise():
             "/kb/materials/file",
             json={"path": str(fixtures_dir / "sample-chart.png"), "folder_id": INBOX_ID, "to_wiki": False},
         )
-        assert png.status_code == 503, png.text
-        png_detail = png.json()["detail"]
-        assert "damaged" not in png_detail.lower()
-        assert "PyAV" in png_detail
+        assert png.status_code == 201, png.text
+        assert png.json()["material"]["kind"] == "image"
 
         heic = await client.post(
             "/kb/materials/file",
             json={"path": str(fixtures_dir / "sample-chart.heic"), "folder_id": INBOX_ID, "to_wiki": False},
         )
-        assert heic.status_code == 503, heic.text
-        assert "HEIC" in heic.json()["detail"]
+        assert heic.status_code == 201, heic.text
+        assert heic.json()["material"]["kind"] == "image"
 
         clip = await client.post(
             "/kb/materials/clipboard-image",
@@ -127,24 +125,23 @@ async def _exercise():
             headers={"content-type": "image/png"},
             content=(fixtures_dir / "sample-chart.png").read_bytes(),
         )
-        assert clip.status_code == 503, clip.text
-        assert "damaged" not in clip.json()["detail"].lower()
+        assert clip.status_code == 200, clip.text
+        assert clip.json()["material"]["id"] == png.json()["material"]["id"]
 
         prev = await client.post(
             "/kb/materials/image-preview",
             json={"path": str(fixtures_dir / "sample-chart.heic")},
         )
-        assert prev.status_code == 503, prev.text
-        assert "HEIC" in prev.json()["detail"]
+        assert prev.status_code == 200, prev.text
+        assert prev.content.startswith(bytes.fromhex("89504e470d0a1a0a"))
 
         mats = await client.get("/kb/materials")
         assert mats.status_code == 200
-        assert [m["kind"] for m in mats.json()] == ["docx"]
+        assert sorted(m["kind"] for m in mats.json()) == ["docx", "image", "image"]
 
         return {
             "skaz_file": skaz.__file__,
             "png_status": png.status_code,
-            "png_detail": png_detail,
             "clip_status": clip.status_code,
             "prev_status": prev.status_code,
             "materials": len(mats.json()),
@@ -185,13 +182,13 @@ def test_subprocess_startup_and_routes_without_av(tmp_path: Path) -> None:
     )
     assert proc.returncode == 0, f"stderr:\n{proc.stderr}\nstdout:\n{proc.stdout}"
     payload = json.loads(proc.stdout.strip().splitlines()[-1])
-    assert payload["png_status"] == 503
-    assert payload["clip_status"] == 503
-    assert payload["prev_status"] == 503
-    assert payload["materials"] == 1
+    assert payload["png_status"] == 201
+    assert payload["clip_status"] == 200
+    assert payload["prev_status"] == 200
+    assert payload["materials"] == 3
 
 
-async def test_non_image_intake_and_image_capability_errors(
+async def test_image_and_document_intake_with_broken_pyav_loader(
     kb_app: Any,
     kb_client: httpx.AsyncClient,
     tmp_path: Path,
@@ -275,44 +272,40 @@ async def test_non_image_intake_and_image_capability_errors(
 
         monkeypatch.setattr(importlib, "import_module", _fail_av)
 
-    # Disk image import (new file) fails with 503 capability error and creates no broken material.
+    # Native intake uses the bundled image decoder even if PyAV cannot load.
     new_png = tmp_path / "new-chart.png"
     new_png.write_bytes(png_bytes + b"\x00")
     img_resp = await kb_client.post(
         "/kb/materials/file",
         json={"path": str(new_png), "folder_id": INBOX_ID, "to_wiki": False},
     )
-    assert img_resp.status_code == 503, img_resp.text
-    img_detail = img_resp.json()["detail"]
-    assert "damaged" not in img_detail.lower()
-    assert "dlopen" not in img_detail
-    assert "PNG" in img_detail
-    assert "local-asr" in img_detail
+    assert img_resp.status_code == 201, img_resp.text
+    assert img_resp.json()["material"]["kind"] == "image"
 
-    # Clipboard image import fails with 503 capability error and creates no broken material.
+    # Clipboard import reuses the previously saved image.
     clip_resp = await kb_client.post(
         "/kb/materials/clipboard-image",
         params={"folder_id": INBOX_ID, "file_name": "Clipboard"},
         headers={"content-type": "image/png"},
         content=png_bytes,
     )
-    assert clip_resp.status_code == 503, clip_resp.text
-    assert "damaged" not in clip_resp.json()["detail"].lower()
+    assert clip_resp.status_code == 200, clip_resp.text
+    assert clip_resp.json()["material"]["id"] == existing_img.manifest.id
 
-    # Disk and stored-material previews return 503 capability error without breaking the healthy material.
+    # Disk and legacy material previews use the same bundled image decoder.
     disk_prev = await kb_client.post(
         "/kb/materials/image-preview",
         json={"path": str(FIXTURES_DIR / "sample-chart.heic")},
     )
-    assert disk_prev.status_code == 503, disk_prev.text
-    assert "HEIC" in disk_prev.json()["detail"]
+    assert disk_prev.status_code == 200, disk_prev.text
+    assert disk_prev.content.startswith(b"\x89PNG\r\n\x1a\n")
 
     mat_prev = await kb_client.post(
         "/kb/materials/image-preview",
         json={"material_id": existing_img.manifest.id},
     )
-    assert mat_prev.status_code == 503, mat_prev.text
-    assert "PNG" in mat_prev.json()["detail"]
+    assert mat_prev.status_code == 200, mat_prev.text
+    assert mat_prev.content.startswith(b"\x89PNG\r\n\x1a\n")
 
     # Existing healthy image material remains intact and readable; no extra broken materials were created.
     existing_get = await kb_client.get(f"/kb/materials/{existing_img.manifest.id}")
@@ -322,7 +315,7 @@ async def test_non_image_intake_and_image_capability_errors(
 
     all_mats = await kb_client.get("/kb/materials")
     assert all_mats.status_code == 200
-    assert len(all_mats.json()) == 3
+    assert len(all_mats.json()) == 4
 
     # Re-adding the exact already-stored image returns existing=True safely.
     sources: SourceService = kb_app.state.runtime.kb_sources

@@ -77,7 +77,6 @@ from .native_intake041 import (
     SelectionSource,
     TrustedFileSelection,
     classify_extension,
-    decode_image,
     decode_verified_image,
     prepare_clipboard_image,
     prepare_docx_selection,
@@ -469,10 +468,17 @@ class SourceService:
         classified = classify_extension(resolved)
         if classified.category != "image":
             raise SourceRejected("This material's original file isn't a supported image.")
-        decoded = decode_image(
-            resolved,
-            expected_format=cast(ImageFormat, classified.format_id),
-            mime_type=classified.mime_type,
+        from .native_intake041.images import material_webp
+
+        data = read_bounded_bytes(resolved, max_bytes=classified.max_bytes)
+        origin = files.manifest.origin
+        metadata = origin.model_extra if origin else None
+        expected = (metadata or {}).get("stored_sha256") or (metadata or {}).get("sha256")
+        if expected and content_hash(data) != expected:
+            raise SourceRejected("The stored material has changed since import.")
+        _, decoded = material_webp(
+            data,
+            cast(ImageFormat, classified.format_id),
             generate_preview=True,
             max_preview_edge=max_edge,
         )
@@ -626,7 +632,9 @@ class SourceService:
                 saved = read_bounded_bytes(original, max_bytes=MAX_CARD_BYTES)
                 if (metadata or {}).get("stored_sha256") != content_hash(saved):
                     return None
-                return pages if len(card_pages(saved)) == pages and len(open_pdf(selected_bytes).pages) == pages else None
+                if len(card_pages(saved)) != pages or len(open_pdf(selected_bytes).pages) != pages:
+                    return None
+                return pages
             descriptor = os.open(original, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
             with os.fdopen(descriptor, "rb") as handle:
                 verify_handle_version(

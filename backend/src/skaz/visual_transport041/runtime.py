@@ -514,9 +514,11 @@ def _preflight_source(
             from ..knowledge.sources.document_card import CARD_NAME, MAX_CARD_BYTES, card_pages
 
             try:
-                data = _read_verified_original(files, original_path,
-                                               max_bytes=MAX_CARD_BYTES if original_name == CARD_NAME else MAX_PDF_BYTES)
-                page_count = len(card_pages(data)) if original_name == CARD_NAME else len(open_pdf(data).pages)
+                is_card = original_name == CARD_NAME
+                data = _read_verified_original(
+                    files, original_path, max_bytes=MAX_CARD_BYTES if is_card else MAX_PDF_BYTES,
+                )
+                page_count = len(card_pages(data)) if is_card else len(open_pdf(data).pages)
             except PdfRejected as err:
                 raise VisualSourceUnsupported(
                     "pdf_render_unavailable",

@@ -91,6 +91,7 @@ async def test_saved_scan_and_duplicate_can_send_one_selected_page(
         assert image.format == "PNG"
         # Both pages contain a grey scan. Only page 2 has a white right margin.
         grey = image.getpixel((image.width // 2, image.height // 2))
+        assert isinstance(grey, tuple) and len(grey) == 3
         assert all(120 <= channel <= 136 for channel in grey)
         assert image.getpixel((image.width - 3, image.height // 2)) == (255, 255, 255)
     jobs = await kb_client.get("/kb/jobs", params={"material_id": material_id})

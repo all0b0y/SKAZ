@@ -810,7 +810,11 @@ def extract_pdf(data: bytes) -> PdfExtraction:
             raise PdfRejected(f"SKAZ can't read page {number + 1} of this PDF.") from error
         findings.extend(_unreadable_finding(text, number + 1) for text in visible.unreadable)
         cleaned = clean_invisible(visible.text, page=number + 1)
-        if not cleaned.text.strip() and analysis.image_coverage >= OCR_IMAGE_COVERAGE and not analysis.hidden_count:
+        if (
+            not cleaned.text.strip()
+            and analysis.image_coverage >= OCR_IMAGE_COVERAGE
+            and not analysis.hidden_count
+        ):
             scan_pages.append(number + 1)
         findings.extend(cleaned.findings)
         blocks = [part for part in re.split(r"\n\s*\n", cleaned.text) if part.strip()]

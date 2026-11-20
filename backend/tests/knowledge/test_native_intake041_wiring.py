@@ -81,12 +81,12 @@ def test_source_service_imports_docx_and_images_into_real_library(
         assert detail.origin["ocr_performed"] is False
         assert detail.origin["selection_source"] == "drop"
 
-        # Original file preserved in .skaz/original.<ext>
         record = sources.kb.material_repo.get(res.material_id)
         assert record is not None
-        ext = img_path.suffix.lower()
-        orig_path = sources.kb.library_root / record.rel_dir / ".skaz" / f"original{ext}"
-        assert orig_path.read_bytes() == img_path.read_bytes()
+        stored = (sources.kb.library_root / record.rel_dir / ".skaz" / "image.webp").read_bytes()
+        assert detail.origin["stored_sha256"] == hashlib.sha256(stored).hexdigest()
+        normalized = decode_image(stored, expected_format="webp", mime_type="image/webp")
+        assert (normalized.width, normalized.height) == (64, 48)
 
         # HEIC & image preview decode locally to PNG
         preview_png = sources.preview_material_image(res.material_id)
