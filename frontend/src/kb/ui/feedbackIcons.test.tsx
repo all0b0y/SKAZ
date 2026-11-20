@@ -99,11 +99,11 @@ describe('Feedback motion of the six buttons', () => {
     renderKb({ world: chatWorld() });
     await within(side()).findByRole('region', { name: 'Pinned' });
     const input = screen.getByTestId('message-input');
-    const send = screen.getByRole('button', { name: 'Send' });
-    await user.hover(send);
-    await user.click(send); // nothing typed: no message, no motion
-    expect(iconPlays).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Dictate' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
     await user.click(input);
+    await user.keyboard('{Enter}');
+    expect(iconPlays).toEqual([]);
     await user.keyboard('First question{Enter}');
     await waitFor(() => expect(iconPlays).toEqual(['send']));
   });

@@ -291,13 +291,19 @@ for (const theme of THEMES) {
   }
 }
 
-test('narrow centre hides the effort (v39)', async () => {
+test('a narrow centre keeps the reasoning control usable with the reader open', async () => {
   await open('', 'light', { width: 960, height: 700 });
   await side().getByRole('button', { name: /Why is there a logarithm/ }).click();
   await page.getByRole('article', { name: 'Answer' }).getByRole('button', { name: 'Wiki page: Entropy' }).first().click();
   await expect(page.getByRole('complementary', { name: 'Document' })).toBeVisible();
-  const width = await page.locator('.kb-composer').evaluate((el) => el.getBoundingClientRect().width);
-  if (width <= 440) await expect(page.getByRole('button', { name: /^Effort/ })).toBeHidden();
+  const composer = page.getByTestId('composer');
+  expect(await composer.evaluate((el) => el.getBoundingClientRect().width)).toBeLessThanOrEqual(440);
+  const effort = composer.getByRole('button', { name: /^Effort:/ });
+  await effort.click();
+  const menu = page.getByRole('menu', { name: 'Effort' });
+  await expect(menu.getByRole('menuitemradio', { checked: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(effort).toBeFocused();
   await check('narrow-doc-960-light');
 });
 

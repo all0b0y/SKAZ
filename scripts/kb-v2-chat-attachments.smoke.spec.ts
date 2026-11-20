@@ -27,8 +27,12 @@ test('V2 imports a disk-backed chat drop and a clipboard image through the nativ
     }));
     expect(created.ok).toBe(true);
     const chat = (created as { data: KbChat }).data;
-    await page.getByRole('button', { name: 'V2 attachment fixture', exact: true }).click();
-    await expect(page.getByRole('tab', { name: 'V2 attachment fixture' })).toHaveAttribute('aria-selected', 'true');
+    const chatRow = page.getByRole('region', { name: 'Chats' })
+      .getByRole('button', { name: 'V2 attachment fixture', exact: true });
+    await chatRow.click();
+    await expect(chatRow).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByRole('region', { name: 'Chat', exact: true })
+      .getByRole('heading', { name: 'V2 attachment fixture' })).toBeVisible();
     const log = page.getByRole('log', { name: 'Conversation' });
     const draft = page.getByRole('list', { name: 'Draft attachments' });
     const editor = page.getByRole('textbox', { name: 'Message' });
@@ -54,8 +58,10 @@ test('V2 imports a disk-backed chat drop and a clipboard image through the nativ
     } finally {
       await cdp.detach();
     }
-    await expect(draft.getByRole('button', { name: 'View sample-note.docx' })).toBeVisible();
-    await expect(draft.locator('[data-state="ready"]')).toHaveCount(1);
+    const document = draft.locator('[data-state="ready"]');
+    await expect(document).toHaveCount(1);
+    await expect(document.getByText('sample-note.docx', { exact: true })).toBeVisible();
+    await expect(document.getByRole('checkbox', { name: 'In wiki: sample-note.docx' })).toBeChecked();
     expect(hash()).toBe(before);
 
     // Use fixture bytes with a ClipboardEvent so this does not touch the system clipboard.

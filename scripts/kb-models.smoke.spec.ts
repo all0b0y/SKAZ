@@ -121,7 +121,6 @@ for (const theme of THEMES) {
       await wiki.getByRole('button', { name: /^Wiki model:/ }).click();
       menu = page.getByRole('menu', { name: 'Wiki model' });
       await expect(menu.getByRole('group', { name: 'Codex' })).toContainText('last:');
-      await expect(menu.getByRole('radiogroup', { name: 'Reasoning' })).toBeVisible();
       const m = (await menu.boundingBox())!;
       expect(m.x).toBeGreaterThanOrEqual(0);
       expect(right(m)).toBeLessThanOrEqual(size.width + 1);
@@ -129,6 +128,15 @@ for (const theme of THEMES) {
       await shot(`models-wiki-menu-${size.name}-${theme}`);
       await page.keyboard.press('Escape');
       await expect(menu).toBeHidden();
+      const effort = wiki.getByRole('button', { name: /^Effort:/ });
+      await effort.click();
+      const effortMenu = page.getByRole('menu', { name: 'Effort' });
+      await expect(effortMenu.getByRole('menuitemradio', { checked: true })).toHaveCount(1);
+      const effortBox = (await effortMenu.boundingBox())!;
+      expect(effortBox.x).toBeGreaterThanOrEqual(0);
+      expect(right(effortBox)).toBeLessThanOrEqual(size.width + 1);
+      await page.keyboard.press('Escape');
+      await expect(effort).toBeFocused();
       await checkPickerRow(wiki, 'wiki after a choice', wide);
 
       await rec.getByRole('button', { name: /^Recognition check:/ }).click();

@@ -5,23 +5,23 @@
 }
 :is(.kb-mat[data-material-kind],.kb-page[data-page-kind=concept]) {
   --reading-size: clamp(1rem,calc(var(--t-base) + 4px),1.35rem);
-  gap: 16px;
+  gap: var(--kb-sp-16);
 }
 :is(.kb-mat[data-material-kind],.kb-page[data-page-kind=concept]).is-wide {
   width: min(100%,46rem);
   margin-inline: auto;
-  padding-block: clamp(2px,1.8vw,20px) 20px;
+  padding-block: clamp(var(--kb-sp-2),1.8vw,var(--kb-sp-20)) var(--kb-sp-20);
 }
 .kb-doc__body:has(> :is(.kb-mat,.kb-page[data-page-kind=concept]).is-wide) {
-  padding-inline: clamp(14px,3.8vw,52px);
+  padding-inline: clamp(var(--kb-sp-14),3.8vw,52px);
 }
 :is(.kb-mat,.kb-page[data-page-kind=concept]) .kb-doc__title {
   line-height: 1.25;
   text-wrap: pretty;
 }
 .kb-mat__head {
-  gap: 6px;
-  padding-bottom: 6px;
+  gap: var(--kb-sp-6);
+  padding-bottom: var(--kb-sp-6);
 }
 .kb-mat :is(.kb-spk__text,.kb-mtext,.kb-tr-paras,.kb-document-content) {
   font-size: var(--reading-size);
@@ -31,23 +31,23 @@
   line-height: 1.62;
 }
 .kb-mat .kb-spk-list {
-  gap: 18px;
+  gap: var(--kb-sp-18);
 }
 .kb-mat .kb-spk {
-  gap: 5px;
+  gap: var(--kb-sp-6);
 }
 .kb-mat .kb-mtext {
-  gap: 14px;
+  gap: var(--kb-sp-14);
 }
 .kb-page[data-page-kind=concept] .kb-psec {
-  gap: 8px;
-  padding-top: 8px;
+  gap: var(--kb-sp-8);
+  padding-top: var(--kb-sp-8);
 }
 .kb-page[data-page-kind=concept] .kb-psec__head {
   font-size: calc(var(--t-base) + 1px);
 }
 .kb-page[data-page-kind=concept] .kb-psec__body {
-  gap: 14px;
+  gap: var(--kb-sp-14);
 }
 .kb-page[data-page-kind=concept] .kb-block__body {
   font-size: var(--reading-size);
@@ -57,7 +57,7 @@
 .kb-side__body:is([data-section=materials],[data-section=wiki]) .kb-sellist button.kb-row {
   height: auto;
   min-height: 34px;
-  padding-block: 5px;
+  padding-block: var(--kb-sp-6);
   align-items: center;
 }
 .kb-side__body:is([data-section=materials],[data-section=wiki]) .kb-sellist button.kb-row .kb-row__text {
@@ -70,11 +70,11 @@
   text-align: left;
 }
 .kb-side__body[data-section=materials] .kb-subhead--row {
-  margin-top: 14px;
+  margin-top: var(--kb-sp-14);
 }
 .kb-side__body[data-section=wiki] .kb-wsearch__field {
   min-height: 36px;
-  padding-inline: 10px;
+  padding-inline: var(--kb-sp-10);
 }
 .kb-side__body[data-section=wiki] .kb-wsearch__list {
   max-height: min(28dvh,15rem);
@@ -82,19 +82,19 @@
   overscroll-behavior: contain;
 }
 .kb-side__body[data-section=wiki] .kb-wiki-more {
-  margin-top: 14px;
+  margin-top: var(--kb-sp-14);
 }
 @media (max-width: 680px) {
   :is(.kb-mat,.kb-page[data-page-kind=concept]) {
     --reading-size: calc(var(--t-base) + 2px);
-    gap: 13px;
+    gap: var(--kb-sp-14);
   }
   .kb-page[data-page-kind=concept] .kb-psec__body:not(.kb-psec--user_note .kb-psec__body) {
-    padding-left: 4px;
+    padding-left: var(--kb-sp-4);
   }
   .kb-mat .kb-two {
     grid-template-columns: minmax(0,1fr);
-    gap: 10px;
+    gap: var(--kb-sp-10);
   }
 }
 .kb-app {
@@ -104,8 +104,8 @@
 .kb-doc.is-expanded :is(article[data-page-kind=note],article[data-page-kind=analysis],article[data-page-kind=folder],article[data-page-kind=deck],article[data-wiki-file]) {
   width: min(100%,46rem);
   margin-inline: auto;
-  padding-block: 15px 22px;
-  gap: 16px;
+  padding-block: var(--kb-sp-16) var(--kb-sp-22);
+  gap: var(--kb-sp-16);
 }
 :is(article[data-page-kind=note],article[data-page-kind=analysis],article[data-page-kind=folder]) .kb-block__body,article[data-wiki-file]>.kb-md {
   font-size: var(--reading-prose);
@@ -113,11 +113,11 @@
   overflow-wrap: anywhere;
 }
 :is(article[data-page-kind=note],article[data-page-kind=analysis],article[data-page-kind=folder]) .kb-psec {
-  padding-top: 9px;
-  gap: 8px;
+  padding-top: var(--kb-sp-10);
+  gap: var(--kb-sp-8);
 }
 :is(article[data-page-kind=note],article[data-page-kind=analysis],article[data-page-kind=folder]) .kb-psec__body {
-  gap: 14px;
+  gap: var(--kb-sp-14);
 }
 article[data-wiki-file] .md :is(h2,h3) {
   margin-block: 1.1em .35em;
@@ -134,10 +134,10 @@ article[data-wiki-file] .md p {
   display: block;
   font-size: var(--t-base);
   line-height: 1.5;
-  margin-top: 4px;
+  margin-top: var(--kb-sp-4);
 }
 .kb-deck__row {
-  padding-block: 9px;
+  padding-block: var(--kb-sp-10);
 }
 .kb-st-tq {
   max-width: 60ch;
@@ -163,14 +163,14 @@ article[data-wiki-file] .md p {
   overflow-wrap: anywhere;
 }
 .kb-settings .kb-srow__label+.kb-srow__hint {
-  margin-top: 4px;
+  margin-top: var(--kb-sp-4);
 }
 @media (max-width: 680px) {
   .kb-app {
     --reading-prose: calc(var(--t-base) + 2px);
   }
   :is(article[data-page-kind=note],article[data-page-kind=analysis],article[data-page-kind=folder]) .kb-psec__body {
-    padding-inline-start: 4px;
+    padding-inline-start: var(--kb-sp-4);
   }
   .kb-settings .kb-settings__nav {
     min-width: 0;
@@ -191,8 +191,8 @@ article[data-wiki-file] .md p {
     display: grid;
     grid-template-columns: minmax(0,1fr) minmax(0,1.1fr);
     align-items: center;
-    gap: 7px;
-    padding: 6px 10px;
+    gap: var(--kb-sp-8);
+    padding: var(--kb-sp-6) var(--kb-sp-10);
     overflow: visible;
     border-right: none;
     border-bottom: 1px solid var(--kb-line);
@@ -214,11 +214,11 @@ article[data-wiki-file] .md p {
     color: var(--kb-text);
     font: inherit;
     border-radius: var(--kb-r-md);
-    padding-inline: 5px;
+    padding-inline: var(--kb-sp-6);
   }
   .kb-settings__content {
     min-height: 0;
-    padding: 10px 12px 16px;
+    padding: var(--kb-sp-10) var(--kb-sp-12) var(--kb-sp-16);
   }
   .kb-srow[data-row='wiki-model']>.kb-srow__control {
     flex: 1 1 100%;
@@ -245,20 +245,20 @@ article[data-wiki-file] .md p {
 .kb-msg__bubble { max-width: 100%; background: transparent; padding: 0; }
 .kb-composer { width: min(calc(100% - 2 * var(--kb-sp-18)), 48rem); margin-inline: auto; }
 .kb-wiki-engines { border: 0; margin: 0; padding: 0; min-width: 0; }
-.kb-wiki-engines label { display: inline-flex; position: relative; cursor: pointer; margin: 3px 3px 0 0; }
+.kb-wiki-engines label { display: inline-flex; position: relative; cursor: pointer; margin: var(--kb-sp-4) var(--kb-sp-4) 0 0; }
 .kb-wiki-engines input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .kb-wiki-engines span, .kb-wiki-select select {
   border: 1px solid var(--kb-line); background: var(--kb-pane); color: var(--kb-text);
-  border-radius: var(--kb-r-sm); padding: 4px 7px; font: inherit;
+  border-radius: var(--kb-r-sm); padding: var(--kb-sp-4) var(--kb-sp-8); font: inherit;
 }
 .kb-wiki-engines :checked + span { border-color: var(--kb-accent); background: var(--kb-accent-soft); }
 .kb-wiki-engines :focus-visible + span { outline: 2px solid var(--kb-accent); }
 .kb-wiki-engines :disabled + span { opacity: .5; }
-.kb-wiki-select { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
+.kb-wiki-select { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--kb-sp-6); }
 .kb-wiki-select select { max-width: 100%; }
 .kb-srow[data-row='wiki-model'] { align-items: flex-start; flex-wrap: wrap; }
 .kb-srow[data-row='wiki-model'] .kb-srow__control { max-width: 100%; min-width: 0; }
-.kb-wiki-pick { width: min(100%, 360px); align-items: stretch; gap: 8px; }
+.kb-wiki-pick { width: min(100%, 360px); align-items: stretch; gap: var(--kb-sp-8); }
 .kb-side__record { display: flex; justify-content: center; }
 .kb-recgo { border: 1px solid var(--kb-line); border-radius: var(--kb-r-pill); }
 .kb-recgo .kb-capsule { background: transparent; color: var(--kb-text); border: 0; justify-content: center; }
@@ -272,7 +272,7 @@ article[data-wiki-file] .md p {
 .kb-src-pick__list [aria-selected='true'] { background: var(--kb-accent-soft); }
 @media (max-width: 680px) {
   .kb-msg__bubble, .kb-msg__body { font-size: calc(var(--t-base) + 4px); line-height: 1.56; }
-  .kb-spanel__foot { gap: 4px; flex-wrap: wrap; }
+  .kb-spanel__foot { gap: var(--kb-sp-4); flex-wrap: wrap; }
 }
 .kb-prose-link { display: inline; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: .15em; cursor: pointer; overflow-wrap: anywhere; }
 .kb-prose-link:where([data-platform]:not([data-platform=""]))::before { content: "▶"; font-size: .75em; margin-inline-end: .25em; }
@@ -284,9 +284,9 @@ article[data-wiki-file] .md p {
 @media (max-width: 680px) {
   .kb-panel-expand { display: none; }
   .kb-center { min-width: 0; }
-  .kb-composer { width: calc(100% - 12px); padding-inline: 6px; }
-  .kb-composer__bar { gap: 2px; }
-  .kb-picker { padding-inline: 3px; }
+  .kb-composer { width: calc(100% - 12px); padding-inline: var(--kb-sp-6); }
+  .kb-composer__bar { gap: var(--kb-sp-2); }
+  .kb-picker { padding-inline: var(--kb-sp-4); }
   .kb-titlebar { --kb-titlebar-inset: 8px; }
   .kb-rail { overflow-y: auto; }
   .kb-rail > * { flex-shrink: 0; }
@@ -298,13 +298,13 @@ article[data-wiki-file] .md p {
   .kb-picker:not(.kb-effort) { max-width: 30%; }
 }
 .kb-reader-finish .kb-composer {
-  padding: 10px 12px;
+  padding: var(--kb-sp-10) var(--kb-sp-12);
   border-color: var(--kb-line);
   background: var(--kb-pane);
   box-shadow: none;
 }
 .kb-editor, .kb-editor__placeholder { font-size: calc(var(--t-base) + 3px); line-height: 1.54; }
-.kb-editor__placeholder { white-space: normal; }
+.kb-editor__placeholder { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kb-editor-wrap:has(.kb-editor__placeholder) { display: grid; }
 .kb-editor-wrap:has(.kb-editor__placeholder) > * { position: static; grid-area: 1 / 1; }
 .kb-editor__placeholder { padding: var(--kb-sp-2) var(--kb-sp-4); }

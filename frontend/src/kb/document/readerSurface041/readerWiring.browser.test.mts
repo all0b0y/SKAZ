@@ -176,7 +176,7 @@ for (const theme of ['light', 'dark']) {
       await expect(targetQuote).toBeFocused();
       await expect(panel).toHaveAttribute('data-state', 'open');
       const materialLayout = await checkHeaderActions(panel);
-      assert.equal(materialLayout.count, 7);
+      assert.equal(materialLayout.count, 8);
       const notes = panel.getByRole('button', { name: 'Open the notes' });
       const transcript = panel.getByRole('button', { name: 'Transcript' });
       const back = panel.getByRole('button', { name: 'Back', exact: true });
@@ -184,7 +184,7 @@ for (const theme of ['light', 'dark']) {
       await expect(panel.getByRole('heading', { name: 'Notes: Lecture 8 — entropy' })).toBeVisible();
       await expect(transcript).toBeFocused();
       const notesLayout = await checkHeaderActions(panel);
-      assert.equal(notesLayout.count, 8);
+      assert.equal(notesLayout.count, 9);
       if (artifacts) await page.screenshot({ path: resolve(artifacts, theme + '-' + width + '-notes.png') });
       await page.keyboard.press('Enter');
       await expect(notes).toBeFocused();

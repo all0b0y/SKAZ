@@ -204,8 +204,9 @@ for (const theme of ['light', 'dark'] as const) {
     const panel = composer.getByRole('dialog', { name: 'Search and sources for this chat' });
     await panel.getByRole('radio', { name: 'Only these', exact: true }).click();
     await panel.getByRole('button', { name: 'Add material' }).click();
-    await panel.getByRole('textbox', { name: 'Find a material or wiki page' }).fill('Lecture 8');
-    await panel.getByRole('button', { name: 'Lecture 8 — entropy', exact: true }).click();
+    const picker = panel.getByRole('combobox', { name: 'Find a material or wiki page' });
+    await picker.fill('Lecture 8');
+    await panel.getByRole('option', { name: 'Lecture 8 — entropy', exact: true }).click();
     await panel.getByRole('switch', { name: 'Web · only these sites' }).click();
     const only = panel.getByRole('region', { name: 'Web · only these sites' });
     await only.getByRole('button', { name: 'Add site' }).click();

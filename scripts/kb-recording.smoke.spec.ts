@@ -77,9 +77,8 @@ async function shoot(page: Page, name: string) {
   await page.emulateMedia({ colorScheme: 'light' });
 }
 
-const titlebar = (page: Page) => page.getByTestId('titlebar');
-const recordButton = (page: Page) => titlebar(page).getByRole('button', { name: 'Record', exact: true });
-const capsule = (page: Page) => titlebar(page).getByRole('button', { name: /^(Recording|Paused) \d/ });
+const recordButton = (page: Page) => page.getByRole('button', { name: 'Record', exact: true });
+const capsule = (page: Page) => page.getByRole('button', { name: /^(Recording|Paused) \d.*Recording controls$/ });
 const livePanel = (page: Page) => page.getByRole('complementary', { name: 'Live recording' });
 
 /** Stop through the capsule's control row (opened by hovering, as a pointer user does). */
@@ -241,7 +240,8 @@ for (const outcome of ['acknowledged', 'quit-timeout'] as const) {
 
       // Continue the same recording through the material view (the old "Continue recording").
       await again.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: /^Materials/ }).click();
-      await again.getByRole('region', { name: 'Materials' }).getByRole('button', { name: /^Recording/ }).first().click();
+      const recent = again.getByRole('region', { name: 'Materials' }).getByRole('grid', { name: 'Recent' });
+      await recent.locator(`[data-sel-id="${materialId}"]`).getByRole('button', { name: /^Recording/ }).click();
       const doc = again.getByRole('complementary', { name: 'Document' });
       await expect(doc.getByText('fixture', { exact: false }).first()).toBeVisible();
       await injectCapture(again, 'normal');

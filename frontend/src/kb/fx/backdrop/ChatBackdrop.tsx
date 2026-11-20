@@ -71,7 +71,7 @@ export function ChatBackdrop({ working, active, reduced }: ChatBackdropProps) {
     return () => { observer.disconnect(); app.removeEventListener('scroll', paintBridge, true); };
   }, [paintBridge]);
   return (
-    <div ref={host} className="kb-chat__backdrop" aria-hidden="true" data-working={moving ? 'true' : undefined} data-still={reduced ? 'true' : undefined}>
+    <div ref={host} className="kb-chat__backdrop" aria-hidden="true" data-overlay="" data-working={moving ? 'true' : undefined} data-still={reduced ? 'true' : undefined}>
       <FxCanvas className="kb-fx-backdrop" active={active && (reduced || running)} reduced={reduced} frameMs={frameMs}
         onFrame={(ctx, w, h, _t, dt, colors) => {
           scene.step(dt);
