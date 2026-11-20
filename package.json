@@ -49,7 +49,15 @@
     "jsdom": "^30.1.2",
     "playwright": "^1.63.0",
     "typescript": "^7.0.2",
-    "vite": "^7.3.6",
+    "vite": "^7.3.8",
     "vitest": "^5.0.4"
+  },
+  "overrides": {
+    "@electron/universal@2.0.3": {
+      "minimatch@^9.0.3": "^11.0.1"
+    },
+    "app-builder-lib@26.15.3": {
+      "minimatch@^10.2.5": "^11.0.1"
+    }
   }
 }
