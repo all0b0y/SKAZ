@@ -27,6 +27,17 @@ class AppConfig:
     local_model_cache_dir: Path | None = None
     documents_dir: Path = field(default_factory=lambda: Path.home() / "Documents")
     documents_sandbox: Path | None = None
+    #: Run Me Graph on a separate, explicitly supplied synthetic profile.
+    me_graph_isolated: bool = False
+
+    def validate_me_graph_profile(self) -> None:
+        if not self.me_graph_isolated:
+            return
+        data = self.data_dir.resolve()
+        sandbox = self.documents_sandbox
+        if (sandbox is None or not data.is_relative_to(sandbox.resolve())
+                or data.is_relative_to((Path.home() / ".skaz").resolve())):
+            raise ValueError("Me Graph requires an isolated data directory inside the test sandbox.")
 
     @property
     def audio_dir(self) -> Path:
@@ -53,6 +64,7 @@ class AppConfig:
             data_dir=data_dir,
             port=port,
             documents_sandbox=(Path(value) if (value := os.environ.get("SKAZ_DOCUMENTS_SANDBOX")) else None),
+            me_graph_isolated=os.environ.get("SKAZ_ME_GRAPH_ISOLATED") == "1",
             documents_dir=Path(os.environ.get(
                 "SKAZ_DOCUMENTS_DIR", str(Path.home() / "Documents"),
             )),

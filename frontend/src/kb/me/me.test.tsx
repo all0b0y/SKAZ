@@ -6,6 +6,9 @@ import { chatWorld } from '../test/fixtures';
 import { freshMe, writeMe } from '../test/fakeMe';
 import type { FakeWorld } from '../test/fakeKb';
 import { ME_STORAGE_NOTE } from './MeSection';
+import type { BridgeRequest, JsonResponse } from '../../api/bridge';
+import type { KbGraphEntries, KbGraphMe } from '../../api/kb/types.gen';
+import { createFakeBridge } from '../test/fakeBridge';
 
 const openMe = async (user: ReturnType<typeof userEvent.setup>) => {
   await screen.findByRole('navigation', { name: 'Sections' });
@@ -16,6 +19,37 @@ const openMe = async (user: ReturnType<typeof userEvent.setup>) => {
   return dialog;
 };
 const skill = (dialog: HTMLElement, title: string) => within(within(dialog).getByRole('region', { name: 'Skills of Me' })).getByRole('group', { name: title });
+
+it('renders graph entries inline in Settings Me and returns focus after Escape', async () => {
+  const user = userEvent.setup();
+  const view: KbGraphMe = {
+    schema_version: 2, status: 'ready', revision: 1, enabled: true, personal: true, study: false, chat: false,
+  };
+  const rows: KbGraphEntries = {
+    next_offset: null, entries: [{
+      id: 'fixture', revision: 1, text: 'Always use short answers.', title: null, description: null,
+      area: 'chat', kind: 'instruction', origin: 'user', scoped: false, enabled: true,
+      status: 'ready', created_at: null, why: 'You added this entry in Me.',
+    }],
+  };
+  const other = createFakeBridge(chatWorld());
+  const request = async <T,>(req: BridgeRequest): Promise<JsonResponse<T>> => {
+    if (req.method === 'GET' && ['/kb/me', '/kb/me/entries'].includes(req.path)) {
+      return { ok: true, status: 200, data: (req.path === '/kb/me' ? view : rows) as T };
+    }
+    return other.bridge.request<T>(req);
+  };
+  renderKb({ world: chatWorld(), bridge: { request } });
+  const dialog = await openMe(user);
+  expect(await within(dialog).findByRole('heading', { name: 'What you told me' })).toBeVisible();
+  const trigger = await within(dialog).findByRole('button', { name: 'Why this?' });
+  await user.click(trigger);
+  expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  expect(within(dialog).getByText('You added this entry in Me.')).toBeVisible();
+  await user.keyboard('{Escape}');
+  expect(trigger).toHaveFocus();
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+});
 
 /** A world whose «Я» already holds a profile and a skill of the user's own. */
 function meWorld(): FakeWorld {

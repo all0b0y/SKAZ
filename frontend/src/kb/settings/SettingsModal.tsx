@@ -28,6 +28,8 @@ import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
 import { MeIntro, MeSkills, MeStorageNote, MeSwitchRow } from '../me/MeSection';
+import { MeGraphSection } from '../me/MeGraphSection';
+import { isGraphMe } from '../me/api';
 import { SearchRowControl, SearchRowList, SEARCH_ROWS, type SearchRowId } from '../searchRules/SearchSettings';
 import { useSearchSettings } from '../searchRules/sites';
 import { AccentRow, BaseRow, DensityRow, MotionRow, PresetGallery, SoundsRow } from './Appearance';
@@ -249,6 +251,8 @@ function visibleSearchRows(rows: ReadonlyArray<RowDef>, beta: boolean): RowDef[]
 function SectionBody({ section }: { section: SettingsSection }) {
   const { client } = useServices();
   const beta = useSearchSettings(client, (s) => s.rules?.beta ?? false);
+  const me = useSettings((s) => s.me.value);
+  if (section === 'me' && isGraphMe(me)) return <MeGraphSection view={me} />;
   const rows = visibleSearchRows(ROWS.filter((r) => r.section === section), beta);
   return (
     <>
@@ -284,6 +288,7 @@ export function SettingsModal() {
   const setSection = useUi((s) => s.setSettingsSection);
   const problems = useProblems();
   const { settings, agents, client } = useServices();
+  const graphMe = useSettings((s) => isGraphMe(s.me.value));
   const beta = useSearchSettings(client, (s) => s.rules?.beta ?? false);
 
   // Fresh live data each time the window opens (cheap reads; the backend owns the truth).
@@ -309,7 +314,9 @@ export function SettingsModal() {
   const updateSeen = !useAgentUpdatesDot();
 
   return (
-    <Modal open={open} onClose={() => { setQuery(''); close(); }} title="Settings" className="kb-settings" testId="settings" pane="settings"
+    <Modal open={open} onClose={() => { setQuery(''); close(); }} title="Settings"
+      className={graphMe && section === 'me' ? 'kb-settings kb-settings--me-graph' : 'kb-settings'}
+      testId="settings" pane="settings"
       initialFocusRef={searchRef}>
       <div className="kb-settings__body">
         <nav className="kb-settings__nav" aria-label="Settings sections">
@@ -328,6 +335,19 @@ export function SettingsModal() {
               }}
             />
           </div>
+          {graphMe && section === 'me' && (
+            <select className="kb-select kb-settings__section-picker" aria-label="Settings section" value={section}
+              onChange={(event) => {
+                const item = NAV.flatMap((group) => group.items).find(({ id }) => id === event.currentTarget.value);
+                if (item) { setQuery(''); setSection(item.id); }
+              }}>
+              {NAV.map((group) => (
+                <optgroup key={group.group} label={group.group}>
+                  {group.items.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          )}
           {NAV.map((g) => (
             <Fragment key={g.group}>
               <h3 className="kb-settings__group">{g.group}</h3>

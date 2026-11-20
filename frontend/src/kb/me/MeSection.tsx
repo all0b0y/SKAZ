@@ -30,7 +30,7 @@ const Reading = () => <span className="kb-muted" role="status">Reading…</span>
 function usePutSkill() {
   const { settings } = useServices();
   return (d: KbMeSkillDetail) => settings.setState((s) => {
-    if (!s.me.value) return {};
+    if (!s.me.value || !('skills' in s.me.value)) return {};
     const { text: _t, ...skill } = d;
     void _t;
     const known = s.me.value.skills.some((k) => k.id === d.id);
@@ -297,6 +297,7 @@ export function MeSkills() {
   const { settings } = useServices();
   const me = useSettings((s) => s.me);
   const [view, setView] = useState<{ kind: 'list' } | { kind: 'skill'; id: string } | { kind: 'new' }>({ kind: 'list' });
+  const legacy = me.value && 'skills' in me.value ? me.value : null;
   if (view.kind === 'skill') return <SkillEditor id={view.id} onBack={() => setView({ kind: 'list' })} />;
   if (view.kind === 'new') return <NewSkill onDone={(id) => setView(id ? { kind: 'skill', id } : { kind: 'list' })} />;
   return (
@@ -305,11 +306,11 @@ export function MeSkills() {
         <h4 className="kb-sgroup__title">Skills</h4>
         <Button size="sm" icon="plus" onClick={() => setView({ kind: 'new' })}>New skill</Button>
       </div>
-      {!me.value ? (
+      {!legacy ? (
         me.error ? <Failed error={me.error} retry={() => void settings.getState().loadMe()} /> : <Reading />
       ) : (
-        <div className={me.value.enabled ? undefined : 'kb-me__off'}>
-          {me.value.skills.map((skill) => <SkillRow key={skill.id} skill={skill} onOpen={() => setView({ kind: 'skill', id: skill.id })} />)}
+        <div className={legacy.enabled ? undefined : 'kb-me__off'}>
+          {legacy.skills.map((skill) => <SkillRow key={skill.id} skill={skill} onOpen={() => setView({ kind: 'skill', id: skill.id })} />)}
         </div>
       )}
     </section>

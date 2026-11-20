@@ -1052,6 +1052,12 @@ export interface KbGraph {
   edges: KbGraphEdge[];
 }
 
+export interface KbGraphCreate {
+  expected_revision: number;
+  text: string;
+  area: "chat" | "practice" | "personal";
+}
+
 export interface KbGraphEdge {
   source: string;
   target: string;
@@ -1061,6 +1067,48 @@ export interface KbGraphEdge {
   block_id: string | null;
 }
 
+export interface KbGraphEntries {
+  entries: KbGraphEntry[];
+  next_offset: number | null;
+}
+
+export interface KbGraphEntry {
+  id: string;
+  revision: number;
+  text: string;
+  title: string | null;
+  description: string | null;
+  area: "chat" | "practice" | "personal";
+  kind: "instruction" | "fact" | "procedure" | "legacy_import" | "observed";
+  origin: "user" | "agent" | "restore" | "observed";
+  scoped: boolean;
+  enabled: boolean;
+  status: "ready" | "not_used" | "needs_context" | "shadow";
+  created_at: string | null;
+  why: string;
+}
+
+export interface KbGraphHistory {
+  versions: KbGraphEntry[];
+}
+
+export interface KbGraphLearning {
+  expected_revision: number;
+  study?: boolean | null;
+  chat?: boolean | null;
+  personal?: boolean | null;
+}
+
+export interface KbGraphMe {
+  schema_version: 2;
+  status: "ready" | "migrating" | "recovery_required";
+  revision: number;
+  enabled: boolean;
+  personal: boolean;
+  study: boolean;
+  chat: boolean;
+}
+
 export interface KbGraphNode {
   id: string;
   kind: "concept" | "note" | "analysis" | "folder";
@@ -1068,6 +1116,18 @@ export interface KbGraphNode {
   folder_ids: string[];
   degree: number;
   hub: boolean;
+}
+
+export interface KbGraphRestore {
+  expected_revision: number;
+  revision: number;
+}
+
+export interface KbGraphUpdate {
+  expected_revision: number;
+  text?: string | null;
+  area?: "chat" | "practice" | "personal" | null;
+  enabled?: boolean | null;
 }
 
 export interface KbHermesCatalogItem {
@@ -1600,6 +1660,7 @@ export interface KbMeSkillDetail {
 
 export interface KbMeSwitch {
   enabled: boolean;
+  expected_revision?: number | null;
 }
 
 export interface KbMeUpdate {
@@ -4111,21 +4172,91 @@ export interface KbEndpoints {
     path: Record<string, never>;
     query: Record<string, never>;
     body: never;
-    response: KbMe;
+    response: KbMe | KbGraphMe;
     status: 200;
   };
   "PUT /kb/me": {
     path: Record<string, never>;
     query: Record<string, never>;
     body: KbMeSwitch;
-    response: KbMe;
+    response: KbMe | KbGraphMe;
+    status: 200;
+  };
+  "DELETE /kb/me/data": {
+    path: Record<string, never>;
+    query: { expected_revision: number };
+    body: never;
+    response: KbGraphMe;
     status: 200;
   };
   "POST /kb/me/edits/{edit_id}/undo": {
     path: { edit_id: string };
     query: Record<string, never>;
     body: never;
-    response: KbMeSkillDetail;
+    response: KbMeSkillDetail | KbGraphEntry;
+    status: 200;
+  };
+  "GET /kb/me/entries": {
+    path: Record<string, never>;
+    query: { offset?: number; limit?: number };
+    body: never;
+    response: KbGraphEntries;
+    status: 200;
+  };
+  "POST /kb/me/entries": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbGraphCreate;
+    response: KbGraphEntry;
+    status: 201;
+  };
+  "GET /kb/me/entries/{entry_id}": {
+    path: { entry_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbGraphEntry;
+    status: 200;
+  };
+  "PATCH /kb/me/entries/{entry_id}": {
+    path: { entry_id: string };
+    query: Record<string, never>;
+    body: KbGraphUpdate;
+    response: KbGraphEntry;
+    status: 200;
+  };
+  "DELETE /kb/me/entries/{entry_id}": {
+    path: { entry_id: string };
+    query: { expected_revision: number };
+    body: never;
+    response: void;
+    status: 204;
+  };
+  "GET /kb/me/entries/{entry_id}/history": {
+    path: { entry_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbGraphHistory;
+    status: 200;
+  };
+  "POST /kb/me/entries/{entry_id}/restore": {
+    path: { entry_id: string };
+    query: Record<string, never>;
+    body: KbGraphRestore;
+    response: KbGraphEntry;
+    status: 200;
+  };
+  "PUT /kb/me/learning": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbGraphLearning;
+    response: KbGraphMe;
+    status: 200;
+  };
+  "POST /kb/me/retry": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbGraphMe;
     status: 200;
   };
   "POST /kb/me/skills": {

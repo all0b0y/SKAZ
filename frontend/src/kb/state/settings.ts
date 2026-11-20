@@ -6,8 +6,7 @@ import type { HealthSectionId, KeyProviderId } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult } from './library';
 import type { SettingsSection } from './ui';
-import type { KbMe } from '../../api/kb/types.gen';
-import { readMe, switchMe } from '../me/api';
+import { readMe, switchMe, type MeSettings } from '../me/api';
 
 /** One backend-backed piece of settings: its value, or the reason it could not be read. */
 export interface Remote<T> {
@@ -27,7 +26,7 @@ export interface SettingsData {
   about: Remote<KbAbout>;
   skills: Remote<KbSkills>;
   /** N6 «Я» (Me): the master switch and the list of skills (texts are read when one is opened). */
-  me: Remote<KbMe>;
+  me: Remote<MeSettings>;
 }
 
 export interface SettingsActions {

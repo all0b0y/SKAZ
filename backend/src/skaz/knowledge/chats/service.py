@@ -79,8 +79,12 @@ from ..keyed_locks import KeyedLocks
 from ..logsafe import error_note
 from ..markdown.text import name_key
 from ..me import MeError
-from ..me.access import me_store
+from ..me.access import graph_store, me_store
+from ..me.adapters import accept_chat, is_branching
+from ..me.graph import GraphEdit, GraphUnavailable, MeGraphStore
+from ..me.policy import Projection, ProjectionReader, TurnContext, review_requested, task_for
 from ..me.prompt import held_after_turn, marks, needs_reseed, snapshot, with_me
+from ..me.tools import graph_memory_part
 from ..permissions.ask_tool import ASK_TOOL, NATIVE_QUESTIONS
 from ..permissions.broker import RESTARTED, PermissionBroker
 from ..permissions.broker import STOPPED as STOPPED_WAIT
@@ -244,6 +248,10 @@ class _Run:
     stopping: bool = False
     #: N6: the question, the live-session plan and what to record once the answer is ``done``.
     question: Message | None = None
+    fresh_user: bool = False
+    observe_epoch: str | None = None
+    graph_epoch: str | None = None
+    graph_sensitive: bool = False
     decision: SessionDecision | None = None
     session: LiveSession | None = None
     context: SessionContext | None = None
@@ -280,6 +288,7 @@ class ChatService:
         self.kb = kb
         self._sources_provider = sources
         self.repo = ChatRepository(kb.db)
+        self._me_reader = ProjectionReader()
         self.usage_log = UsageLog(kb.db)
         self.summaries = ChatSummaries(kb.db, self.usage_log)
         #: N6: each chat's live agent session and the agent sessions waiting to be deleted.
@@ -737,6 +746,12 @@ class ChatService:
         if run is not None:
             run.deleted = True
             await self._stop_run(run)
+        graph = graph_store(self.kb)
+        if graph is not None:
+            with contextlib.suppress(GraphUnavailable):
+                sources = {message.id for message in await disk_call(self.repo.messages, chat_id)}
+                if await disk_call(graph.revoke_sources, sources, scope=chat_id):
+                    await self.drop_graph_sessions()
         await disk_call(self.repo.delete, chat_id)  # its live session is queued for deletion (cascade)
         self._frame_pins.drop_chat(chat_id)
         self._feeds.pop(chat_id, None)
@@ -916,7 +931,12 @@ class ChatService:
                 raise ChatInvalid("Write a reply to the agent’s question.")
             return await self._answer_question(chat, run, given)
         self._reserve(chat_id)
+        graph = graph_store(self.kb)
+        epoch = None
         try:
+            if graph is not None:
+                with contextlib.suppress(GraphUnavailable):
+                    epoch = await disk_call(graph.source_epoch, "chat")
             engine = await self.registry.require_known(chat.engine)  # bug 7: no fresh check first
             prior = await disk_call(self.repo.messages, chat_id)
             if given.selection is not None:  # P2: only ids that exist in the stored answer
@@ -950,7 +970,7 @@ class ChatService:
         feed.emit("message", answer.id, message=answer)
         if "title" in updates:
             feed.emit("title", None, text=updates["title"])
-        self._start(chat, engine, answer, user, prior, visuals=visuals)
+        self._start(chat, engine, answer, user, prior, visuals=visuals, fresh_user=True, observe_epoch=epoch)
         return user, answer
 
     async def regenerate(self, chat_id: str, message_id: str) -> tuple[Message, Message]:
@@ -1028,6 +1048,12 @@ class ChatService:
         except BaseException:
             self._reserved.discard(chat_id)
             raise
+        graph = graph_store(self.kb)
+        if graph is not None:
+            with contextlib.suppress(GraphUnavailable):
+                changed = await disk_call(graph.revoke_sources, {question.id, *removed})
+                if changed:
+                    await self.drop_graph_sessions()
         feed = self._feed(chat_id)
         for gone in removed:
             feed.emit("removed", gone)
@@ -1077,11 +1103,13 @@ class ChatService:
         return folders
 
     def _start(self, chat: Chat, engine: AgentEngine, answer: Message, question: Message,
-               prior: Sequence[Message], *, visuals: tuple[AuthorizedVisualPayload, ...] = ()) -> None:
+               prior: Sequence[Message], *, visuals: tuple[AuthorizedVisualPayload, ...] = (),
+               fresh_user: bool = False, observe_epoch: str | None = None) -> None:
         now = time.monotonic()
         has_linked_frames = any(item.linked_frame is not None for item in visuals)
         run = _Run(
             chat.id, answer.id, engine, answer, saved_at=now, started_at=now, visuals=visuals,
+            fresh_user=fresh_user, observe_epoch=observe_epoch,
             visual_library=self.kb.library_root if has_linked_frames else None,
         )
         self._runs[chat.id] = run
@@ -1106,6 +1134,38 @@ class ChatService:
             dropped.add(WEB_TOOL)
         return tuple(spec for spec in self.tools.specs() if spec.name not in dropped)
 
+    def _graph_projection(self, graph: MeGraphStore, question: Message, given: MessageInput,
+                          prior: Sequence[Message], fresh_user: bool) -> Projection:
+        practice_scope = None
+        chat_id = question.chat_id
+        picked = given.selection
+        # Quoted or attached material is not evidence of an intent or a declaration.
+        text = given.text if not (given.quotes or given.attachments) else ""
+        block_id = picked.block_id if picked is not None and picked.kind == "study" else None
+        if block_id is None and review_requested(text):
+            block_id = given.context.study_id
+        if block_id is not None and self.study is not None:
+            with contextlib.suppress(KnowledgeError):
+                block = self.study.get(block_id)
+                if (block.chat_id == chat_id and block.kind == "deck"
+                        and block.mode in {"due", "hard", "quick10", "all"}):
+                    practice_scope = block.id
+        state = graph.open()
+        task = task_for(text, practice_scope is not None)
+        if task == "unknown" and is_branching(question, prior):
+            task = "branching"
+        return self._me_reader.read(
+            state, TurnContext(chat_id, text, task, practice_scope is not None, practice_scope),
+            graph.admitted, opportunity=fresh_user,
+        )
+
+    def graph_edit_source(self, run_id: str) -> tuple[Message, str, str] | None:
+        for run in self._runs.values():
+            if (run.run_id == run_id and run.fresh_user and not run.stopping
+                    and run.question is not None and run.graph_epoch is not None):
+                return run.question, run.message.id, run.graph_epoch
+        return None
+
     async def _drive(self, run: _Run, chat: Chat, question: Message, prior: list[Message]) -> None:
         reader = MaterialReader(self.kb, self._text_layer())
         resolver = Resolver(self.kb, reader)
@@ -1126,7 +1186,22 @@ class ChatService:
             # Read when the turn is built: switching a skill applies from the next answer (H3).
             skills = await disk_call(enabled_skills, self.kb.settings)
             # N6 «Я»: read when the turn is built too; chats are the only turns that carry it (decision 15).
-            me = await disk_call(snapshot, me_store(self.kb))
+            graph = graph_store(self.kb)
+            if graph is not None and run.observe_epoch is not None:
+                with contextlib.suppress(MeError):
+                    await disk_call(accept_chat, graph, question, prior, run.observe_epoch)
+            me = None
+            if graph is None:
+                with contextlib.suppress(GraphUnavailable):
+                    me = await disk_call(lambda: snapshot(me_store(self.kb)))
+            projection: Projection | None = None
+            if graph is not None:
+                with contextlib.suppress(GraphUnavailable):
+                    projection = await disk_call(
+                        self._graph_projection, graph, question, question.input, prior, run.fresh_user,
+                    )
+            if projection is not None:
+                run.graph_epoch, run.graph_sensitive = projection.epoch, bool(projection.block)
             # W-2: the agent's own web search, only where SKAZ can hold each query before it is sent;
             # W-3b: the other agents search only through ``skaz_web_search`` (their own search stays off).
             rules = (await disk_call(SearchRulesStore(self.kb.db, self.kb.settings).active, chat.id)
@@ -1147,23 +1222,46 @@ class ChatService:
             web_text = "\n\n".join(part for part in parts if part)
             if web_text:
                 told = f"{told}\n\n{web_text}"
-            told = with_me(told, me)  # after every SKAZ rule; a live session gets later changes as notes
+            if me is not None:
+                told = with_me(told, me)  # legacy profiles only
             # N6: continue / revert the chat's live session, or start a new seeded one. The context also
             # records the tool set and fixed instructions a session starts with (a change reseeds once).
             context: SessionContext | None = None
             if session_support(run.engine).live:
                 gone = await disk_call(self._gone_materials, prior)
                 context = SessionContext(language, tuple(skill.id for skill in skills), web_text, gone,
-                                         marks(me), me, tools=tuple(sorted(spec.name for spec in
+                                         marks(me) if me is not None else None, me,
+                                         tools=tuple(sorted(spec.name for spec in
                                                                            self._tools_for(
                                                                                chat, skaz_web=run.skaz_web))),
-                                         base=BASE_INSTRUCTIONS)
+                                         base=BASE_INSTRUCTIONS,
+                                         graph_epoch=projection.epoch if projection is not None else None,
+                                         graph_stamp=projection.stamp if projection is not None else None)
             entries = await self._plan_session(run, chat, prior, context)
             if run.decision is not None:
                 run.context = context
             reseeded = False
+            heated = False
             while True:
-                turn = await self._turn(run, chat, prior, entries, request, told, gate, skills)
+                payload = request
+                if projection is not None and projection.block:
+                    payload = f"{projection.block}\n\n{request}"
+                turn = await self._turn(run, chat, prior, entries, payload, told, gate, skills)
+                if graph is not None and projection is not None:
+                    epoch = None
+                    with contextlib.suppress(GraphUnavailable):
+                        epoch = await disk_call(graph.current_epoch)
+                    if epoch != projection.epoch:
+                        projection = None
+                        run.graph_epoch, run.graph_sensitive = None, False
+                        if context is not None:
+                            context = replace(context, graph_epoch=None, graph_stamp=None)
+                            entries = await self._plan_session(run, chat, prior, context)
+                            run.context = context
+                        continue
+                if run.stopping:
+                    terminal = Failed(run.run_id, "cancelled", STOPPED)
+                    break
                 run.prompt_characters = len(turn.instructions) + sum(len(item.content)
                                                                      for item in turn.messages)
                 stream = run.engine.run(turn)
@@ -1171,6 +1269,10 @@ class ChatService:
                 async for event in stream:
                     if event.run_id != run.run_id:
                         continue  # a late notification of another answer cannot mutate this one
+                    if (projection is not None and run.fresh_user and not run.stopping and not heated
+                            and isinstance(event, TextDelta | ToolCall | SessionBound | Completed)):
+                        self._me_reader.materialized(projection)
+                        heated = True
                     if isinstance(event, TextDelta):
                         run.produced = True
                         await self._apply(run, parser.feed(event.text), resolver)
@@ -1339,7 +1441,9 @@ class ChatService:
         context = run.context
         try:
             written = {part.skill_id for part in message.parts if isinstance(part, MemoryPart)}
-            now = marks(await disk_call(snapshot, me_store(self.kb))) if written else None
+            now = None
+            if written and graph_store(self.kb) is None:
+                now = marks(await disk_call(snapshot, me_store(self.kb)))
             if now is not None:
                 context = replace(context, me=held_after_turn(context.me, now, written))
             if not await disk_call(self.sessions.record, run.chat_id, bound.session_id, bound.turn_id, items,
@@ -1491,6 +1595,28 @@ class ChatService:
         if dropped:
             self._kick_deletions()
         return dropped
+
+    async def drop_graph_sessions(self) -> None:
+        graph = graph_store(self.kb)
+        if graph is None:
+            return
+        self._me_reader.invalidate()
+        epoch = None
+        with contextlib.suppress(GraphUnavailable):
+            epoch = await disk_call(graph.current_epoch)
+        active = [run for run in self._runs.values() if run.graph_sensitive and run.graph_epoch != epoch
+                  and run.task is not asyncio.current_task()]
+        for run in active:
+            run.stopping = True
+        if active:
+            await asyncio.gather(*(self._stop_run(run) for run in active))
+        for chat_id, held in await disk_call(self.sessions.contexts):
+            if held is not None and (held.me is not None or held.graph_epoch != epoch):
+                await disk_call(self.sessions.drop, chat_id)
+        self._kick_deletions()
+
+    async def mark_graph_edit_undone(self, edit_id: str, edit: GraphEdit) -> None:
+        await self.update_part(edit.chat_id, edit.message_id, graph_memory_part(edit_id, undone=True))
 
     async def end_sessions(self, engine: EngineId, wait_s: float = END_SESSIONS_WAIT_S) -> None:
         """Sign-out of an engine (decision 9): every chat's session with it is deleted (bounded wait;
@@ -2059,6 +2185,8 @@ def memory_view(kb: KnowledgeService, part: MemoryPart) -> tuple[str, str]:
     """(skill title, summary) of a «Я» chip as shown. The stored part holds a generic label only (the
     chat database is plain SQLite); the edit's own words come from the «Я» vault — or the generic ones
     once the vault no longer has the edit (trimmed, erased). Blocking: call it off the event loop."""
+    if graph_store(kb) is not None:
+        return "Me", "Saved to Me"
     try:
         edit = me_store(kb).edit(part.edit_id)
     except MeError:

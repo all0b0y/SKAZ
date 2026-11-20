@@ -28,12 +28,20 @@ KEY_NAME = "me.key"
 UNREADABLE_SUFFIX = ".unreadable"
 
 
+class MeVaultUnreadable(ValueError):
+    """A vault exists but cannot be opened with its current key."""
+
+
 class MeVault:
-    def __init__(self, directory: Path | str) -> None:
+    def __init__(self, directory: Path | str, *, name: str = VAULT_NAME, key: str = KEY_NAME) -> None:
         self.dir = Path(directory)
-        self.path = self.dir / VAULT_NAME
-        self.key_path = self.dir / KEY_NAME
+        self.path = self.dir / name
+        self.key_path = self.dir / key
         self._unreadable = False
+
+    @property
+    def unreadable_path(self) -> Path:
+        return self.path.with_name(self.path.name + UNREADABLE_SUFFIX)
 
     def _ensure_dir(self) -> None:
         self.dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -65,7 +73,7 @@ class MeVault:
             log.warning("Could not restrict permissions on the Me key file.")
         return Fernet(self.key_path.read_bytes().strip())
 
-    def read(self) -> dict[str, Any] | None:
+    def read(self, *, strict: bool = False) -> dict[str, Any] | None:
         """The stored «Я», or ``None`` when there is none (or it can't be read — never logged)."""
         from cryptography.fernet import InvalidToken
 
@@ -77,11 +85,15 @@ class MeVault:
             if not blob or fernet is None:
                 raise ValueError("no key")
             loaded = json.loads(fernet.decrypt(blob))
-        except (InvalidToken, ValueError, OSError):
+        except (InvalidToken, ValueError, OSError) as error:
+            if strict:
+                raise MeVaultUnreadable("Me could not be opened.") from error
             log.warning("The stored Me profile could not be read; starting empty (the file is kept aside).")
             self._unreadable = True
             return None
         if not isinstance(loaded, dict):
+            if strict:
+                raise MeVaultUnreadable("Me has an unsupported format.")
             self._unreadable = True
             return None
         return loaded
@@ -89,7 +101,7 @@ class MeVault:
     def write(self, data: dict[str, Any]) -> None:
         self._ensure_dir()
         if self._unreadable and self.path.exists():
-            os.replace(self.path, self.path.with_name(VAULT_NAME + UNREADABLE_SUFFIX))
+            os.replace(self.path, self.unreadable_path)
         self._unreadable = False
         token = self._fernet(create=True).encrypt(json.dumps(data, ensure_ascii=False).encode("utf-8"))
         descriptor, temp_name = tempfile.mkstemp(dir=self.dir, prefix=".me-", suffix=".tmp")
@@ -110,6 +122,6 @@ class MeVault:
 
     def erase(self) -> None:
         """"Delete everything": the file, a kept-aside unreadable copy and the key."""
-        for path in (self.path, self.path.with_name(VAULT_NAME + UNREADABLE_SUFFIX), self.key_path):
+        for path in (self.key_path, self.path, self.unreadable_path):
             path.unlink(missing_ok=True)
         self._unreadable = False

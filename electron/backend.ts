@@ -215,6 +215,8 @@ export class BackendManager {
         ...(!app.isPackaged ? { PYTHONPATH: path.join(this.repoRoot, 'backend', 'src') } : {}),
         SKAZ_TOKEN: token,
         SKAZ_DATA_DIR: this.dataDir,
+        SKAZ_ME_GRAPH_ISOLATED: !app.isPackaged && process.env.SKAZ_OPTIN_SMOKE_USER_DATA
+          ? process.env.SKAZ_ME_GRAPH_ISOLATED ?? '' : '',
         // Settings → About shows the app's version, not the backend package's (QA A21).
         SKAZ_APP_VERSION: app.getVersion(),
         SKAZ_DOCUMENTS_DIR: app.getPath('documents'),

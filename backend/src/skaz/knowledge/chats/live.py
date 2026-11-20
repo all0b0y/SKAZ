@@ -89,11 +89,15 @@ class SessionContext:
     tools: tuple[str, ...] | None = None
     #: :data:`BASE_INSTRUCTIONS` the session was started with; ``None`` = unknown.
     base: str | None = None
+    #: Opaque Me Graph authorization and applicability stamps.
+    graph_epoch: str | None = None
+    graph_stamp: str | None = None
 
     def to_json(self) -> str:
         return json.dumps({"language": self.language, "skills": list(self.skills), "web": self.web,
                            "gone": list(self.gone), "me": self.me.to_json() if self.me is not None else None,
-                           "tools": list(self.tools) if self.tools is not None else None, "base": self.base},
+                           "tools": list(self.tools) if self.tools is not None else None, "base": self.base,
+                           "graph_epoch": self.graph_epoch, "graph_stamp": self.graph_stamp},
                           ensure_ascii=False)
 
     @classmethod
@@ -105,11 +109,14 @@ class SessionContext:
         if not isinstance(data, dict) or "web" not in data:
             return None
         language, tools, base = data.get("language"), data.get("tools"), data.get("base")
+        graph_epoch, graph_stamp = data.get("graph_epoch"), data.get("graph_stamp")
         return cls(language if isinstance(language, str) else None,
                    tuple(str(item) for item in data.get("skills") or ()), str(data.get("web") or ""),
                    tuple(str(item) for item in data.get("gone") or ()), MeMarks.from_json(data.get("me")),
                    tools=tuple(str(item) for item in tools) if isinstance(tools, list) else None,
-                   base=base if isinstance(base, str) else None)
+                   base=base if isinstance(base, str) else None,
+                   graph_epoch=graph_epoch if isinstance(graph_epoch, str) else None,
+                   graph_stamp=graph_stamp if isinstance(graph_stamp, str) else None)
 
 
 @dataclass(frozen=True)
@@ -208,6 +215,8 @@ def stale(held: SessionContext | None, now: SessionContext) -> bool:
     if now.tools is not None and (held is None or held.tools != now.tools):
         return True
     if now.base is not None and (held is None or held.base != now.base):
+        return True
+    if (held.graph_stamp if held is not None else None) != now.graph_stamp:
         return True
     return held is not None and now.me is not None and needs_reseed(held.me, now.me)
 

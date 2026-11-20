@@ -105,7 +105,7 @@ function LevelMeter({ level, label = 'Microphone level' }: { level: number; labe
   const pct = Math.round(level * 100);
   return (
     <span className="kb-meter" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
-      <i style={{ width: `${pct}%` }} />
+      <i style={{ transform: `translateX(${pct - 100}%)` }} />
     </span>
   );
 }

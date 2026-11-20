@@ -2,12 +2,17 @@
 
 import type { KbClient } from '../api/client';
 import type {
-  KbMe, KbMeCreate, KbMeSkillDetail, KbMeUpdate, KbMemoryPart, KbMeVersions,
+  KbGraphEntry, KbGraphMe, KbMe, KbMeCreate, KbMeSkillDetail, KbMeUpdate, KbMemoryPart, KbMeVersions,
 } from '../../api/kb/types.gen';
 
-export const readMe = (client: KbClient): Promise<KbMe> => client.call('GET /kb/me');
+export type MeSettings = KbMe | KbGraphMe;
 
-export const switchMe = (client: KbClient, enabled: boolean): Promise<KbMe> =>
+export const isGraphMe = (value: MeSettings | null): value is KbGraphMe =>
+  value !== null && 'schema_version' in value;
+
+export const readMe = (client: KbClient): Promise<MeSettings> => client.call('GET /kb/me');
+
+export const switchMe = (client: KbClient, enabled: boolean): Promise<MeSettings> =>
   client.call('PUT /kb/me', { body: { enabled } });
 
 export const readMeSkill = (client: KbClient, id: string): Promise<KbMeSkillDetail> =>
@@ -29,7 +34,7 @@ export const meSkillVersions = (client: KbClient, id: string): Promise<KbMeVersi
 export const restoreMeVersion = (client: KbClient, id: string, version: number): Promise<KbMeSkillDetail> =>
   client.call('POST /kb/me/skills/{skill_id}/versions/{version}/restore', { path: { skill_id: id, version } });
 
-export const undoMeEdit = (client: KbClient, editId: string): Promise<KbMeSkillDetail> =>
+export const undoMeEdit = (client: KbClient, editId: string): Promise<KbMeSkillDetail | KbGraphEntry> =>
   client.call('POST /kb/me/edits/{edit_id}/undo', { path: { edit_id: editId } });
 
 /** A message part is an agent's edit of «Я». */
@@ -40,6 +45,7 @@ const REMEMBERED_IN = new Set(['profile', 'how-to-work', 'search']);
 
 /** The chip's line: «Remembered: <summary>» for an addition to a built-in, «Updated skill "<title>"» otherwise. */
 export function memoryChipText(part: KbMemoryPart): string {
+  if (part.skill_id === 'me-graph') return 'Saved to Me';
   const remembered = REMEMBERED_IN.has(part.skill_id) && (part.action === 'append' || part.action === 'create');
   return remembered ? `Remembered: ${part.summary}` : `Updated skill “${part.skill_title}”`;
 }

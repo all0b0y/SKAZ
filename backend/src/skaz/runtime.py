@@ -26,7 +26,11 @@ from .knowledge.chats.wiki_fix import WikiFixes
 from .knowledge.decisions.service import DecisionService
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
+from .knowledge.me.access import SECRETS_DIR, bind_graph, legacy_retired
+from .knowledge.me.adapters import study_observer
+from .knowledge.me.graph import MeGraphStore
 from .knowledge.me.tools import attach as attach_me_tools
+from .knowledge.me.tools import graph_tool as me_graph_tool
 from .knowledge.permissions.ask_tool import ask_tool
 from .knowledge.permissions.broker import PermissionBroker
 from .knowledge.permissions.questions import QuestionBroker
@@ -67,6 +71,7 @@ class Runtime:
         secret_store: SecretStore | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
+        config.validate_me_graph_profile()
         config.data_dir.mkdir(parents=True, exist_ok=True)
         # Must run before the database is opened, or SQLite creates an empty
         # skaz.sqlite3 beside the pre-rename file and the install looks wiped.
@@ -83,6 +88,10 @@ class Runtime:
             config.data_dir, documents_dir=config.documents_dir,
             documents_sandbox=config.documents_sandbox,
         )
+        self.kb_me_graph = MeGraphStore(config.data_dir / SECRETS_DIR) if config.me_graph_isolated else None
+        self.kb_me_migration: asyncio.Task[bool] | None = None
+        if self.kb_me_graph is not None:
+            bind_graph(self.kb, self.kb_me_graph)
         #: Ingest (W1); its detector/decisions/engines are connected by ``wire_knowledge`` below.
         self.kb_ingest = IngestService(self.kb)
         #: Read-only SKAZ agent tools: listed by the MCP server and given to Codex as dynamicTools.
@@ -140,8 +149,11 @@ class Runtime:
                                     permissions=self.kb_permissions, questions=self.kb_questions,
                                     study=self.kb_study, web=self.kb_web,
                                     sources=lambda: self.kb_sources)
-        #: N6 «Я»: ``skaz_me_edit`` / ``skaz_me_skill``, chat answers only (they act for this chat service).
-        attach_me_tools(self.kb_chats)
+        if self.kb_me_graph is None and not legacy_retired(self.kb):
+            attach_me_tools(self.kb_chats)
+        elif self.kb_me_graph is not None:
+            self.kb_tools.add((me_graph_tool(self.kb_chats, self.kb_me_graph),))
+            self.kb_study.capture_activity = study_observer(self.kb_me_graph)
         #: N6: an agent being installed / repaired / updated keeps its queued session deletions (no attempt).
         self.kb_chats.hold_deletions = lambda engine: (
             self.kb_agents.installs.running_for(cast(Any, engine)) is not None)

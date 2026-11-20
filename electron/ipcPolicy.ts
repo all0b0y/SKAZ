@@ -278,6 +278,12 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}\/versions$/ },
   { method: 'POST', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}\/versions\/\d{1,9}\/restore$/ },
   { method: 'POST', pattern: /^\/kb\/me\/edits\/[a-z0-9_-]{1,64}\/undo$/ },
+  { method: 'GET', pattern: /^\/kb\/me\/entries(?:\/[a-z0-9-]{1,64}(?:\/history)?)?$/ },
+  { method: 'POST', pattern: /^\/kb\/me\/entries(?:\/[a-z0-9-]{1,64}\/restore)?$/ },
+  { method: 'PATCH', pattern: /^\/kb\/me\/entries\/[a-z0-9-]{1,64}$/ },
+  { method: 'DELETE', pattern: /^\/kb\/me\/(?:data|entries\/[a-z0-9-]{1,64})$/ },
+  { method: 'PUT', pattern: /^\/kb\/me\/learning$/ },
+  { method: 'POST', pattern: /^\/kb\/me\/retry$/ },
 ];
 
 /**

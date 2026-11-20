@@ -8,8 +8,9 @@ import type { KbEndpoints, KbMemoryPart, KbMeSkill, KbMeSkillDetail, KbMeVersion
 import { FakeHttpError, type FakeWorld } from './fakeKb';
 
 type KbMeSource = KbMeVersion['source'];
-/** The «Я» routes of the generated contract. */
-type KbMeRoute = Extract<keyof KbEndpoints, `${string} /kb/me` | `${string} /kb/me/${string}`>;
+/** The legacy Me fixture intentionally implements the skill API. */
+type KbMeRoute = Extract<keyof KbEndpoints,
+  `${string} /kb/me` | `${string} /kb/me/skills` | `${string} /kb/me/${'skills' | 'edits'}/${string}`>;
 
 interface FakeMeVersion extends KbMeVersion { text: string }
 
