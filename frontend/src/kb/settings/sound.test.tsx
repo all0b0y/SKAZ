@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
@@ -72,8 +72,10 @@ describe('Settings → Microphone and Computer audio (B20)', () => {
     await within(mic).findByRole('option', { name: 'USB Microphone' });
     expect(select).toHaveValue('');
     await waitFor(() => expect(meter.open).toHaveBeenCalledWith('', expect.any(Function)));
-    meter.push!(0.6);
-    expect(await within(mic).findByRole('meter', { name: 'Microphone level' })).toHaveAttribute('aria-valuenow', '60');
+    await act(async () => { meter.push!(0.6); });
+    const level = await within(mic).findByRole('meter', { name: 'Microphone level' });
+    expect(level).toHaveAttribute('aria-valuenow', '60');
+    expect(level.querySelector('i')).toHaveStyle({ transform: 'translateX(-40%)' });
 
     await user.selectOptions(select, 'mic-usb');
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/settings', body: { input_device_id: 'mic-usb' } })));

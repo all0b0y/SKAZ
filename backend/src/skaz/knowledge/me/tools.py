@@ -20,6 +20,8 @@ from ..agents.tools import SkazTool, ToolContext, ToolInputError, ToolRegistry, 
 from ..chats.model import MemoryPart
 from . import DESCRIPTION_MAX, ID_PATTERN, PROFILE, SKILL_CAP, TITLE_MAX, MeEdit, MeError, builtin
 from .access import me_store
+from .graph import MeGraphStore
+from .policy import declaration
 from .prompt import EDIT_TOOL, SKILL_TOOL
 
 if TYPE_CHECKING:  # chats.service imports this module
@@ -141,3 +143,45 @@ async def mark_undone(chats: ChatService, edit: MeEdit) -> None:
     """The chat chip of an undone edit says "Undone": the part is changed through the chat service (safe
     against the final save of a still-streaming answer) and the ``message`` event is sent."""
     await chats.update_part(edit.chat_id, edit.message_id, replace(memory_part(edit), undone=True))
+
+
+class DeclaredSpan(_Args):
+    start: int = Field(ge=0, description="Start of the explicit declaration in the current user message.")
+    end: int = Field(gt=0, description="Exclusive end of that declaration in the current user message.")
+
+
+GRAPH_CHIP = "me-graph"
+
+
+def graph_tool(chats: ChatService, store: MeGraphStore) -> SkazTool:
+    async def edit(context: ToolContext | None, args: DeclaredSpan) -> dict[str, Any]:
+        current = chats.graph_edit_source(context.run_id) if context is not None else None
+        if current is None:
+            raise ToolInputError(NOT_IN_CHAT)
+        question, answer_id, epoch = current
+        given = question.input
+        if given is None or given.quotes or given.attachments or given.mentions or given.selection:
+            raise ToolInputError("Use a lasting declaration in the user's own current message.")
+        area = declaration(given.text, args.start, args.end)
+        if area is None:
+            raise ToolInputError("Me could not verify a lasting declaration in this message.")
+        try:
+            edit_id = await disk_call(
+                store.remember, text=given.text[args.start:args.end], area=area, chat_id=question.chat_id,
+                source_id=question.id, answer_id=answer_id, epoch=epoch,
+            )
+        except MeError as error:
+            raise ToolInputError(error.message) from error
+        await chats.add_part(question.chat_id, answer_id, graph_memory_part(edit_id))
+        return {"status": "saved"}
+
+    return SkazTool(
+        EDIT_TOOL,
+        "Save a clearly lasting instruction or personal fact from the current user's own message. "
+        "Supply only the character span in that message. SKAZ verifies it and shows Undo.",
+        DeclaredSpan, run=edit,
+    )
+
+
+def graph_memory_part(edit_id: str, *, undone: bool = False) -> MemoryPart:
+    return MemoryPart(edit_id, GRAPH_CHIP, "Me", "create", "Saved to Me", undone)

@@ -81,6 +81,8 @@ def create_app(
             await runtime.kb_maintenance.on_start()
             yield
         finally:
+            if runtime.kb_me_migration is not None:
+                await runtime.kb_me_migration
             # Agents and llama-server first, then the wiki services, within Electron's grace.
             await close_knowledge(runtime)
             await runtime.codex_connection.close()

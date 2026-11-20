@@ -170,6 +170,67 @@
 .kb-me__empty { margin: 0; font-size: var(--t-sm); }
 .kb-me__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--kb-sp-8); font-size: var(--t-sm); }
 
+/* Settings → Me Graph: the disclosure and editor stay below their origin. */
+.kb-me-graph {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-sp-10);
+  min-width: 0;
+}
+.kb-me-graph__error {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  background: var(--kb-danger-soft);
+}
+.kb-me-graph__head,
+.kb-me-graph__row,
+.kb-me-graph__version {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kb-sp-8);
+  min-width: 0;
+}
+.kb-me-graph__head {
+  flex-wrap: wrap;
+  padding-bottom: var(--kb-sp-6);
+  border-bottom: 1px solid var(--kb-line);
+}
+.kb-me-graph__row { flex-wrap: nowrap; }
+.kb-me-graph__row > div,
+.kb-me-graph__version > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.kb-me-graph__row > :is(.kb-btn, .kb-switch),
+.kb-me-graph__version > .kb-btn { flex: none; }
+.kb-me-graph__link {
+  color: var(--kb-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.kb-me-graph__danger { color: var(--kb-danger); }
+.kb-me-graph__detail,
+.kb-me-graph__confirm {
+  padding: var(--kb-sp-10) var(--kb-sp-12);
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-bg);
+  overflow-wrap: anywhere;
+}
+.kb-me-graph__row + .kb-me-graph__detail { border-inline-start: 2px solid var(--kb-accent); }
+.kb-me-graph__confirm { margin-top: var(--kb-sp-8); background: var(--kb-warn-soft); }
+.kb-me-graph__detail p,
+.kb-me-graph__confirm p { margin: var(--kb-sp-4) 0 var(--kb-sp-8); }
+.kb-me-graph__actions { display: flex; flex-wrap: wrap; gap: var(--kb-sp-6); }
+.kb-me-graph__history { margin-top: var(--kb-sp-10); }
+.kb-me-graph__version { padding: var(--kb-sp-6) 0; border-bottom: 1px solid var(--kb-line); }
+.kb-me-graph__form, .kb-me-graph__form label { display: grid; gap: var(--kb-sp-6); margin-top: var(--kb-sp-8); }
+.kb-me-graph__form :is(textarea, select) { width: 100%; min-width: 0; }
+.kb-me-graph__form textarea { resize: vertical; }
+
 /* Settings → Privacy → Activity log (F2): read-only list of GET /logs, newest first. */
 .kb-confirm.kb-activity { width: min(620px, calc(100vw - 48px)); }
 .kb-activity__body { max-height: min(60vh, 520px); overflow: hidden; }
@@ -186,7 +247,14 @@
 .kb-obsidian-ask { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--kb-sp-8); min-width: 0; }
 .kb-sound .kb-select { max-width: 260px; }
 .kb-meter { position: relative; display: inline-block; width: 96px; height: 6px; border-radius: var(--kb-r-2xs); background: var(--kb-line); overflow: hidden; flex: none; }
-.kb-meter i { display: block; height: 100%; border-radius: var(--kb-r-2xs); background: var(--kb-accent); transition: width 90ms linear; }
+.kb-meter i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--kb-r-2xs);
+  background: var(--kb-accent);
+  transition: transform 90ms linear;
+}
 @media (prefers-reduced-motion: reduce) { .kb-meter i { transition: none; } }
 
 /* Provider marks (0.3.1 K, decision Q4): colour marks as images, single-colour marks in the text colour. */

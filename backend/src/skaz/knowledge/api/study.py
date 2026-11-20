@@ -11,6 +11,7 @@ from ...native_io import disk_call
 from ..chats.service import ChatService
 from ..errors import KnowledgeError
 from ..markdown.page import Cite
+from ..study.activity import StudyAction, StudyActivity, StudyObserver
 from ..study.service import StudyService
 from ..study.store import StudyBlock
 from ..study.unclear import unclear_items
@@ -306,6 +307,21 @@ async def _act(request: Request, study: StudyService, call: Callable[[], StudyBl
     return await _view(study, request, block)
 
 
+async def _study_observer(study: StudyService) -> StudyObserver | None:
+    capture = study.capture_activity
+    return await capture() if capture is not None else None
+
+
+async def _observe_study(observer: StudyObserver | None, block: StudyBlock, *,
+                         item_id: str, kind: StudyAction) -> None:
+    if observer is None:
+        return
+    session = str(block.state.get("attempt") or block.id)
+    await observer(StudyActivity(
+        block.id, block.message_id or block.id, session, item_id, block.updated_at, kind,
+    ))
+
+
 @router.patch("/{block_id}")
 async def move_block(block_id: str, body: KbStudyMove, study: StudyDep, request: Request) -> KbStudyPart:
     return await _act(request, study, lambda: study.move(block_id, place=body.place, position=body.position,
@@ -320,7 +336,16 @@ async def grade_card(block_id: str, body: KbStudyGradeIn, study: StudyDep, reque
 @router.post("/{block_id}/pass")
 async def study_pass(block_id: str, body: KbStudyPassIn, study: StudyDep, request: Request) -> KbStudyPart:
     """P3-d: one step of a pass — «I know this», a skip, ← back, or «Go through again»."""
-    return await _act(request, study, lambda: study.study_pass(block_id, body.action, body.item_id))
+    if body.action not in ("skip", "restart"):
+        return await _act(request, study, lambda: study.study_pass(block_id, body.action, body.item_id))
+    observer = await _study_observer(study)
+    try:
+        block = await disk_call(study.study_pass, block_id, body.action, body.item_id)
+    except KnowledgeError as error:
+        raise _http(error) from error
+    await _observe_study(observer, block, item_id=body.item_id or block.id,
+                         kind="skip" if body.action == "skip" else "repeat")
+    return await _view(study, request, block)
 
 
 @router.post("/{block_id}/mark")
@@ -335,17 +360,24 @@ async def mark_cards(block_id: str, body: KbStudyMarkIn, study: StudyDep, reques
 @router.post("/{block_id}/answer")
 async def answer_question(block_id: str, body: KbStudyAnswerIn, study: StudyDep,
                           request: Request) -> KbStudyPart:
-    return await _act(request, study, lambda: study.answer(block_id, body.item_id, choices=body.choices,
-                                                           text=body.text))
+    observer = await _study_observer(study)
+    try:
+        block = await disk_call(study.answer, block_id, body.item_id, choices=body.choices, text=body.text)
+    except KnowledgeError as error:
+        raise _http(error) from error
+    await _observe_study(observer, block, item_id=body.item_id, kind="attempt")
+    return await _view(study, request, block)
 
 
 @router.post("/{block_id}/check-open")
 async def check_open_answer(block_id: str, body: KbStudyAnswerIn, study: StudyDep,
                             request: Request) -> KbStudyPart:
+    observer = await _study_observer(study)
     try:
         block = await study.check_open(block_id, body.item_id, body.text or "")
     except KnowledgeError as error:
         raise _http(error) from error
+    await _observe_study(observer, block, item_id=body.item_id, kind="attempt")
     return await _view(study, request, block)
 
 
@@ -374,7 +406,13 @@ async def finish_test(block_id: str, study: StudyDep, request: Request) -> KbStu
 
 @router.post("/{block_id}/retake")
 async def retake_test(block_id: str, body: KbStudyRetake, study: StudyDep, request: Request) -> KbStudyPart:
-    return await _act(request, study, lambda: study.retake(block_id, mistakes_only=body.mistakes_only))
+    observer = await _study_observer(study)
+    try:
+        block = await disk_call(study.retake, block_id, mistakes_only=body.mistakes_only)
+    except KnowledgeError as error:
+        raise _http(error) from error
+    await _observe_study(observer, block, item_id=block.id, kind="repeat")
+    return await _view(study, request, block)
 
 
 @router.post("/{block_id}/save")

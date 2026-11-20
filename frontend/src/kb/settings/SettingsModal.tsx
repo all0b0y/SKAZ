@@ -28,6 +28,8 @@ import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
 import { MeIntro, MeSkills, MeStorageNote, MeSwitchRow } from '../me/MeSection';
+import { MeGraphSection } from '../me/MeGraphSection';
+import { isGraphMe } from '../me/api';
 import { SearchRowControl, SearchRowList, SEARCH_ROWS, type SearchRowId } from '../searchRules/SearchSettings';
 import { useSearchSettings } from '../searchRules/sites';
 import { AccentRow, BaseRow, DensityRow, MotionRow, PresetGallery, SoundsRow } from './Appearance';
@@ -249,6 +251,8 @@ function visibleSearchRows(rows: ReadonlyArray<RowDef>, beta: boolean): RowDef[]
 function SectionBody({ section }: { section: SettingsSection }) {
   const { client } = useServices();
   const beta = useSearchSettings(client, (s) => s.rules?.beta ?? false);
+  const me = useSettings((s) => s.me.value);
+  if (section === 'me' && isGraphMe(me)) return <MeGraphSection view={me} />;
   const rows = visibleSearchRows(ROWS.filter((r) => r.section === section), beta);
   return (
     <>

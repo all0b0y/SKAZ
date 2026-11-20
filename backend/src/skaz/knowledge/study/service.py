@@ -42,6 +42,7 @@ from ..permissions.store import RunRef
 from ..service import KnowledgeService
 from ..wiki.pages_io import page_path
 from ..wiki.service import WikiService
+from .activity import CaptureStudyActivity
 from .checks import (
     CardIn,
     CheckedCard,
@@ -202,6 +203,7 @@ class StudyService:
         local_day: Callable[[datetime], str] | None = None,
     ) -> None:
         self.kb = kb
+        self.capture_activity: CaptureStudyActivity | None = None
         self.wiki = wiki
         self.store = StudyStore(kb.db)
         #: P3: key ideas and «Unclear» marks, kept on the item across attempts.
