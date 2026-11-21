@@ -604,7 +604,8 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
     # written only on their click) comes next.
     assert turn.tools is not None
     assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, *ME_TOOL_NAMES,
-                                                       "skaz_skill_install", "skaz_mcp_list", "skaz_mcp_propose", "skaz_mcp_call",
+                                                       "skaz_skill_install", "skaz_mcp_list",
+                                                       "skaz_mcp_propose", "skaz_mcp_call",
                                                        *STUDY_TOOL_NAMES, "skaz_ask_user", "skaz_web_search",
                                                        "skaz_web_read",
                                                        "skaz_wiki_propose_fix")

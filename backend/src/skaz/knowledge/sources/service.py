@@ -822,7 +822,8 @@ class SourceService:
         """Read the imported SKILL.md original, bound to its intake digest."""
         record = self.kb.material_repo.get(material_id)
         origin = record.origin if record else None
-        if not origin or origin.get("type") != "file" or str(origin.get("file_name")).casefold() != "skill.md":
+        if (not origin or origin.get("type") != "file"
+                or str(origin.get("file_name")).casefold() != "skill.md"):
             return None
         assert record is not None
         files = self.kb.require().read_material(material_id, hint=record.rel_dir)

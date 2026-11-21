@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS permission_requests (
     run_id      TEXT NOT NULL,
     engine      TEXT NOT NULL,
     kind        TEXT NOT NULL
-                CHECK (kind IN ('create', 'edit', 'rename', 'delete', 'mcp_call', 'mcp_connect', 'skill_install')),
+         CHECK (kind IN ('create', 'edit', 'rename', 'delete', 'mcp_call', 'mcp_connect', 'skill_install')),
     page_id     TEXT,
     title       TEXT NOT NULL DEFAULT '',
     -- JSON: {"summary": {...}, "changes": [...], "extra": {...}} as shown on the card.

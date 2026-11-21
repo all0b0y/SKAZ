@@ -161,7 +161,9 @@ class Runtime:
             self.kb_agents.installs.running_for(cast(Any, engine)) is not None)
         self.kb_extensions = Extensions(self.kb)
         self.kb_chats.downloaded_skills = self.kb_extensions.skills
-        self.kb_tools.add(attach_external_tools(self.kb_extensions, self.kb_chats, self.kb_permissions, self.kb_sources))
+        self.kb_tools.add(attach_external_tools(
+            self.kb_extensions, self.kb_chats, self.kb_permissions, self.kb_sources,
+        ))
         self.kb_wiki_edits.runs = self.kb_chats.run_ref
         #: N7-4: a chat's «Use only these sources» / «Exclude from this chat», kept by the library tools.
         chat_sources = ChatSourceScopes(self.kb_chats.run_ref, self.kb_search_rules)
