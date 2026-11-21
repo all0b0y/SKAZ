@@ -37,6 +37,8 @@ import { useDiagramFix } from './diagramFix';
 import { SelectionChip } from './select/SelectionChip';
 import { WikiFixCard } from './select/WikiFixCard';
 import { UnclearClearRow, useLastUnclearAnswer } from '../study/Unclear';
+import { FileToolDialog } from '../ui/FileToolDialog';
+import { ResultFile } from './ResultFile';
 import { AnswerFrames } from './videoFrames041/AnswerFrames';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
@@ -47,6 +49,7 @@ export type InlineSlot =
 type Block =
   | { kind: 'inline'; pieces: Array<string | number>; slots: InlineSlot[] }
   | { kind: 'connection'; part: Extract<KbMessagePart, { type: 'connection' }> }
+  | { kind: 'file'; part: Extract<KbMessagePart, { type: 'file' }> }
   | { kind: 'permission'; part: KbPermissionPart }
   | { kind: 'question'; part: KbQuestionPart }
   | { kind: 'study'; part: KbStudyPart }
@@ -75,6 +78,12 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
   };
   for (const part of parts) {
     if (part.type === 'tool' || part.type === 'knowledge' || part.type === 'text_only') continue;
+    if (part.type === 'file') {
+      flushSpace();
+      run = null;
+      out.push({ kind: 'file', part });
+      continue;
+    }
     if (isMemoryPart(part)) {
       // N6 decision 7: an agent's edit of «Я» is its own compact line with Undo.
       flushSpace();
@@ -162,12 +171,13 @@ export function plainText(parts: KbMessagePart[]): string {
   }).join('').trim();
 }
 
-function Parts({ chatId, parts, working }: { chatId: string; parts: readonly AnyMessagePart[]; working: boolean }) {
+function Parts({ chatId, messageId, parts, working }: { chatId: string; messageId: string; parts: readonly AnyMessagePart[]; working: boolean }) {
   const open = useOpenDocument();
   const { ui } = useServices();
   return (
     <>
       {composeBlocks(toBlocks(parts)).map((b, i) => {
+        if (b.kind === 'file') return <ResultFile key={b.part.id} file={b.part} chatId={chatId} messageId={messageId} />;
         if (b.kind === 'answers') return <AnswerBlocks key={b.parts[0]!.id} parts={b.parts} />; // P1 decision 2
         if (b.kind === 'connection') return <ConnectionBlock key={i} folders={b.part.folders} inference={b.part.inference} page={b.part.page} />;
         if (b.kind === 'permission') {
@@ -251,7 +261,7 @@ export function AssistantMessage({ chatId, message, actions, frames = [] }: {
           <AnswerSelectScope messageId={message.id}>
             <DiagramFixProvider value={fixDiagram}>
               {timed.window && <TimeWindowChip window={timed.window} disabled={message.state === 'streaming'} />}
-              <Parts chatId={chatId} parts={timed.parts as typeof message.parts} working={message.state === 'streaming'} />
+              <Parts chatId={chatId} messageId={message.id} parts={timed.parts as typeof message.parts} working={message.state === 'streaming'} />
             </DiagramFixProvider>
           </AnswerSelectScope>
         </SourcesProvider>
@@ -315,6 +325,7 @@ export function UserMessage({ message, actions }: { message: KbMessage; actions?
   const open = useOpenDocument();
   const materials = useLibrary((s) => s.materials);
   const input = questionInput(message);
+  const [allFiles, setAllFiles] = useState(false);
   const [editing, setEditing] = useState(false);
   const articleRef = useRef<HTMLElement | null>(null);
   const refocus = useRef(false);
@@ -338,10 +349,19 @@ export function UserMessage({ message, actions }: { message: KbMessage; actions?
         <div className="kb-msg__bubble">{renderInput(input)}</div>
       )}
       {input.attachments.length > 0 && (
-        <div className="kb-msg__attach" aria-label="Attachments">{input.attachments.map((id, index) => (
+        <div className="kb-msg__attach" aria-label="Attachments">{input.attachments.slice(0, 2).map((id, index) => (
           <Button key={id} size="sm" variant="quiet" icon="attach"
             onClick={() => open({ type: 'material', id })}>{materials.find((item) => item.id === id)?.title ?? `Attachment ${index + 1}`}</Button>
-        ))}</div>
+        ))}
+          {input.attachments.length > 2 && <Button size="sm" variant="quiet" aria-label={'Show all ' + input.attachments.length + ' attachments'}
+            onClick={() => setAllFiles(true)}>+{input.attachments.length - 2}</Button>}
+          {allFiles && <FileToolDialog title="Attached files" close={() => setAllFiles(false)}>
+            <ul className="kb-source-list">{input.attachments.map((id, index) => <li key={id}>
+              <Button variant="quiet" icon="attach" onClick={() => { setAllFiles(false); open({ type: 'material', id }); }}>
+                {materials.find(material => material.id === id)?.title ?? 'Attachment ' + (index + 1)}
+              </Button></li>)}</ul>
+          </FileToolDialog>}
+        </div>
       )}
       {actions && !editing && <QuestionActionsRow text={input.text} actions={actions} onEdit={() => setEditing(true)} />}
       {actions?.error && !editing && <p className="kb-inline-error kb-inline-error--flat kb-msg__error" role="alert">{actions.error}</p>}

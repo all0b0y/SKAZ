@@ -1,0 +1,21 @@
+.kb-filetool-dialog {
+  box-sizing: border-box; position: fixed; inset: 0; margin: auto; width: min(435px, calc(100% - 22px));
+  max-height: 85vh; overflow: auto; padding: 19px; border: 1px solid var(--kb-line); border-radius: 12px;
+  background: var(--kb-pane); color: var(--kb-text); box-shadow: var(--kb-shadow-pop); font: inherit;
+}
+.kb-filetool-dialog::backdrop { background: var(--kb-scrim); }
+.kb-filetool-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
+.kb-filetool-dialog h3 { font-size: 18px; margin: 0; overflow-wrap: anywhere; }
+.kb-filetool-dialog label { display: grid; gap: 6px; font-weight: 600; }
+.kb-filetool-dialog input { width: 100%; padding: 8px; border: 1px solid var(--kb-line); border-radius: 6px; color: inherit; background: var(--kb-bg); }
+.kb-filetool-dialog footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.kb-filetool-dialog section, .kb-filetool-dialog pre { margin-top: 12px; padding: 12px; background: var(--kb-bg); border-radius: 7px; overflow-wrap: anywhere; }
+.kb-filetool-preview { padding: 13px; max-height: 88vh; }
+.kb-filetool-preview pre { white-space: pre-wrap; max-height: 60vh; overflow: auto; }
+.kb-filetool-preview img, .kb-filetool-preview canvas { max-width: 100%; height: auto; }
+.kb-result-file { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px; margin: 8px 0; border: 1px solid var(--kb-line); border-radius: 8px; }
+.kb-result-file strong { overflow-wrap: anywhere; }
+.kb-result-file small { display: block; color: var(--kb-muted); }
+.kb-result-actions { display: flex; gap: 5px; margin-inline-start: auto; }
+.kb-source-list { list-style: none; padding: 0; }
+.kb-external-arguments { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; }

@@ -108,7 +108,7 @@ def test_a_chats_v1_database_upgrades_to_the_agent_control_tables(tmp_path: Path
 
     db = KnowledgeDatabase(path)
     try:
-        assert db.schema_versions()["chats"] == chats.VERSION == 2
+        assert db.schema_versions()["chats"] == chats.VERSION == 4
         with db.read() as connection:
             tables = {row[0] for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")}

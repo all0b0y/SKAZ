@@ -527,6 +527,23 @@ export interface KbCheckNotification {
   message: string;
 }
 
+export interface KbCheckSource {
+  kind: "mcp" | "skill";
+  url: string;
+}
+
+export interface KbCheckedSource {
+  kind: "mcp" | "skill";
+  name: string;
+  recipient?: string | null;
+  tools?: KbExternalTool[];
+  trust?: "local" | "verified" | "unverified" | null;
+  warning?: string | null;
+  publisher?: string | null;
+  version?: string | null;
+  check_id: string;
+}
+
 export interface KbCheckpoint {
   id: string;
   revision: number;
@@ -598,6 +615,12 @@ export interface KbConceptCardsBlock {
   kind: "concept_cards";
   title: string | null;
   cards: KbConceptCard[];
+}
+
+export interface KbConnectSource {
+  url: string;
+  check_id: string;
+  acknowledge_unverified?: boolean;
 }
 
 export interface KbConnectionFolder {
@@ -831,6 +854,27 @@ export interface KbExportWritten {
   file: string;
 }
 
+export interface KbExternalItem {
+  kind: "mcp" | "skill";
+  name: string;
+  recipient?: string | null;
+  tools?: KbExternalTool[];
+  trust?: "local" | "verified" | "unverified" | null;
+  warning?: string | null;
+  publisher?: string | null;
+  version?: string | null;
+  id: string;
+  url?: string | null;
+  active: boolean;
+  built_in?: boolean;
+}
+
+export interface KbExternalTool {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+}
+
 export interface KbFactualSignal {
   id: string;
   subject: KbSignalEntity;
@@ -852,6 +896,14 @@ export interface KbFailure {
 export interface KbFavoriteModel {
   engine: "codex" | "claude_code" | "hermes" | "opencode";
   model: string;
+}
+
+export interface KbFilePart {
+  type: "file";
+  id: string;
+  name: string;
+  mime_type: string;
+  size: number;
 }
 
 export interface KbFinding {
@@ -1475,6 +1527,14 @@ export interface KbLocalModelDeleted {
   speech: KbSpeechSettings;
 }
 
+export interface KbLocalResultFile {
+  id: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  data: string;
+}
+
 export interface KbLocalSpeechModel {
   model: string;
   state: "missing" | "downloading" | "ready" | "failed";
@@ -1737,7 +1797,7 @@ export interface KbMessageInput {
   text_only?: boolean;
 }
 
-export type KbMessagePart = KbKnowledgePart | KbTextPart | KbTextOnlyPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart | KbWikiFixPart;
+export type KbMessagePart = KbFilePart | KbKnowledgePart | KbTextPart | KbTextOnlyPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart | KbWikiFixPart;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
@@ -1925,7 +1985,9 @@ export interface KbPermissionDecide {
 export interface KbPermissionPart {
   type: "permission";
   id: string;
-  kind: "create" | "edit" | "rename" | "delete";
+  kind: "create" | "edit" | "rename" | "delete" | "mcp_call" | "mcp_connect" | "skill_install";
+  recipient?: string | null;
+  arguments?: Record<string, unknown> | null;
   engine: "codex" | "claude_code" | "hermes" | "opencode";
   page_id: string | null;
   title: string;
@@ -2371,6 +2433,10 @@ export interface KbSendTarget {
   effort?: string | null;
 }
 
+export interface KbSetToolActive {
+  active: boolean;
+}
+
 export interface KbSettingsHealth {
   sections: KbSettingsSection[];
 }
@@ -2811,6 +2877,11 @@ export interface KbToolPart {
 export interface KbToolTarget {
   type: "material" | "page";
   id: string;
+}
+
+export interface KbToolsSettings {
+  mcp: KbExternalItem[];
+  skills: KbExternalItem[];
 }
 
 /** The background job that gives wiki materials their topic (EX2). ``not_ready``: no wiki engine to ask. */
@@ -3333,6 +3404,13 @@ export interface KbEndpoints {
     body: KbMessageEdit;
     response: KbSendResult;
     status: 202;
+  };
+  "GET /kb/chats/{chat_id}/messages/{message_id}/files/{file_id}": {
+    path: { chat_id: string; message_id: string; file_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbLocalResultFile;
+    status: 200;
   };
   "POST /kb/chats/{chat_id}/messages/{message_id}/frames/{frame_id}/pin": {
     path: { chat_id: string; message_id: string; frame_id: string };
@@ -4607,6 +4685,41 @@ export interface KbEndpoints {
     body: never;
     response: KbLocalModelDeleted;
     status: 200;
+  };
+  "GET /kb/settings/tools": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbToolsSettings;
+    status: 200;
+  };
+  "POST /kb/settings/tools": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbConnectSource;
+    response: KbExternalItem;
+    status: 201;
+  };
+  "POST /kb/settings/tools/check": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbCheckSource;
+    response: KbCheckedSource;
+    status: 200;
+  };
+  "PATCH /kb/settings/tools/{item_id}": {
+    path: { item_id: string };
+    query: Record<string, never>;
+    body: KbSetToolActive;
+    response: KbExternalItem;
+    status: 200;
+  };
+  "DELETE /kb/settings/tools/{item_id}": {
+    path: { item_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: void;
+    status: 204;
   };
   "GET /kb/settings/weekly-check": {
     path: Record<string, never>;

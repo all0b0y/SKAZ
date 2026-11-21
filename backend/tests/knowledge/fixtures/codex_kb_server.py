@@ -73,6 +73,12 @@ def start_turn() -> None:
             "total": USAGE, "last": USAGE,
             "modelContextWindow": None})
         complete()
+    elif mode == "fixture_tool":
+        with open(os.path.join(os.path.dirname(LOG), "selected-tool.json"), encoding="utf-8") as handle:
+            call = json.load(handle)
+        send({"id": "tool-1", "method": "item/tool/call", "params": {
+            "threadId": THREAD, "turnId": TURN, "callId": "call-1", "namespace": None,
+            "tool": call["name"], "arguments": call["arguments"]}})
     elif mode in ("tool", "tool_error"):
         arguments = {} if mode == "tool" else {"material_id": "mat-nope", "seg": 1}
         name = "skaz_list_folders" if mode == "tool" else "skaz_get_fragment"
@@ -178,6 +184,8 @@ for line in sys.stdin:
         text = message["params"]["input"][0]["text"]
         found = re.findall(r"case:([a-z_]+)", text)
         mode = found[-1] if found else "stream"
+        if "Connect this MCP server: http://127.0.0.1:" in text:
+            mode = "fixture_tool"
         if mode == "refuse_turn":  # e.g. a model the account can't use: the thread exists, no turn
             send({"id": identity, "error": {"code": -32600, "message": "PRIVATE model not allowed"}})
             continue
@@ -193,6 +201,8 @@ for line in sys.stdin:
             send({"id": identity, "result": {"rateLimits": {
                 "primary": {"usedPercent": 100, "windowDurationMins": 60, "resetsAt": 1791000000},
                 "secondary": None}, "rateLimitsByLimitId": None}})
+    elif method == "account/read":
+        send({"id": identity, "result": {"account": {"type": "chatgpt"}}})
     elif method == "model/list":
         send({"id": identity, "result": {"nextCursor": None, "data": [
             {"id": "m1", "model": "gpt-fixture", "displayName": "Fixture", "hidden": False,

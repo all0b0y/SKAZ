@@ -401,13 +401,16 @@ function startAnswer(world: FakeWorld, c: KbChat, question: string): KbMessage {
   pushEvent(world, c.id, { type: 'message', message_id: id, message: structuredClone(assistant) });
   const rest = answerEvents(world, id, question);
   const finish = () => {
+    const queued = world.pendingAnswers[c.id] ?? rest;
+    delete world.pendingAnswers[c.id];
+    delete finishers.get(world)?.[c.id];
     const m = c.messages.find((x) => x.id === id)!;
-    if (rest[0]?.text === 'limit') {
+    if (queued[0]?.text === 'limit') {
       emit(world, c, [{ type: 'state', message_id: id, message: {
         ...structuredClone(m), state: 'interrupted', failure: { kind: 'limit', message: 'ChatGPT subscription limit reached.', retry_at: '2026-10-15T18:00:00Z' },
       } }]);
     } else {
-      emit(world, c, rest);
+      emit(world, c, queued);
       emit(world, c, [{ type: 'state', message_id: id, message: { ...structuredClone(m), state: 'done' } }]);
     }
     c.state = 'idle';
@@ -462,7 +465,6 @@ export function fakeSkills(w: FakeWorld): KbSkills {
 }
 
 export function finishAnswer(world: FakeWorld, chatId: string): void {
-  delete world.pendingAnswers[chatId];
   finishers.get(world)?.[chatId]?.();
 }
 
@@ -1547,6 +1549,9 @@ const ROUTES: FakeRoutes = {
   }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],
   'GET /kb/settings/about': [200, (w) => structuredClone(w.about)],
+  'GET /kb/settings/tools': [200, w => ({ mcp: [], skills: fakeSkills(w).skills.map(s => ({
+    id: s.id, kind: 'skill' as const, name: s.name, version: s.version, built_in: true, active: s.enabled,
+  })) })],
   'GET /kb/settings/skills': [200, (w) => fakeSkills(w)],
   'PUT /kb/settings/skills/{skill_id}': [200, (w, { path, body }) => {
     if (path.skill_id !== 'humanizer') fail(404, 'Unknown skill.');

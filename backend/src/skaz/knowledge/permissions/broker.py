@@ -143,7 +143,10 @@ class PermissionBroker:
         if record.status != "pending":
             raise PermissionConflict(ALREADY, "ALREADY_DECIDED")
         if decision == "allow_chat" and record.kind not in GRANTABLE:
-            raise PermissionInvalid(ALWAYS_ASKS)
+            raise PermissionInvalid("Adding a connection requires a separate approval."
+                                    if record.kind == "mcp_connect" else
+                                    "Each skill installation requires separate approval."
+                                    if record.kind == "skill_install" else ALWAYS_ASKS)
         clean = (reason or "").strip()[:MAX_REASON] or None
         future = self._futures.get(permission_id)
         if future is None or future.done():

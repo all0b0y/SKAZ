@@ -24,6 +24,8 @@ from .knowledge.agents.web_runner import CodexSearch, EngineSearch, WebSearchRun
 from .knowledge.chats import ChatService
 from .knowledge.chats.wiki_fix import WikiFixes
 from .knowledge.decisions.service import DecisionService
+from .knowledge.extensions.service import Extensions
+from .knowledge.extensions.tools import attach as attach_external_tools
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
 from .knowledge.me.access import SECRETS_DIR, bind_graph, legacy_retired
@@ -157,6 +159,9 @@ class Runtime:
         #: N6: an agent being installed / repaired / updated keeps its queued session deletions (no attempt).
         self.kb_chats.hold_deletions = lambda engine: (
             self.kb_agents.installs.running_for(cast(Any, engine)) is not None)
+        self.kb_extensions = Extensions(self.kb)
+        self.kb_chats.downloaded_skills = self.kb_extensions.skills
+        self.kb_tools.add(attach_external_tools(self.kb_extensions, self.kb_chats, self.kb_permissions, self.kb_sources))
         self.kb_wiki_edits.runs = self.kb_chats.run_ref
         #: N7-4: a chat's «Use only these sources» / «Exclude from this chat», kept by the library tools.
         chat_sources = ChatSourceScopes(self.kb_chats.run_ref, self.kb_search_rules)

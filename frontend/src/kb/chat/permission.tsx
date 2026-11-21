@@ -10,8 +10,8 @@ import type { KbPermissionChange, KbPermissionDecision, KbPermissionKind, KbPerm
 /** «Codex», «Claude Code», «Hermes»: the agent as the card names it. */
 export const agentName = (engine: KbPermissionPart['engine']): string => ENGINE_NAME[engine].replace(/ Agent$/, '');
 
-const VERB: Record<KbPermissionKind, string> = { create: 'create', edit: 'edit', rename: 'rename', delete: 'delete' };
-const PAST: Record<KbPermissionKind, string> = { create: 'Created', edit: 'Edited', rename: 'Renamed', delete: 'Deleted' };
+export const VERB: Record<KbPermissionKind, string> = { create: 'create', edit: 'edit', rename: 'rename', delete: 'delete', mcp_call: 'call', mcp_connect: 'connect', skill_install: 'install' };
+const PAST: Record<KbPermissionKind, string> = { create: 'Created', edit: 'Edited', rename: 'Renamed', delete: 'Deleted', mcp_call: 'Authorized', mcp_connect: 'Authorized', skill_install: 'Authorized' };
 const OP: Record<KbPermissionChange['op'], { tag: string; cls: string }> = {
   add: { tag: 'Added', cls: 'add' },
   replace: { tag: 'Changed', cls: 'chg' },
@@ -139,7 +139,7 @@ export function DecisionBar({ chatId, part }: { chatId: string; part: KbPermissi
         <div className="kb-perm__foot" role="group" aria-label="Decision">
           <Button ref={denyRef} size="sm" onClick={() => setDenying(true)} disabled={disabled}>Deny</Button>
           <span className="kb-perm__spacer" />
-          {!del && <Button size="sm" busy={busy === 'allow_chat'} disabled={disabled} onClick={() => void send('allow_chat')}>Allow in this chat</Button>}
+          {!del && part.kind !== 'mcp_connect' && part.kind !== 'skill_install' && <Button size="sm" busy={busy === 'allow_chat'} disabled={disabled} onClick={() => void send('allow_chat')}>Allow in this chat</Button>}
           <Button size="sm" variant={del ? 'danger' : 'fill'} className={del ? 'kb-perm__delete' : undefined}
             busy={busy === 'allow'} disabled={disabled} onClick={() => void send('allow')}>{del ? 'Delete page' : 'Allow'}</Button>
         </div>
@@ -167,7 +167,8 @@ export function PermissionOutcome({ chatId, part, onOpen }: { chatId: string; pa
   } else if (part.status === 'denied') {
     icon = 'denied';
     state = 'Denied';
-    detail = part.reason ? `Your reason was sent to ${agent}: “${part.reason}”` : `${agent} was told no`;
+    if (part.kind === 'skill_install' || part.kind === 'mcp_connect') detail = part.reason ?? null;
+    else detail = part.reason ? `Your reason was sent to ${agent}: “${part.reason}”` : `${agent} was told no`;
   } else if (part.status === 'cancelled') {
     icon = 'cancelled';
     state = 'Cancelled';
@@ -178,7 +179,7 @@ export function PermissionOutcome({ chatId, part, onOpen }: { chatId: string; pa
     detail = 'back as it was';
   }
   const canOpen = part.status === 'allowed' && !part.auto && part.kind !== 'delete' && !!part.page_id && !!onOpen;
-  const canUndo = part.status === 'allowed' && part.auto && part.undoable !== false;
+  const canUndo = part.kind !== 'mcp_call' && part.kind !== 'mcp_connect' && part.kind !== 'skill_install' && part.status === 'allowed' && part.auto && part.undoable !== false;
 
   const undo = async () => {
     setBusy(true);
@@ -215,6 +216,7 @@ export function PermissionCard({ chatId, part, onOpen, onReview }: {
 }) {
   const [all, setAll] = useState(false);
   if (part.status !== 'pending') return <PermissionOutcome chatId={chatId} part={part} onOpen={onOpen} />;
+  const external = part.kind === 'mcp_call' || part.kind === 'mcp_connect' || part.kind === 'skill_install';
   const many = part.changes.length > FIRST && !all;
   const name = requestTitle(part);
   return (
@@ -226,9 +228,15 @@ export function PermissionCard({ chatId, part, onOpen, onReview }: {
         <span className="kb-perm__path" title={part.path ?? part.title}>{part.path ?? part.title}</span>
         {part.kind === 'rename' && part.new_title && <span className="kb-perm__to">→ {part.new_title}</span>}
         <span className="kb-perm__spacer" />
-        {onReview && <IconButton icon="wiki" size="sm" label="Review beside the chat" onClick={onReview} />}
+        {!external && onReview && <IconButton icon="wiki" size="sm" label="Review beside the chat" onClick={onReview} />}
       </header>
-      <SummaryPills part={part} />
+      {external ? <div className="kb-perm__body">
+        <p>{part.kind === 'skill_install' ? 'Source' : 'Recipient'} · {part.recipient}</p>
+        {part.kind === 'skill_install' && <p>Allow this skill to be installed for this profile?</p>}
+        {part.kind === 'mcp_call' && <p>“Allow in this chat” covers later MCP calls in this conversation.</p>}
+        {part.kind === 'mcp_connect' && part.arguments?.trust === 'unverified' && <p role="alert">Unverified MCP publisher.</p>}
+        {part.kind !== 'skill_install' && <pre className="kb-external-arguments">{JSON.stringify(part.arguments ?? {}, null, 2)}</pre>}
+      </div> : <><SummaryPills part={part} />
       <div className="kb-perm__body">
         <ChangeList part={part} limit={many ? FIRST : undefined} />
         <KindNote part={part} />
@@ -236,6 +244,7 @@ export function PermissionCard({ chatId, part, onOpen, onReview }: {
           <button type="button" className="kb-perm__more" onClick={() => setAll(true)}>Show all {part.changes.length} changes</button>
         )}
       </div>
+      </>}
       <DecisionBar chatId={chatId} part={part} />
     </m.section>
   );

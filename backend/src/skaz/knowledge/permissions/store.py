@@ -1,4 +1,4 @@
-"""Permission requests, grants and agents' questions in ``knowledge.sqlite3`` (schema ``chats`` v2)."""
+"""Permission requests, grants and agents' questions in ``knowledge.sqlite3`` (schema ``chats``)."""
 from __future__ import annotations
 
 import json
@@ -10,12 +10,14 @@ from typing import Any, Literal, cast
 from ..agents.engine import EngineId
 from ..store.database import KnowledgeDatabase
 
-PermissionKind = Literal["create", "edit", "rename", "delete"]
+PermissionKind = Literal["create", "edit", "rename", "delete", "mcp_call", "mcp_connect", "skill_install"]
 PermissionStatus = Literal["pending", "allowed", "denied", "cancelled", "undone"]
 QuestionStatus = Literal["pending", "answered", "superseded", "cancelled"]
-PERMISSION_KINDS: tuple[PermissionKind, ...] = ("create", "edit", "rename", "delete")
+PERMISSION_KINDS: tuple[PermissionKind, ...] = (
+    "create", "edit", "rename", "delete", "mcp_call", "mcp_connect", "skill_install",
+)
 #: Kinds "Allow in this chat" can cover; deleting a page always asks.
-GRANTABLE: frozenset[str] = frozenset({"create", "edit", "rename"})
+GRANTABLE: frozenset[str] = frozenset({"create", "edit", "rename", "mcp_call"})
 
 
 @dataclass(frozen=True)

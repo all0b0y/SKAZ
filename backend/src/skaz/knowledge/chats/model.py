@@ -155,12 +155,22 @@ class MemoryPart:
     undone: bool = False
 
 
-Part = (KnowledgePart | TextOnlyPart | TextPart | CitePart | PagePart | ConnectionPart | ToolPart
+@dataclass(frozen=True)
+class FilePart:
+    id: str
+    name: str
+    mime_type: str
+    size: int
+
+
+Part = (FilePart | KnowledgePart | TextOnlyPart | TextPart | CitePart | PagePart | ConnectionPart | ToolPart
         | PermissionPart | QuestionPart | StudyPart
         | WebSearchPart | MemoryPart | BlockPart | WikiFixPart | ResearchPart)
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
+    if isinstance(part, FilePart):
+        return {"type": "file", **asdict(part)}
     if isinstance(part, KnowledgePart):
         return {"type": "knowledge"}
     if isinstance(part, TextOnlyPart):
@@ -206,6 +216,8 @@ def part_to_json(part: Part) -> dict[str, Any]:
 
 
 def part_from_json(data: Mapping[str, Any]) -> Part | None:
+    if data.get("type") == "file":
+        return FilePart(str(data["id"]), str(data["name"]), str(data["mime_type"]), int(data["size"]))
     kind = data.get("type")
     if kind == "knowledge":
         return KnowledgePart()

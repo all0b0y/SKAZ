@@ -5,7 +5,7 @@ Response models have no defaults unless the contract marks the field optional
 """
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
@@ -25,7 +25,7 @@ KbMessageRole = Literal["user", "assistant", "system"]
 KbMessageState = Literal["streaming", "done", "interrupted", "failed", "cancelled"]
 KbFailureKind = Literal["limit", "auth", "incompatible", "network", "cancelled", "other"]
 KbChatEventType = Literal["message", "delta", "part", "state", "title", "part_update", "removed"]
-KbPermissionKind = Literal["create", "edit", "rename", "delete"]
+KbPermissionKind = Literal["create", "edit", "rename", "delete", "mcp_call", "mcp_connect", "skill_install"]
 KbPermissionStatus = Literal["pending", "allowed", "denied", "cancelled", "undone"]
 KbQuestionStatus = Literal["pending", "answered", "superseded", "cancelled"]
 
@@ -180,6 +180,8 @@ class KbPermissionPart(BaseModel):
     type: Literal["permission"]
     id: str
     kind: KbPermissionKind
+    recipient: str | None = None
+    arguments: dict[str, Any] | None = None
     engine: KbEngineId
     #: ``null`` for a page that is still to be created.
     page_id: str | None
@@ -237,8 +239,16 @@ class KbMemoryPart(BaseModel):
     undone: bool
 
 
+class KbFilePart(BaseModel):
+    type: Literal["file"]
+    id: str
+    name: str
+    mime_type: str
+    size: int
+
+
 class KbMessagePart(RootModel[Annotated[
-    KbKnowledgePart | KbTextPart | KbTextOnlyPart | KbCitePart | KbPagePart
+    KbFilePart | KbKnowledgePart | KbTextPart | KbTextOnlyPart | KbCitePart | KbPagePart
                                         | KbConnectionPart | KbToolPart
                                         | KbPermissionPart | KbQuestionPart | KbStudyPart
                                         | KbWebSearchPart | KbMemoryPart

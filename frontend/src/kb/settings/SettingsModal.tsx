@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
+import { ToolsSettings } from './ToolsSettings';
 import { NewCardsRow } from '../study/StudySettingsRow';
 import { Banner, Button, Icon, Modal, PathText, Segmented } from '../ui';
 import { usePrefs, useLibrary, useServices, useSettings, useUi } from '../state/context';
@@ -252,6 +253,11 @@ function SectionBody({ section }: { section: SettingsSection }) {
   const { client } = useServices();
   const beta = useSearchSettings(client, (s) => s.rules?.beta ?? false);
   const me = useSettings((s) => s.me.value);
+  if (section === 'skills') return <ToolsSettings humanizerDetails={<>
+    <p>{ROWS.find(row => row.id === 'humanizer')?.hint}</p>
+    <section aria-label="Applies to">{ROWS.filter(row => row.id.startsWith('skill-')).map(row => <Row key={row.id} row={row} />)}</section>
+    <SkillsNote />
+  </>} />;
   if (section === 'me' && isGraphMe(me)) return <MeGraphSection view={me} />;
   const rows = visibleSearchRows(ROWS.filter((r) => r.section === section), beta);
   return (
@@ -260,9 +266,6 @@ function SectionBody({ section }: { section: SettingsSection }) {
       <HealthPlates section={section} />
       {section === 'me' && <MeIntro />}
       {section === 'look' && <PresetGallery />}
-      {section === 'skills' && (
-        <p className="kb-sintro">Skills SKAZ gives to every agent. Only skills from SKAZ’s own folder are used — your personal skills in ~/.claude, ~/.codex and ~/.hermes are not.</p>
-      )}
       {groupsOf(rows).map((g, i) => (
         <section key={`${g.title}-${i}`} className="kb-sgroup" aria-label={g.title || undefined}>
           {g.title && <h4 className="kb-sgroup__title">{g.title}</h4>}
@@ -273,7 +276,6 @@ function SectionBody({ section }: { section: SettingsSection }) {
         <p className="kb-snote"><Icon name="warning" size={14} />If the chosen model is unavailable, SKAZ says so and never switches to another on its own.</p>
       )}
       {section === 'about' && <Licenses />}
-      {section === 'skills' && <SkillsNote />}
       {section === 'me' && <MeSkills />}
       {section === 'me' && <MeStorageNote />}
     </>

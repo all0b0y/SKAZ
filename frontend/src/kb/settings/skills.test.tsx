@@ -11,25 +11,27 @@ const openSettings = async () => {
 };
 const row = (dialog: HTMLElement, label: string) => within(dialog).getByRole('group', { name: label });
 
-describe('Settings → Skills (0.3.1 H3, variant B)', () => {
+describe('Settings → Tools → Skills', () => {
   it('shows SKAZ’s own Humanizer, on by default, with a status per agent', async () => {
     const user = userEvent.setup();
     renderKb({ world: chatWorld() });
     const dialog = await openSettings();
     const nav = within(dialog).getByRole('navigation', { name: 'Settings sections' });
     const work = within(nav).getByRole('heading', { name: 'Work' }).nextElementSibling as HTMLElement;
-    expect(within(work).getByRole('button', { name: 'Skills' })).toBeInTheDocument();
-    await user.click(within(nav).getByRole('button', { name: 'Skills' }));
-    expect(within(dialog).getByRole('heading', { name: 'Skills', level: 3 })).toBeInTheDocument();
+    expect(within(work).getByRole('button', { name: 'Tools' })).toBeInTheDocument();
+    await user.click(within(nav).getByRole('button', { name: 'Tools' }));
+    await user.click(within(dialog).getByRole('tab', { name: /^Skills/ }));
+    await user.click(await within(dialog).findByRole('button', { name: 'Details' }));
+    expect(within(dialog).getByRole('heading', { name: 'Tools', level: 3 })).toBeInTheDocument();
     expect(dialog).toHaveTextContent(
-      'Skills SKAZ gives to every agent. Only skills from SKAZ’s own folder are used — your personal skills in ~/.claude, ~/.codex and ~/.hermes are not.',
+      'One setup for Codex, Claude Code, Hermes and OpenCode.',
     );
     const humanizer = row(dialog, 'Humanizer');
     // C1-b: Humanizer is for ordinary chat replies only, not wiki processing, cards or tests.
     expect(humanizer).toHaveTextContent('Writes like a person: no filler, no AI tells. Used only in ordinary chat replies, not wiki processing, cards or tests. Quotes from sources are never changed.');
     expect(humanizer).toHaveTextContent('v3.1.0 · MIT · github.com/blader/humanizer');
     expect(await within(humanizer).findByRole('switch', { name: 'Humanizer' })).toBeChecked();
-    expect(within(dialog).getByRole('region', { name: 'Writing' })).toContainElement(humanizer);
+    expect(within(dialog).getByRole('tabpanel')).toContainElement(humanizer);
     const applies = within(dialog).getByRole('region', { name: 'Applies to' });
     expect(await within(row(applies, 'Codex')).findByText('Loaded')).toBeInTheDocument();
     expect(within(row(applies, 'Claude Code')).getByText('Loaded')).toBeInTheDocument();
@@ -41,7 +43,9 @@ describe('Settings → Skills (0.3.1 H3, variant B)', () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
     const dialog = await openSettings();
-    await user.click(within(dialog).getByRole('button', { name: 'Skills' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Tools' }));
+    await user.click(within(dialog).getByRole('tab', { name: /^Skills/ }));
+    await user.click(await within(dialog).findByRole('button', { name: 'Details' }));
     const toggle = await within(row(dialog, 'Humanizer')).findByRole('switch', { name: 'Humanizer' });
     await user.click(toggle);
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({
@@ -64,7 +68,9 @@ describe('Settings → Skills (0.3.1 H3, variant B)', () => {
     const { services, fake } = renderKb({ world: chatWorld() });
     const world = fake.world;
     const dialog = await openSettings();
-    await user.click(within(dialog).getByRole('button', { name: 'Skills' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Tools' }));
+    await user.click(within(dialog).getByRole('tab', { name: /^Skills/ }));
+    await user.click(await within(dialog).findByRole('button', { name: 'Details' }));
     const hermes = () => row(within(dialog).getByRole('region', { name: 'Applies to' }), 'Hermes Agent');
     expect(await within(hermes()).findByText('Hermes Agent is not installed.')).toBeInTheDocument();
     world.agents.agents = world.agents.agents.map((a) => (a.id === 'hermes' ? { ...a, state: 'ready', installed: true, signed_in: true } : a));

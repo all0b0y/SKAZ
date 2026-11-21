@@ -224,9 +224,12 @@ class McpServer:
 
     def _annotations(self, name: str) -> dict[str, bool]:
         tool = self.registry.get(name)
-        if tool is None or not tool.interactive:
+        if tool is None or not tool.interactive or name == "skaz_mcp_list":
             return TOOL_ANNOTATIONS
         # A wiki change (after the user's Allow) or a question: not read-only, never outside the library.
+        if name in {"skaz_mcp_call", "skaz_mcp_propose", "skaz_skill_install"}:
+            return {"readOnlyHint": False, "destructiveHint": name == "skaz_mcp_call",
+                    "idempotentHint": False, "openWorldHint": True}
         return {"readOnlyHint": False, "destructiveHint": name == "skaz_wiki_delete_page",
                 "idempotentHint": False, "openWorldHint": False}
 

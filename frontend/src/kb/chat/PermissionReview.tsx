@@ -3,9 +3,7 @@ import { useChats } from '../state/context';
 import { useOpenDocument } from '../state/document';
 import { PanelFrameButtons } from '../document/parts';
 import { partsOf, type KbPermissionPart } from '../api/permissions';
-import { ChangeList, DecisionBar, KindNote, PermissionOutcome, agentName, summaryPills } from './permission';
-
-const VERB: Record<KbPermissionPart['kind'], string> = { create: 'create', edit: 'edit', rename: 'rename', delete: 'delete' };
+import { ChangeList, DecisionBar, KindNote, PermissionOutcome, VERB, agentName, summaryPills } from './permission';
 
 /** The request as the chat has it now (live: a decision in the card shows here at once). */
 function usePermissionPart(chatId: string, partId: string): KbPermissionPart | null {

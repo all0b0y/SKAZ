@@ -12,9 +12,12 @@ placeholders and are not used by this area.
 """
 from __future__ import annotations
 
+import sqlite3
+
 NAME = "chats"
 #: v2 (0.3.1 P): agents' permission requests, "Allow in this chat" grants and agents' questions.
-VERSION = 2
+#: v3: preserve earlier wiki decisions and add chat-scoped permissions for external MCP.
+VERSION = 4
 
 _TOKENIZE = "tokenize='unicode61 remove_diacritics 2'"
 
@@ -28,7 +31,8 @@ CREATE TABLE IF NOT EXISTS permission_requests (
     message_id  TEXT NOT NULL,
     run_id      TEXT NOT NULL,
     engine      TEXT NOT NULL,
-    kind        TEXT NOT NULL CHECK (kind IN ('create', 'edit', 'rename', 'delete')),
+    kind        TEXT NOT NULL
+                CHECK (kind IN ('create', 'edit', 'rename', 'delete', 'mcp_call', 'mcp_connect', 'skill_install')),
     page_id     TEXT,
     title       TEXT NOT NULL DEFAULT '',
     -- JSON: {"summary": {...}, "changes": [...], "extra": {...}} as shown on the card.
@@ -47,7 +51,7 @@ CREATE INDEX IF NOT EXISTS permission_requests_by_run ON permission_requests(run
 -- "Allow in this chat": one row per chat and kind (never 'delete': deleting always asks).
 CREATE TABLE IF NOT EXISTS permission_grants (
     chat_id    TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
-    kind       TEXT NOT NULL CHECK (kind IN ('create', 'edit', 'rename')),
+    kind       TEXT NOT NULL CHECK (kind IN ('create', 'edit', 'rename', 'mcp_call')),
     granted_at TEXT NOT NULL,
     PRIMARY KEY (chat_id, kind)
 );
@@ -70,7 +74,32 @@ CREATE INDEX IF NOT EXISTS agent_questions_by_chat ON agent_questions(chat_id, s
 CREATE INDEX IF NOT EXISTS agent_questions_by_run ON agent_questions(run_id, status);
 """
 
-UPGRADES = {2: PERMISSIONS_SQL}
+def _mcp_permissions(connection: sqlite3.Connection) -> None:
+    # Keep requests, decisions, undo records and chat grants through upgrades. All DDL is atomic.
+    for table in ("permission_requests", "permission_grants"):
+        ddl = connection.execute("SELECT sql FROM sqlite_master WHERE name=?", (table,)).fetchone()[0]
+        required = "'skill_install'" if table == "permission_requests" else "'mcp_call'"
+        if required in ddl:
+            continue
+        with connection:
+            connection.execute("SAVEPOINT migrate_mcp_permissions")
+            connection.execute(f"ALTER TABLE {table} RENAME TO previous_{table}")
+            if table == "permission_requests":
+                connection.execute("DROP INDEX IF EXISTS permission_requests_by_chat")
+                connection.execute("DROP INDEX IF EXISTS permission_requests_by_run")
+            # Execute individual complete statements without executescript's implicit COMMIT.
+            statement = ""
+            for line in PERMISSIONS_SQL.splitlines(keepends=True):
+                statement += line
+                if sqlite3.complete_statement(statement):
+                    connection.execute(statement)
+                    statement = ""
+            connection.execute(f"INSERT INTO {table} SELECT * FROM previous_{table}")
+            connection.execute(f"DROP TABLE previous_{table}")
+            connection.execute("RELEASE migrate_mcp_permissions")
+
+
+UPGRADES = {2: PERMISSIONS_SQL, 3: _mcp_permissions, 4: _mcp_permissions}
 
 _CHATS_V1 = f"""
 CREATE TABLE IF NOT EXISTS chat_threads (

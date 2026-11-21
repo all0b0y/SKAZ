@@ -24,7 +24,7 @@ import contextlib
 import logging
 import sqlite3
 import time
-from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -101,6 +101,7 @@ from ..permissions.store import PermissionRecord, QuestionRecord, RunRef
 from ..permissions.web_search import ChatWebGate, WebSearchBroker, WebSearchRecord
 from ..permissions.web_tool import WEB_TOOL
 from ..service import KnowledgeService
+from ..skills import SkazSkill
 from ..skills.settings import enabled_skills
 from ..sources.service import SourceService
 from ..sources.visual import VisualSourceUnsupported
@@ -304,6 +305,10 @@ class ChatService:
         #: The runtime wires it to the install tasks; an update that holds the agent counts as well.
         self.hold_deletions: Callable[[str], bool] = lambda _engine: False
         self._agents = agents
+        self.review_shared_tools: Callable[
+            [RunRef, MessageInput], Awaitable[tuple[str, tuple[str, ...]] | None]
+        ] | None = None
+        self.downloaded_skills: Callable[[], tuple[SkazSkill, ...]] = tuple
         self.tools = tools
         self._text_layer = text_layer or (lambda: IdentityTextLayer())
         self._checkpoint_s = checkpoint_s
@@ -1176,6 +1181,21 @@ class ChatService:
         run.question = question
         try:
             assert question.input is not None
+            if self.review_shared_tools is not None:
+                ref = self.run_ref(run.run_id)
+                if ref is not None:
+                    review = await self.review_shared_tools(ref, question.input)
+                    if review is not None:
+                        reply, remaining = review
+                        self._add_part(run, TextPart(reply + "\n\n" if remaining else reply))
+                        if not remaining:
+                            terminal = Completed(run.run_id)
+                            return
+                        # The stored user message keeps all its files. Only unresolved materials
+                        # need to be sent to the engine, and may be used by this turn's tools.
+                        question = replace(question, input=replace(question.input, attachments=remaining))
+                        run.question = question
+            assert question.input is not None
             scope = scope_of(await disk_call(SearchRulesStore(self.kb.db, self.kb.settings).chat, chat.id))
             request = await disk_call(builder.request, chat, question.input, self._other_chat, scope)
             # N7-4: the narrowed sources, told before the question each turn (kept in code by the tools).
@@ -1184,7 +1204,7 @@ class ChatService:
                 request = f"{note}\n\n{request}"
             language = await disk_call(self._wiki_language)
             # Read when the turn is built: switching a skill applies from the next answer (H3).
-            skills = await disk_call(enabled_skills, self.kb.settings)
+            skills = await disk_call(lambda: enabled_skills(self.kb.settings) + self.downloaded_skills())
             # N6 «Я»: read when the turn is built too; chats are the only turns that carry it (decision 15).
             graph = graph_store(self.kb)
             if graph is not None and run.observe_epoch is not None:
@@ -1846,6 +1866,12 @@ class ChatService:
                                           execution="stopped" if stopped and not closing else "unknown")
         except Exception as error:
             log.error("Cancelling the requests of chat answer %s failed: %s", run_id, error_note(error))
+
+    def run_input(self, ref: RunRef) -> MessageInput | None:
+        run = self._runs.get(ref.chat_id)
+        if run and run.run_id == ref.run_id and not run.stopping and run.question:
+            return run.question.input
+        return None
 
     def run_ref(self, run_id: str) -> RunRef | None:
         """The chat answer an agent run belongs to (tools learn their chat this way)."""

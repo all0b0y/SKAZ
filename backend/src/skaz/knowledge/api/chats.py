@@ -24,6 +24,7 @@ from ..chats.fix_part import WikiFixPart
 from ..chats.model import (
     CitePart,
     ConnectionPart,
+    FilePart,
     KnowledgePart,
     MemoryPart,
     Message,
@@ -76,6 +77,7 @@ from .schemas_chats import (
     KbConnectionPart,
     KbDiscussFinding,
     KbFailure,
+    KbFilePart,
     KbKnowledgePart,
     KbMemoryPart,
     KbMessage,
@@ -193,6 +195,9 @@ class Presenter:
         return self._folders[folder_id]
 
     def part(self, part: Part) -> KbMessagePart:
+        if isinstance(part, FilePart):
+            return KbMessagePart(KbFilePart(type="file", id=part.id, name=part.name,
+                                            mime_type=part.mime_type, size=part.size))
         if isinstance(part, PermissionPart):
             record = self.controls.permission(part.permission_id)
             return KbMessagePart(permission_part(record) if record is not None
@@ -310,7 +315,8 @@ def permission_part(record: PermissionRecord) -> KbPermissionPart:
     return KbPermissionPart(
         type="permission", id=record.id, kind=record.kind, engine=record.engine, page_id=record.page_id,
         title=record.title, status=record.status, auto=record.auto, reason=record.reason, summary=summary,
-        changes=changes, path=preview.get("path") if isinstance(preview.get("path"), str) else None,
+        changes=changes, recipient=preview.get("recipient"), arguments=preview.get("arguments"),
+        path=preview.get("path") if isinstance(preview.get("path"), str) else None,
         new_title=preview.get("new_title") if isinstance(preview.get("new_title"), str) else None,
         linking_pages=int(preview.get("linking_pages") or 0),
         links_unlinked=int(preview.get("links_unlinked") or 0),

@@ -94,6 +94,7 @@ while True:
     if method == "initialize":
         send({"jsonrpc": "2.0", "id": ident, "result": SCENARIO["initialize"]})
     elif method == "session/new":
+        servers = params.get("mcpServers", [])
         send({"jsonrpc": "2.0", "id": ident, "result": {**SCENARIO["session_new"],
                                                          "configOptions": state["options"]}})
     elif method in ("session/resume", "session/load"):
@@ -130,6 +131,8 @@ while True:
             waiting.pop(pending)
     elif method == "session/prompt":
         session = params["sessionId"]
+        if SCENARIO.get("fixture_tool"):
+            record("fixture_result", reply=call_local_mcp(servers[0], SCENARIO["fixture_tool"]))
         for body in SCENARIO.get("updates", []):
             if body == "PERMISSION":
                 next_id += 1
@@ -162,6 +165,8 @@ class FakeOpenCode:
         self.binary = directory / "opencode"
         self.scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
         body = _OPENCODE % {"scenario": str(self.scenario_path), "record": str(self.record_path)}
+        if scenario.get("fixture_tool"):
+            body = (FIXTURES / "call_local_mcp.py").read_text() + "\n" + body
         self.binary.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
         self.binary.chmod(0o755)
 

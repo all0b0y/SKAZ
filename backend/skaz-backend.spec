@@ -53,6 +53,10 @@ for _dir, _subdirs, _files in _os.walk(_os.path.join(_skills_src, "skaz", "knowl
         if not _name.endswith((".py", ".pyc")):
             datas.append((_os.path.join(_dir, _name), _os.path.relpath(_dir, _skills_src)))
 
+_guard_dir = _os.path.join("skaz", "knowledge", "extensions", "hermes_guard")
+for _name in ("LICENSE", "UPSTREAM.md"):
+    datas.append((_os.path.join(_skills_src, _guard_dir, _name), _guard_dir))
+
 excludes = [
     "gigachat_audio_mlx",
     "torch",

@@ -818,6 +818,23 @@ class SourceService:
             raise NotFound("Material not found.")
         return self.kb.require().read_material(material_id, hint=record.rel_dir)
 
+    def skill_attachment(self, material_id: str, *, max_bytes: int) -> bytes | None:
+        """Read the imported SKILL.md original, bound to its intake digest."""
+        record = self.kb.material_repo.get(material_id)
+        origin = record.origin if record else None
+        if not origin or origin.get("type") != "file" or str(origin.get("file_name")).casefold() != "skill.md":
+            return None
+        assert record is not None
+        files = self.kb.require().read_material(material_id, hint=record.rel_dir)
+        intake = self._intake(files.directory)
+        if intake is None or intake.original != "original.md":
+            raise SourceRejected("The original SKILL.md is unavailable.")
+        path = self.visual._authorized_service_file(files, intake.original)
+        data = read_bounded_bytes(path, max_bytes=max_bytes)
+        if hashlib.sha256(data).hexdigest() != origin.get("sha256"):
+            raise SourceRejected("The original SKILL.md has changed. Attach it again.")
+        return data
+
     def share_file(self, material_id: str) -> Path:
         files = self._material_files(material_id)
         intake = self._intake(files.directory)

@@ -349,10 +349,10 @@ test('settings: every section at every width and theme', async () => {
       await page.keyboard.press('Meta+Comma');
       const dialog = page.getByRole('dialog', { name: 'Settings' });
       await expect(dialog).toBeVisible();
-      for (const section of ['Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Skills', 'Storage', 'Privacy', 'Appearance', 'About']) {
+      for (const section of ['Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Tools', 'Storage', 'Privacy', 'Appearance', 'About']) {
         // A section with a problem on this Mac is named "<section> Needs attention" (the dot).
         await dialog.getByRole('navigation').getByRole('button', { name: new RegExp(`^${section}`) }).click();
-        const shot = (section === 'Storage' || section === 'Models' || section === 'Appearance' || section === 'Skills') && v.width !== 1024;
+        const shot = (section === 'Storage' || section === 'Models' || section === 'Appearance' || section === 'Tools') && v.width !== 1024;
         await check(`settings-${section.replace(/\W+/g, '-').toLowerCase()}-${v.width}-${theme}`, shot);
         // A wide control (five options) never lies over its row's label: it moves below instead.
         const overlaps = await dialog.locator('.kb-srow').evaluateAll((rows) => rows.flatMap((r) => {

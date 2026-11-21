@@ -60,6 +60,11 @@ line = sys.stdin.readline()
 # W-2: with web search the host keeps stdin open for its control responses (SDK control protocol).
 record("stdin", line=line, rest="" if SCENARIO.get("web") else sys.stdin.read())
 
+if SCENARIO.get("fixture_tool"):
+    with open(args[args.index("--mcp-config") + 1]) as config:
+        server = json.load(config)["mcpServers"]["skaz"]
+    record("fixture_result", reply=call_local_mcp(server, SCENARIO["fixture_tool"]))
+
 def ask(item):
     # A ``can_use_tool`` control request as the 2.1.281 binary sends it (``sendRequest`` of the stdio
     # permission prompt), then what the CLI does with the answer: run WebSearch with the host's
@@ -205,6 +210,7 @@ while True:
     if method == "initialize":
         send({"jsonrpc": "2.0", "id": ident, "result": SCENARIO["initialize"]})
     elif method == "session/new":
+        servers = params.get("mcpServers", [])
         if "session_new_error" in SCENARIO:
             send({"jsonrpc": "2.0", "id": ident, "error": SCENARIO["session_new_error"]})
         else:
@@ -252,6 +258,8 @@ while True:
                              "content": {"type": "text", "text": SCENARIO["tools_listing"]}})
             send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": "end_turn"}})
             continue
+        if SCENARIO.get("fixture_tool"):
+            record("fixture_result", reply=call_local_mcp(servers[0], SCENARIO["fixture_tool"]))
         for body in SCENARIO.get("updates", []):
             if body == "PERMISSION_MODEL":
                 next_id += 1
@@ -290,6 +298,8 @@ class FakeCli:
         self.scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
         template = _CLAUDE if name == "claude" else _HERMES
         body = template % {"scenario": str(self.scenario_path), "record": str(self.record_path)}
+        if scenario.get("fixture_tool"):
+            body = (FIXTURES / "call_local_mcp.py").read_text() + "\n" + body
         self.binary.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
         self.binary.chmod(0o755)
 

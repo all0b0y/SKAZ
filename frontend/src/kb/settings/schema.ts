@@ -17,7 +17,7 @@ export const NAV: ReadonlyArray<{ group: string; items: ReadonlyArray<SectionDef
       { id: 'models', label: 'Models', icon: 'models' },
       { id: 'rec', label: 'Recording & speech', icon: 'mic' },
       { id: 'wiki', label: 'Wiki', icon: 'wiki' },
-      { id: 'skills', label: 'Skills', icon: 'skills' },
+      { id: 'skills', label: 'Tools', icon: 'skills' },
       // N6 decision 1: «Я» — one place for what agents know about you and how to work with you.
       { id: 'me', label: 'Me', icon: 'me' },
     ],
