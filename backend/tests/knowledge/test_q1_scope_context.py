@@ -44,7 +44,14 @@ async def test_an_open_material_or_page_outside_the_sources_is_not_sent(env: Env
                        mentions=[{"type": "material", "id": lib.lecture, "title": "Лекция 8"}])
     request = _request(env)
     assert "outside the sources chosen for this chat" in request
-    assert request.count(LECTURE_TEXT) == 1  # only through the user's own @mention
+    mention = '<untrusted-data label="mentioned material">'
+    assert request.count(mention) == 1
+    before, _, rest = request.partition(mention)
+    body, closed, after = rest.partition("</untrusted-data>")
+    # An explicit mention may repeat the excerpt in a citation example; no other block gets it.
+    assert closed and LECTURE_TEXT in body
+    assert LECTURE_TEXT not in before + after
+    assert '<untrusted-data label="open material">' not in request
     await finished(env.chats)
 
 
@@ -54,9 +61,14 @@ async def test_an_excluded_recording_gives_no_speech(env: Env) -> None:
     await _rules(env, chat["id"], {"excluded": [lib.live]})
     await env.answered(chat["id"], "Что было?")
     request = _request(env)
-    assert LIVE_TEXT not in request and "This chat belongs to a recording" not in request
+    assert LIVE_TEXT not in request and "<recording_transcript>" not in request
     other = await env.chat()
     await _rules(env, other["id"], {"sources_only": True, "sources": [lib.textbook]})
     await env.answered(other["id"], "Что идёт?")
-    assert "A recording is in progress" not in _request(env)  # one outside the set isn't listed
+    request = _request(env)
+    assert "<recording_status>" not in request and lib.live not in request
+    await _rules(env, other["id"], {"sources_only": True, "sources": [lib.live]})
+    await env.answered(other["id"], "Что идёт?")
+    request = _request(env)
+    assert "<recording_status>" in request and f"id {lib.live}" in request
     await finished(env.chats)

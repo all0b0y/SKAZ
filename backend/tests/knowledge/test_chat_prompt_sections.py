@@ -43,9 +43,9 @@ SECTIONS = {
 
 def section(prompt: str, tag: str) -> str:
     token = re.compile(rf"(?ms)^<{tag}>\n(.*?)\n</{tag}>$")
-    bodies = token.findall(prompt)
-    assert len(bodies) == 1, f"Expected one <{tag}> section, found {len(bodies)}"
-    return bodies[0]
+    matches = list(token.finditer(prompt))
+    assert len(matches) == 1, f"Expected one <{tag}> section, found {len(matches)}"
+    return matches[0].group(1)
 
 
 def test_each_piece_of_the_core_chat_prompt_has_a_named_boundary() -> None:

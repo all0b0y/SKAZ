@@ -307,10 +307,13 @@ async def test_preparation_progress_is_real_callback_bytes_without_fake_percenta
     preparations = client._transport.app.state.runtime.local_models  # type: ignore[attr-defined]
 
     started = await preparations.start("small", "local-whisper")
-    await entered.wait()
-    progress = preparations.progress("local-whisper", "small")
-    speech = (await client.get("/kb/settings/speech")).json()["local_model"]
-    release.set()
+    assert started[0] == "installing", started
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        progress = preparations.progress("local-whisper", "small")
+        speech = (await client.get("/kb/settings/speech")).json()["local_model"]
+    finally:
+        release.set()
     for _ in range(100):
         if preparations._reports.get("local-whisper:small", ("",))[0] == "ready":
             break
@@ -318,7 +321,6 @@ async def test_preparation_progress_is_real_callback_bytes_without_fake_percenta
     else:
         raise AssertionError("the local model never reached ready")
 
-    assert started[0] == "installing"
     assert progress == local_models.DownloadProgress(downloaded_bytes=1_048_576, completed_files=2)
     assert (speech["state"], speech["progress"]) == ("downloading", None)
 
