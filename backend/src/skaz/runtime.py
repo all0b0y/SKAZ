@@ -160,7 +160,7 @@ class Runtime:
         self.kb_chats.hold_deletions = lambda engine: (
             self.kb_agents.installs.running_for(cast(Any, engine)) is not None)
         self.kb_extensions = Extensions(self.kb)
-        self.kb_chats.downloaded_skills = self.kb_extensions.skills
+        self.kb_chats.external_skill_state = self.kb_extensions.skill_session_state
         self.kb_tools.add(attach_external_tools(
             self.kb_extensions, self.kb_chats, self.kb_permissions, self.kb_sources,
         ))

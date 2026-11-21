@@ -101,6 +101,11 @@ async def set_active(item_id: str, body: KbSetToolActive, service: Ext) -> KbExt
     return KbExternalItem.model_validate(await disk_call(service.toggle, item_id, body.active))
 
 
+@router.post("/settings/tools/{item_id}/refresh")
+async def refresh_tools(item_id: str, service: Ext) -> KbExternalItem:
+    return KbExternalItem.model_validate(await service.refresh_mcp(item_id))
+
+
 @router.delete("/settings/tools/{item_id}", status_code=204)
 async def remove_source(item_id: str, service: Ext) -> None:
     await disk_call(service.remove, item_id)

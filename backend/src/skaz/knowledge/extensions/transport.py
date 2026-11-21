@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
@@ -18,6 +18,7 @@ from ..sources.fetch import MAX_REDIRECTS, Resolver, SafeFetcher, _pinned, liter
 MAX_PACKET = 12 * 1024 * 1024
 VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")
 ACCEPT = "application/json, text/event-stream"
+BeforeSend = Callable[[], None]
 
 
 def local(url: str) -> bool:
@@ -120,6 +121,7 @@ class Transport:
         discover: bool = False,
         end_session: bool = False,
         limit: int = MAX_PACKET,
+        before_send: BeforeSend | None = None,
     ) -> Packet:
         current = address(url)
         guard = SafeFetcher(resolver=self.resolve)
@@ -144,6 +146,8 @@ class Transport:
                     if ip:
                         destination, pinned_headers, extensions = _pinned(current, ip)
                     client.cookies.clear()
+                    if before_send is not None:
+                        before_send()
                     async with client.stream(
                         "DELETE" if end_session else "POST" if payload is not None else "GET",
                         destination,
@@ -169,7 +173,9 @@ class Transport:
         raise NameRejected("The server redirected too many times.")
 
     @asynccontextmanager
-    async def session(self, url: str, *, discover: bool = False) -> AsyncIterator[McpSession]:
+    async def session(
+        self, url: str, *, discover: bool = False, before_send: BeforeSend | None = None,
+    ) -> AsyncIterator[McpSession]:
         packet = await self.request(
             url,
             payload={
@@ -185,6 +191,7 @@ class Transport:
             headers={"Accept": ACCEPT},
             discover=discover,
             limit=128 * 1024,
+            before_send=before_send,
         )
         info = rpc_result(packet, 1)
         version = info.get("protocolVersion")
@@ -201,9 +208,11 @@ class Transport:
                 payload={"jsonrpc": "2.0", "method": "notifications/initialized"},
                 headers=headers,
                 limit=65536,
+                before_send=before_send,
             )
             yield McpSession(
-                self, packet.url, headers, str(info["serverInfo"].get("name") or urlsplit(url).hostname)
+                self, packet.url, headers, str(info["serverInfo"].get("name") or urlsplit(url).hostname),
+                before_send,
             )
         finally:
             if session:
@@ -219,12 +228,14 @@ class McpSession:
     url: str
     headers: dict[str, str]
     name: str
+    before_send: BeforeSend | None = None
 
     async def rpc(self, method: str, params: dict[str, Any], call_id: int = 2) -> dict[str, Any]:
         packet = await self.transport.request(
             self.url,
             payload={"jsonrpc": "2.0", "id": call_id, "method": method, "params": params},
             headers=self.headers,
+            before_send=self.before_send,
         )
         return rpc_result(packet, call_id)
 

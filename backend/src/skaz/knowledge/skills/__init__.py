@@ -15,6 +15,7 @@ from ..errors import KnowledgeError
 
 SKILLS_DIR = Path(__file__).resolve().parent
 HUMANIZER = "humanizer"
+SKILL_READER = "skaz_skill_read"
 
 
 class UnknownSkill(KnowledgeError):

@@ -4721,6 +4721,13 @@ export interface KbEndpoints {
     response: void;
     status: 204;
   };
+  "POST /kb/settings/tools/{item_id}/refresh": {
+    path: { item_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbExternalItem;
+    status: 200;
+  };
   "GET /kb/settings/weekly-check": {
     path: Record<string, never>;
     query: Record<string, never>;

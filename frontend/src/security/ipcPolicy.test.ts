@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { isAllowedExternalUrl, validateBridgeRequest } from '../../../electron/ipcPolicy';
 
 describe('Electron IPC policy', () => {
+  it('allows refreshing a saved MCP catalog through the renderer', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/settings/tools/ext-1/refresh' })).toBeNull();
+    for (const path of ['/kb/settings/tools', '/kb/settings/tools/check', '/kb/settings/tools/ext-1/other']) {
+      expect(validateBridgeRequest({ method: 'POST', path })).toMatch(/not allowed/);
+    }
+  });
+
   it('allows the recording transport and settings, not neighbouring mutations', () => {
     for (const [method, path] of [
       ['GET', '/settings'], ['PUT', '/settings'], ['GET', '/sessions/a/live'], ['PATCH', '/sessions/a'],

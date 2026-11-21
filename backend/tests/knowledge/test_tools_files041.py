@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -10,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 
 from skaz.app import create_app
 from skaz.config import AppConfig
@@ -179,3 +182,92 @@ async def test_b2_disabled_during_consent_sends_nothing(env: Env, external: Exte
     await env.client.post(f"/kb/permissions/{part.id}/decide", json={"decision": "allow"})
     await finished(env.runtime.kb_chats)
     assert external.calls == []
+
+
+async def test_refresh_reads_the_current_catalog_from_the_checked_recipient(
+    env: Env, external: External,
+) -> None:
+    item = await add(env.client, external.url + "/redirect")
+    assert item["tools"][0]["name"] == "save_note"
+    external.tool_name = "add_note"
+    external.requests.clear()
+    updated = data(await env.client.post(f"{TOOLS}/{item['id']}/refresh"))
+    assert [tool["name"] for tool in updated["tools"]] == ["add_note"]
+    assert data(await env.client.get(TOOLS))["mcp"] == [updated]
+    assert set(external.requests) == {"/mcp"}
+    assert not external.calls
+
+
+async def test_agent_can_discover_updated_tools_without_readding(env: Env, external: External) -> None:
+    item = await add(env.client, external.url + "/mcp")
+    external.tool_name = "add_note"
+    chat = await env.chat()
+    env.engine.script = lambda _: [
+        Invoke("skaz_mcp_list", {"connection_id": item["id"]}),
+        TextDelta("", "Listed the tools."),
+    ]
+    await env.send(chat["id"], "Which tools does the notes app have?")
+    await finished(env.runtime.kb_chats)
+    assert '"name":"add_note"' in env.engine.outcomes[-1]
+    assert '"name":"save_note"' not in env.engine.outcomes[-1]
+    arguments = {"title": "Lesson"}
+    invoke = Invoke("skaz_mcp_call", {
+        "connection_id": item["id"], "tool": "add_note", "arguments": arguments,
+    })
+    await call(env, chat["id"], invoke, "allow")
+    assert external.calls == [{"name": "add_note", "arguments": arguments}]
+
+
+async def test_catalog_change_during_consent_prevents_dispatch(env: Env, external: External) -> None:
+    item = await add(env.client, external.url + "/mcp")
+    chat = await env.chat()
+    env.engine.script = lambda _: [Invoke("skaz_mcp_call", {
+        "connection_id": item["id"], "tool": "save_note", "arguments": {"title": "Lesson"},
+    })]
+    await env.send(chat["id"], "Save a note.")
+    part = await env.part_of(chat["id"], "permission")
+    external.tool_name = "add_note"
+    data(await env.client.post(f"/kb/permissions/{part['id']}/decide", json={"decision": "allow"}))
+    await finished(env.runtime.kb_chats)
+    assert external.calls == []
+    assert "The MCP tool changed." in env.engine.outcomes[-1]
+
+
+async def test_stopping_a_chat_while_the_mcp_session_opens_prevents_dispatch(
+    env: Env, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.knowledge.test_tools_files_trust041 import REMOTE, install_fixture
+
+    fixture = await install_fixture(env)
+    item = await add(env.client, REMOTE)
+    opening = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        if json.loads(request.content).get("method") == "initialize":
+            opening.set()
+            await resume.wait()
+        return fixture.handle(request)
+
+    env.runtime.kb_extensions.transport.http_transport = httpx.MockTransport(handle)
+    interrupt = env.engine.interrupt
+
+    async def stop_engine(run_id: str) -> None:
+        await interrupt(run_id)
+        resume.set()
+
+    monkeypatch.setattr(env.engine, "interrupt", stop_engine)
+    chat = await env.chat()
+    env.engine.script = lambda _: [Invoke("skaz_mcp_call", {
+        "connection_id": item["id"], "tool": "save_note", "arguments": {"title": "Lesson"},
+    })]
+    try:
+        response = await env.send(chat["id"], "Save a note.")
+        part = await env.part_of(chat["id"], "permission")
+        data(await env.client.post(f"/kb/permissions/{part['id']}/decide", json={"decision": "allow"}))
+        await asyncio.wait_for(opening.wait(), 3)
+        data(await env.client.post(f"/kb/chats/{chat['id']}/messages/{response['assistant']['id']}/stop"))
+        await finished(env.runtime.kb_chats)
+        assert fixture.app.calls == []
+    finally:
+        resume.set()

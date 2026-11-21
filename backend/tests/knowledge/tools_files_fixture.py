@@ -26,6 +26,7 @@ class External:
     calls: list[dict[str, Any]] = field(default_factory=list)
     requests: list[str] = field(default_factory=list)
     mode: str = "file"
+    tool_name: str = "save_note"
 
     def result(self, body: dict[str, Any]) -> dict[str, Any]:
         method = body["method"]
@@ -39,7 +40,7 @@ class External:
             return {
                 "tools": [
                     {
-                        "name": "save_note",
+                        "name": self.tool_name,
                         "description": "Create a note",
                         "inputSchema": {
                             "type": "object",

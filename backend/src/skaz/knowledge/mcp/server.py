@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..agents.tools import ToolContext, ToolRegistry
+from ..skills import SKILL_READER
 from .tokens import McpRunScope, McpTokens
 
 MODERN_VERSIONS: tuple[str, ...] = ("2026-07-28",)
@@ -224,7 +225,7 @@ class McpServer:
 
     def _annotations(self, name: str) -> dict[str, bool]:
         tool = self.registry.get(name)
-        if tool is None or not tool.interactive or name == "skaz_mcp_list":
+        if tool is None or not tool.interactive or name in {"skaz_mcp_list", SKILL_READER}:
             return TOOL_ANNOTATIONS
         # A wiki change (after the user's Allow) or a question: not read-only, never outside the library.
         if name in {"skaz_mcp_call", "skaz_mcp_propose", "skaz_skill_install"}:

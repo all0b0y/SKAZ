@@ -93,6 +93,7 @@ const ROUTES: readonly Route[] = [
   // 0.3.1 H: Settings → Skills — SKAZ's own skills and the switch of one (lowercase id, one segment).
   { method: 'GET', pattern: /^\/kb\/settings\/tools$/ },
   { method: 'PATCH', pattern: /^\/kb\/settings\/tools\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/kb\/settings\/tools\/[^/]+\/refresh$/ },
   { method: 'DELETE', pattern: /^\/kb\/settings\/tools\/[^/]+$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/messages\/[^/]+\/files\/[^/]+$/ },
   { method: 'GET', pattern: /^\/kb\/settings\/skills$/ },

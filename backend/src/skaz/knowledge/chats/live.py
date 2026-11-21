@@ -13,8 +13,8 @@ messages it would send as history now (:func:`live_entries`) and decides (:func:
   the divergence is in the seed turn) → ``start`` a new session seeded with the history; the old session
   is queued for deletion.
 
-Nothing is recorded for an answer that did not finish ``done``; its turn stays the session's "tail" and
-is reverted (or the session replaced) by the next answer.
+The history prefix is recorded when an answer finishes ``done``. External skill reads are marked
+before delivery, so an interrupted tail cannot hide that its session received the instructions.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 from ..agents.engine import SessionPlan, SessionSupport, TurnMessage
@@ -92,12 +92,15 @@ class SessionContext:
     #: Opaque Me Graph authorization and applicability stamps.
     graph_epoch: str | None = None
     graph_stamp: str | None = None
+    #: Installed skill IDs whose instructions were read in the live session. No instruction text.
+    external_skill_reads: tuple[str, ...] = ()
 
     def to_json(self) -> str:
         return json.dumps({"language": self.language, "skills": list(self.skills), "web": self.web,
                            "gone": list(self.gone), "me": self.me.to_json() if self.me is not None else None,
                            "tools": list(self.tools) if self.tools is not None else None, "base": self.base,
-                           "graph_epoch": self.graph_epoch, "graph_stamp": self.graph_stamp},
+                           "graph_epoch": self.graph_epoch, "graph_stamp": self.graph_stamp,
+                           "external_skill_reads": list(self.external_skill_reads)},
                           ensure_ascii=False)
 
     @classmethod
@@ -110,13 +113,16 @@ class SessionContext:
             return None
         language, tools, base = data.get("language"), data.get("tools"), data.get("base")
         graph_epoch, graph_stamp = data.get("graph_epoch"), data.get("graph_stamp")
+        reads = data.get("external_skill_reads")
         return cls(language if isinstance(language, str) else None,
                    tuple(str(item) for item in data.get("skills") or ()), str(data.get("web") or ""),
                    tuple(str(item) for item in data.get("gone") or ()), MeMarks.from_json(data.get("me")),
                    tools=tuple(str(item) for item in tools) if isinstance(tools, list) else None,
                    base=base if isinstance(base, str) else None,
                    graph_epoch=graph_epoch if isinstance(graph_epoch, str) else None,
-                   graph_stamp=graph_stamp if isinstance(graph_stamp, str) else None)
+                   graph_stamp=graph_stamp if isinstance(graph_stamp, str) else None,
+                   external_skill_reads=tuple(item for item in reads if isinstance(item, str))
+                   if isinstance(reads, list) else ())
 
 
 @dataclass(frozen=True)
@@ -174,7 +180,8 @@ START = SessionPlan("start")
 
 def plan_session(session: LiveSession | None, engine: str, support: SessionSupport,
                  history: Sequence[tuple[str, str]],
-                 now: SessionContext | None = None) -> SessionDecision | None:
+                 now: SessionContext | None = None, *,
+                 enabled_external_skills: frozenset[str] = frozenset()) -> SessionDecision | None:
     """The plan for the next answer; ``None`` when the engine has no live sessions.
 
     ``now`` (the context this turn is built with) replaces the session by a new seeded one (once) when
@@ -187,6 +194,10 @@ def plan_session(session: LiveSession | None, engine: str, support: SessionSuppo
     if session is None:
         return SessionDecision(START)
     if session.engine != engine:
+        return SessionDecision(START, replace=True)
+    if session.context is not None and not enabled_external_skills.issuperset(
+        session.context.external_skill_reads
+    ):
         return SessionDecision(START, replace=True)
     if now is not None and stale(session.context, now):
         return SessionDecision(START, replace=True)
@@ -349,10 +360,14 @@ class SessionStore:
                context: SessionContext) -> bool:
         """The answer of ``turn_id`` finished ``done``: the session now holds ``items`` as well."""
         with self._db.write() as connection:
-            row = connection.execute("SELECT session_id, tail_turn_id FROM agent_sessions WHERE chat_id = ?",
-                                     (chat_id,)).fetchone()
+            row = connection.execute(
+                "SELECT session_id, tail_turn_id, context FROM agent_sessions WHERE chat_id = ?", (chat_id,)
+            ).fetchone()
             if row is None or row[0] != session_id:
                 return False
+            latest = SessionContext.from_json(row["context"])
+            if latest is not None:
+                context = replace(context, external_skill_reads=latest.external_skill_reads)
             last = connection.execute(
                 "SELECT COALESCE(MAX(ord), 0) FROM agent_session_items WHERE chat_id = ?",
                 (chat_id,)).fetchone()[0]
@@ -364,6 +379,23 @@ class SessionStore:
             tail = None if row[1] == turn_id else row[1]
             connection.execute("UPDATE agent_sessions SET tail_turn_id = ?, context = ? WHERE chat_id = ?",
                                (tail, context.to_json(), chat_id))
+            return True
+
+    def record_external_skill_read(self, chat_id: str, session_id: str, skill_id: str) -> bool:
+        """Mark a successful read on the vendor session even if the answer fails later."""
+        with self._db.write() as connection:
+            row = connection.execute(
+                "SELECT context FROM agent_sessions WHERE chat_id = ? AND session_id = ?",
+                (chat_id, session_id),
+            ).fetchone()
+            held = SessionContext.from_json(row["context"]) if row is not None else None
+            if held is None:
+                return False
+            if skill_id not in held.external_skill_reads:
+                reads = tuple(sorted((*held.external_skill_reads, skill_id)))
+                context = replace(held, external_skill_reads=reads)
+                connection.execute("UPDATE agent_sessions SET context = ? WHERE chat_id = ?",
+                                   (context.to_json(), chat_id))
             return True
 
     # -- the deletion list --------------------------------------------------------------

@@ -14,6 +14,7 @@ export function ToolsSettings({ humanizerDetails }: { humanizerDetails: ReactNod
   const [kind, setKind] = useState<ToolKind>('mcp');
   const [adding, setAdding] = useState(false);
   const [expanded, setExpanded] = useState<string[]>([]);
+  const [refreshing, setRefreshing] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const prefix = useId();
@@ -33,7 +34,7 @@ export function ToolsSettings({ humanizerDetails }: { humanizerDetails: ReactNod
       if (!previous) return previous;
       const list = previous[key];
       const next = remove ? list.filter(x => x.id !== item.id)
-        : list.some(x => x.id === item.id) ? list.map(x => x.id === item.id ? item : x) : [...list, item];
+        : list.map(x => x.id === item.id ? { ...x, active: item.active } : x);
       return { ...previous, [key]: next };
     });
   }
@@ -53,6 +54,23 @@ export function ToolsSettings({ humanizerDetails }: { humanizerDetails: ReactNod
       }
     } catch (e) { setError(errorText(e)); } finally { setBusy(''); }
   }
+
+  async function refreshTools(id: string) {
+    if (refreshing.includes(id)) return;
+    setRefreshing(current => [...current, id]);
+    setError('');
+    try {
+      const refreshed = await client.call('POST /kb/settings/tools/{item_id}/refresh', { path: { item_id: id } });
+      setData(current => current && {
+        ...current,
+        mcp: current.mcp.map(item => item.id === id ? { ...item, tools: refreshed.tools } : item),
+      });
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setRefreshing(current => current.filter(itemId => itemId !== id));
+    }
+  }
   return <div className="kb-tools">
     <p className="kb-sintro">One setup for Codex, Claude Code, Hermes and OpenCode.</p>
     <ToolTabs kind={kind} select={setKind} counts={[data?.mcp.length ?? 0, data?.skills.length ?? 0]} prefix={prefix} />
@@ -68,12 +86,15 @@ export function ToolsSettings({ humanizerDetails }: { humanizerDetails: ReactNod
       {data?.[group].map(record => {
         const item = record.built_in && humanizer ? { ...record, active: humanizer.enabled } : record;
         const open = expanded.includes(item.id), tools = item.tools ?? [];
+        const loadingTools = refreshing.includes(item.id);
         return <div key={item.id} className="kb-tools-entry" role="group" aria-label={item.name}>
           <div className="kb-tools-row"><Icon name={mcp ? 'link' : 'skills'} size={21} />
             <div className="kb-tools-name"><strong>{item.name}</strong><div>{mcp ? item.recipient
               : item.built_in ? 'Built in · Ordinary chat replies' : [item.publisher, item.version].filter(Boolean).join(' · ')}
-              {' · '}<button type="button" aria-expanded={open}
-                onClick={() => setExpanded(old => open ? old.filter(id => id !== item.id) : [...old, item.id])}>
+              {' · '}<button type="button" aria-expanded={open} onClick={() => {
+                setExpanded(old => open ? old.filter(id => id !== item.id) : [...old, item.id]);
+                if (!open && mcp && item.active) void refreshTools(item.id);
+              }}>
                 {mcp ? tools.length + (tools.length === 1 ? ' tool' : ' tools') : 'Details'}</button></div></div>
             <button type="button" className="kb-tools-toggle" role="switch" aria-label={item.name} aria-checked={item.active}
               disabled={!!busy} onClick={() => void change(item)}>{item.active ? 'Active' : 'Inactive'}<i aria-hidden="true" /></button>
@@ -82,7 +103,11 @@ export function ToolsSettings({ humanizerDetails }: { humanizerDetails: ReactNod
             {item.built_in ? humanizerDetails : <>
               <p>{item.warning || item.recipient || item.url}</p>
               {mcp && <ul>{tools.map(tool => <li key={tool.name}><b>{tool.name}</b> {tool.description}</li>)}</ul>}
-              <Button size="sm" disabled={!!busy} onClick={() => void change(item, true)}>{mcp ? 'Remove connection' : 'Remove skill'}</Button>
+              <div className="kb-tools-actions">
+                {mcp && <Button size="sm" busy={loadingTools} disabled={!item.active || loadingTools}
+                  onClick={() => void refreshTools(item.id)}>Refresh tools</Button>}
+                <Button size="sm" disabled={!!busy} onClick={() => void change(item, true)}>{mcp ? 'Remove connection' : 'Remove skill'}</Button>
+              </div>
             </>}
           </div>}
         </div>;

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import secrets
 import sqlite3
 import time
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -16,16 +17,19 @@ from ...native_io import disk_call
 from ..chats.model import FilePart
 from ..errors import NameRejected, NameTaken, NotFound
 from ..ids import new_id
+from ..keyed_locks import KeyedLocks
 from ..service import KnowledgeService
-from ..skills import SkazSkill, skill
+from ..skills import skill
 from ..skills.settings import is_enabled, set_enabled
 from .skill_source import MAX_SKILL, assess, download_url
-from .transport import Transport, address, local
+from .transport import BeforeSend, Transport, address, local
 
 # Trust roots ship with SKAZ. No unapproved URL becomes an endorsed publisher automatically.
 SKILL_SOURCES: dict[str, dict[str, str]] = {}
 MCP_SOURCES: frozenset[str] = frozenset()
 MAX_FILE = 8 * 1024 * 1024
+CATALOG_TIMEOUT_S = 35
+LEGACY_SKILL_HISTORY = "external_skills.legacy_inline"
 
 
 @dataclass
@@ -43,6 +47,7 @@ class Extensions:
         self.skill_sources = SKILL_SOURCES
         self.mcp_sources = MCP_SOURCES
         self._checks: dict[str, Check] = {}
+        self._catalogs = KeyedLocks()
 
     async def check(self, kind: str, url: str) -> dict[str, Any]:
         address(url)
@@ -150,6 +155,37 @@ class Extensions:
             raise NotFound("This connection or skill is unavailable.")
         return self._item(row)
 
+    def active_mcp(self, ident: str) -> dict[str, Any]:
+        item = self.get(ident)
+        if not item["active"] or item["kind"] != "mcp":
+            raise NameRejected("This MCP is inactive.")
+        return item
+
+    async def refresh_mcp(self, ident: str, *, before_send: BeforeSend | None = None) -> dict[str, Any]:
+        try:
+            async with asyncio.timeout(CATALOG_TIMEOUT_S), self._catalogs.hold(ident):
+                item = await disk_call(self.active_mcp, ident)
+                recipient = item["recipient"]
+                async with self.transport.session(recipient, before_send=before_send) as remote:
+                    tools = await remote.tools()
+                return await disk_call(self._save_catalog, ident, recipient, tools)
+        except TimeoutError as error:
+            raise NameRejected("Refreshing the MCP tools timed out. Try again.") from error
+
+    def _save_catalog(self, ident: str, recipient: str, tools: list[dict[str, Any]]) -> dict[str, Any]:
+        with self.kb.db.write() as db:
+            row = db.execute(
+                "SELECT * FROM external_tools WHERE id=? AND kind='mcp' AND active=1", (ident,)
+            ).fetchone()
+            if row is None:
+                raise NameRejected("The connection was disabled or removed during the refresh.")
+            details = json.loads(row["details"])
+            if details["recipient"] != recipient:
+                raise NameRejected("The connection address changed during the refresh.")
+            details["tools"] = tools
+            db.execute("UPDATE external_tools SET details=? WHERE id=?", (json.dumps(details), ident))
+        return {**details, "id": ident, "url": row["url"], "active": True}
+
     def toggle(self, ident: str, active: bool) -> dict[str, Any]:
         if ident == "humanizer":
             set_enabled(self.kb.settings, ident, active)
@@ -161,30 +197,58 @@ class Extensions:
 
     def remove(self, ident: str) -> None:
         with self.kb.db.write() as db:
-            if not db.execute("DELETE FROM external_tools WHERE id=?", (ident,)).rowcount:
+            removed = db.execute(
+                "DELETE FROM external_tools WHERE id=? RETURNING kind,details", (ident,)
+            ).fetchone()
+            if removed is None:
                 raise NotFound("This connection or skill is unavailable.")
+            if removed["kind"] == "skill" and "description" not in json.loads(removed["details"]):
+                db.execute(
+                    "INSERT OR IGNORE INTO settings(key,value) VALUES(?, 'true')", (LEGACY_SKILL_HISTORY,)
+                )
 
-    def skills(self) -> tuple[SkazSkill, ...]:
+    def skill_session_state(self) -> tuple[frozenset[str], bool]:
+        """Availability and evidence of installs made when all active skills went into the prompt."""
         with self.kb.db.read() as db:
             rows = db.execute(
-                "SELECT * FROM external_tools WHERE active=1 AND kind='skill' ORDER BY id"
+                "SELECT id,active,details FROM external_tools WHERE kind='skill'"
             ).fetchall()
-        found = []
+            had_legacy = db.execute("SELECT 1 FROM settings WHERE key=?", (LEGACY_SKILL_HISTORY,)).fetchone()
+        enabled = frozenset(row["id"] for row in rows if row["active"])
+        # Catalog rows installed by the inline-prompt implementation have no description field.
+        legacy = had_legacy is not None or any(
+            "description" not in json.loads(row["details"]) for row in rows
+        )
+        return enabled, legacy
+
+    def skill_catalog(self) -> list[dict[str, Any]]:
+        with self.kb.db.read() as db:
+            rows = db.execute(
+                "SELECT id,details FROM external_tools WHERE kind='skill' AND active=1 ORDER BY id"
+            ).fetchall()
+        catalog = []
         for row in rows:
-            item = self._item(row)
-            found.append(
-                SkazSkill(
-                    item["id"],
-                    item["name"],
-                    item["version"],
-                    "",
-                    item["url"],
-                    item["sha256"],
-                    Path("SKILL.md"),
-                    row["instructions"],
-                )
-            )
-        return tuple(found)
+            item = json.loads(row["details"])
+            catalog.append({
+                "id": row["id"], "name": item["name"], "description": item.get("description", ""),
+            })
+        return catalog
+
+    def skill_instructions(self, ident: str) -> tuple[str, str]:
+        with self.kb.db.read() as db:
+            row = db.execute(
+                "SELECT details,instructions FROM external_tools WHERE id=? AND kind='skill' AND active=1",
+                (ident,),
+            ).fetchone()
+        if row is None:
+            raise NotFound("This skill is disabled or unavailable.")
+        return str(json.loads(row["details"])["name"]), str(row["instructions"])
+
+    def skill_is_enabled(self, ident: str) -> bool:
+        with self.kb.db.read() as db:
+            return db.execute(
+                "SELECT 1 FROM external_tools WHERE id=? AND kind='skill' AND active=1", (ident,)
+            ).fetchone() is not None
 
     def discover(self) -> list[dict[str, Any]]:
         return [

@@ -25,4 +25,5 @@
 .kb-tools-toggle[aria-checked=true] i { background: var(--kb-fill); }
 .kb-tools-toggle[aria-checked=true] i::before { margin-left: auto; }
 .kb-tools-detail { padding: 9px; background: var(--kb-bg); overflow-wrap: anywhere; }
+.kb-tools-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (forced-colors: active) { .kb-tool-pill { border-color: Highlight; } }

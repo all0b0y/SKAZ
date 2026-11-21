@@ -218,6 +218,7 @@ _TOOL_ACTIONS: dict[str, str] = {
     "skaz_me_edit": "Edit Me Profile or Skill",
     "skaz_me_skill": "Read Me Skill",
     "skaz_skill_install": "Install Skill",
+    "skaz_skill_read": "Read Skill Instructions",
     "skaz_mcp_list": "List MCP Tools",
     "skaz_mcp_propose": "Propose MCP Connection",
     "skaz_mcp_call": "Call MCP Tool",

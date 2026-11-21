@@ -11,6 +11,7 @@ test('V1 desktop chat connects MCP, reviews a dropped SKILL.md and persists both
   const profile = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'skaz-041-tools-')));
   const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'skaz-041-vendor-home-')));
   const methods: string[] = [];
+  let toolName = 'create_note';
   const fixture = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
@@ -19,7 +20,7 @@ test('V1 desktop chat connects MCP, reviews a dropped SKILL.md and persists both
     if (!('id' in body)) { res.writeHead(202).end(); return; }
     const result = body.method === 'initialize' ? { protocolVersion: body.params.protocolVersion,
       capabilities: { tools: {} }, serverInfo: { name: 'Desktop fixture', version: '1' } }
-      : { tools: [{ name: 'create_note', description: 'Create a note', inputSchema: { type: 'object' } }] };
+      : { tools: [{ name: toolName, description: 'Save a note', inputSchema: { type: 'object' } }] };
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ id: body.id, jsonrpc: '2.0', result }));
   });
   await new Promise<void>(resolve => fixture.listen(0, '127.0.0.1', resolve));
@@ -101,6 +102,13 @@ test('V1 desktop chat connects MCP, reviews a dropped SKILL.md and persists both
         }
         await expect(toggle).toHaveText(/Inactive/);
         await expect(toggle).not.toBeChecked();
+        if (!first) {
+          toolName = 'update_note';
+          await toggle.click();
+          await expect(toggle).toBeChecked();
+          await settings.getByRole('button', { name: '1 tool', exact: true }).click();
+          await expect(settings.getByText('update_note', { exact: true })).toBeVisible();
+        }
         await settings.getByRole('tab', { name: /^Skills/ }).click();
         await expect(settings.getByRole('switch', { name: 'Lecture brief' })).toBeChecked();
       } finally { await run.close(); }

@@ -88,6 +88,7 @@ def assess(raw: bytes, source: str, pin: dict[str, str] | None) -> tuple[dict[st
     return {
         "kind": "skill",
         "name": pin["name"] if pin else fields["name"][:200],
+        "description": fields["description"].strip()[:600],
         "recipient": source,
         "trust": "verified" if trusted else "unverified",
         "publisher": pin["publisher"] if pin else urlsplit(source).hostname or "Chat attachment",

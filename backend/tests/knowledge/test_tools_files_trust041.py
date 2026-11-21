@@ -117,10 +117,11 @@ async def test_b2_verified_skill_download_then_disable_at_every_vendor_wire(
     chat = await env.chat(engine=engine_id)
     await env.answered(chat["id"], "Make a lecture brief.")
     on, tools_on = await wire(env.agents.engines[engine_id].turns[-1], engine_id, env, tmp_path / "on")
-    assert "ZEPHYR-704" in on
+    assert "ZEPHYR-704" not in on
+    assert "skaz_skill_read" in tools_on
     data(await env.client.patch(TOOLS + "/" + installed["id"], json={"active": False}))
     await env.answered(chat["id"], "Make another lecture brief.")
     off, tools_off = await wire(env.agents.engines[engine_id].turns[-1], engine_id, env, tmp_path / "off")
-    assert "ZEPHYR-704" not in off and tools_off == tools_on
+    assert off == on and tools_off == tools_on
     assert all(not path.startswith("/scripts/") for _, path in fixture.requests)
     assert fixture.app.calls == []

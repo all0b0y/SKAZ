@@ -180,12 +180,14 @@ test('V1 an unverified publisher is disclosed before a third-party MCP is added'
     const bridge = h.services.bridge, original = bridge.request.bind(bridge);
     bridge.request = async (req: any) => {
       const res = await original(req);
-      if (req.method === 'POST' && req.path === '/kb/chats/c1/messages' && res.ok) {
+      const match = /^\/kb\/chats\/([^/]+)\/messages$/.exec(req.path);
+      if (req.method === 'POST' && match && res.ok) {
+        const id = match[1]!;
         const part = { type: 'permission', id: 'test-connect', kind: 'mcp_connect', title: 'Notes',
           engine: 'codex', recipient: 'https://third.test/mcp', arguments: { trust: 'unverified' },
           changes: [], summary: { added: 0, changed: 0, removed: 0 }, auto: false, status: 'pending' };
-        h.world.pendingAnswers.c1.unshift({ type: 'part', message_id: res.data.assistant.id, part });
-        h.finish('c1');
+        h.world.pendingAnswers[id].unshift({ type: 'part', message_id: res.data.assistant.id, part });
+        h.finish(id);
       }
       return res;
     };
@@ -197,4 +199,38 @@ test('V1 an unverified publisher is disclosed before a third-party MCP is added'
   await expect(page.getByRole('alert').filter({ hasText: 'Unverified MCP publisher.' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Allow in this chat' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Deny', exact: true }).click();
+});
+
+test('Opening an active MCP shows its current tool catalog', async ({ page }) => {
+  await openRenderer(page, server.url, 820, 'light');
+  const settings = await tools(page);
+  await page.evaluate(() => {
+    (window as any).__seedConnection();
+    const { bridge } = (window as any).__kbFake.services;
+    const original = bridge.request.bind(bridge);
+    let refreshes = 0;
+    bridge.request = async (req: any) => {
+      if (req.method === 'POST' && req.path === '/kb/settings/tools/local-notes/refresh') {
+        const previous = await original({ path: '/kb/settings/tools', method: 'GET' });
+        const item = previous.data.mcp.find((row: any) => row.id === 'local-notes');
+        const name = ++refreshes === 1 ? 'new_note' : 'update_note';
+        return { ok: true, status: 200, data: {
+          ...item, tools: [{ name, description: 'Current tool', inputSchema: { type: 'object' } }],
+        } };
+      }
+      return original(req);
+    };
+  });
+  await settings.getByRole('button', { name: 'Models', exact: true }).click();
+  await settings.getByRole('button', { name: 'Tools', exact: true }).click();
+  const connection = settings.getByRole('group', { name: 'Local notes' });
+  await connection.getByRole('button', { name: '0 tools', exact: true }).click();
+  await expect(connection.getByText('new_note', { exact: true })).toBeVisible();
+  await expect(connection.getByRole('button', { name: '1 tool', exact: true })).toBeVisible();
+  const refresh = connection.getByRole('button', { name: 'Refresh tools', exact: true });
+  await refresh.click();
+  await expect(connection.getByText('update_note', { exact: true })).toBeVisible();
+  await connection.getByRole('switch', { name: 'Local notes' }).click();
+  await expect(refresh).toBeDisabled();
+  await expect(connection.getByText('update_note', { exact: true })).toBeVisible();
 });

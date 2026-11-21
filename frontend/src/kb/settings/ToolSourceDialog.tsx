@@ -11,6 +11,7 @@ export function ToolSourceDialog({ kind, close }: { kind: ToolKind; close: () =>
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const sending = useRef(false);
+  const setupChat = useRef<string | undefined>(undefined);
   const mcp = kind === 'mcp';
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -29,7 +30,11 @@ export function ToolSourceDialog({ kind, close }: { kind: ToolKind; close: () =>
     setError('');
     try {
       const text = (mcp ? 'Connect this MCP server: ' : 'Install this skill: ') + source;
-      const result = await chats.getState().send({ text, mentions: [], quotes: [], attachments: [] }, {});
+      const result = await chats.getState().send({ text, mentions: [], quotes: [], attachments: [] }, {}, {
+        newChat: true,
+        draftChatId: setupChat.current,
+        onDraftChatCreated: id => { setupChat.current = id; },
+      });
       if (!result.ok) { setError(result.error); return; }
       prefs.getState().set({ section: 'chats' });
       const state = ui.getState();

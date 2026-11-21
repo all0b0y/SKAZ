@@ -27,11 +27,14 @@ from tests.knowledge.ingest_support import settle
 from tests.knowledge.opencode_fake import FakeOpenCode
 from tests.knowledge.p_support import ToolEngine
 from tests.knowledge.test_codex_engine import FakeConnection
+from tests.knowledge.test_p_api import Env
+from tests.knowledge.test_p_api import env as tool_fixture
 from tests.knowledge.test_tools_files041 import TOOLS, add, data
 from tests.knowledge.tools_files_fixture import FILE_NAME, External
 from tests.knowledge.tools_files_fixture import external as external_fixture
 
 external = external_fixture
+tool_env = tool_fixture
 
 
 class OfflineVendor(ToolEngine):
@@ -42,6 +45,7 @@ class OfflineVendor(ToolEngine):
         self.root = root
         self.call: dict[str, Any] = {"name": "skaz_list_folders", "arguments": {}}
         self.replies: list[bool] = []
+        self.tool_text: list[str] = []
 
     async def run(self, turn: AgentTurn) -> AsyncIterator[AgentEvent]:
         root = self.root / turn.run_id
@@ -67,6 +71,7 @@ class OfflineVendor(ToolEngine):
                         if item.get("id") == "tool-1" and "result" in item
                     )
                     self.replies.append(reply["success"])
+                    self.tool_text.append("".join(item.get("text", "") for item in reply["contentItems"]))
                 yield event
             return
         adapter_: AgentEngine
@@ -107,13 +112,9 @@ class OfflineVendor(ToolEngine):
         async for event in adapter_.run(turn):
             if isinstance(event, Completed):
                 recorded = cli.records("fixture_result")
-                self.replies.append(
-                    bool(
-                        recorded
-                        and "result" in recorded[0]["reply"]
-                        and not recorded[0]["reply"]["result"].get("isError")
-                    )
-                )
+                reply = recorded[0]["reply"].get("result", {}) if recorded else {}
+                self.replies.append(bool(reply and not reply.get("isError")))
+                self.tool_text.append("".join(item.get("text", "") for item in reply.get("content", [])))
             yield event
 
 
@@ -196,5 +197,45 @@ async def test_b2_tool_requests_across_adapter(
         data(await kb_client.patch(TOOLS + "/" + item["id"], json={"active": False}))
         await send(first)
         assert len(external.calls) == 3
+    finally:
+        await runtime.kb_chats.close()
+
+
+@pytest.mark.parametrize("engine_id", ["codex", "claude_code", "hermes", "opencode"])
+async def test_skill_read_is_scoped_to_active_installations_across_adapters(
+    engine_id: EngineId, loopback: None, tool_env: Env, tmp_path: Path,
+) -> None:
+    from tests.knowledge.test_tools_files_trust041 import TRUSTED, install_fixture
+
+    runtime, kb_client = tool_env.runtime, tool_env.client
+    vendor = OfflineVendor(runtime, engine_id, tmp_path)
+    engines: dict[EngineId, AgentEngine] = dict(Agents().engines)
+    engines[engine_id] = vendor
+    runtime.kb_agents.registry = EngineRegistry(engines, runtime.kb.settings, cache_s=0)
+    fixture = await install_fixture(tool_env)
+    response = await kb_client.post(f"{TOOLS}/check", json={"kind": "skill", "url": TRUSTED})
+    installed = data(await kb_client.post(TOOLS, json={
+        "url": TRUSTED, "check_id": data(response)["check_id"],
+    }), 201)
+    chat = data(await kb_client.post("/kb/chats", json={"engine": engine_id}), 201)
+    vendor.call = {"name": "skaz_skill_read", "arguments": {"skill_id": installed["id"]}}
+    try:
+        for attempt, active in enumerate((True, False), start=1):
+            data(await kb_client.patch(f"{TOOLS}/{installed['id']}", json={"active": active}))
+            response = await kb_client.post(
+                f"/kb/chats/{chat['id']}/messages", json={"text": "Make a brief."},
+            )
+            data(response, 202)
+            await finished(runtime.kb_chats)
+            assert len(vendor.tool_text) == attempt
+            output = vendor.tool_text[-1]
+            if active:
+                assert vendor.replies[-1] and "ZEPHYR-704" in output
+            else:
+                # The Codex RPC reports delivery; a tool refusal is carried in its text.
+                assert "This skill is disabled or unavailable." in output
+                assert "ZEPHYR-704" not in output
+        assert not fixture.app.calls
+        assert all(path == "/SKILL.md" for _, path in fixture.requests)
     finally:
         await runtime.kb_chats.close()

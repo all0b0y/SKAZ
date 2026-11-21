@@ -101,7 +101,7 @@ from ..permissions.store import PermissionRecord, QuestionRecord, RunRef
 from ..permissions.web_search import ChatWebGate, WebSearchBroker, WebSearchRecord
 from ..permissions.web_tool import WEB_TOOL
 from ..service import KnowledgeService
-from ..skills import SkazSkill
+from ..skills import SKILL_READER, SkazSkill
 from ..skills.settings import enabled_skills
 from ..sources.service import SourceService
 from ..sources.visual import VisualSourceUnsupported
@@ -259,6 +259,7 @@ class _Run:
     #: (message id, digest) of the history a ``start`` seeds the new session with.
     seeded: tuple[tuple[str, str], ...] = ()
     bound: SessionBound | None = None
+    session_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     compacted: bool = False
     #: Text or a tool call reached the user: the run can't be retried silently.
     produced: bool = False
@@ -308,7 +309,7 @@ class ChatService:
         self.review_shared_tools: Callable[
             [RunRef, MessageInput], Awaitable[tuple[str, tuple[str, ...]] | None]
         ] | None = None
-        self.downloaded_skills: Callable[[], tuple[SkazSkill, ...]] = tuple
+        self.external_skill_state: Callable[[], tuple[frozenset[str], bool]] = lambda: (frozenset(), False)
         self.tools = tools
         self._text_layer = text_layer or (lambda: IdentityTextLayer())
         self._checkpoint_s = checkpoint_s
@@ -1204,7 +1205,7 @@ class ChatService:
                 request = f"{note}\n\n{request}"
             language = await disk_call(self._wiki_language)
             # Read when the turn is built: switching a skill applies from the next answer (H3).
-            skills = await disk_call(lambda: enabled_skills(self.kb.settings) + self.downloaded_skills())
+            skills = await disk_call(enabled_skills, self.kb.settings)
             # N6 «Я»: read when the turn is built too; chats are the only turns that carry it (decision 15).
             graph = graph_store(self.kb)
             if graph is not None and run.observe_epoch is not None:
@@ -1247,7 +1248,10 @@ class ChatService:
             # N6: continue / revert the chat's live session, or start a new seeded one. The context also
             # records the tool set and fixed instructions a session starts with (a change reseeds once).
             context: SessionContext | None = None
+            enabled_external_skills: frozenset[str] = frozenset()
+            legacy_skills = False
             if session_support(run.engine).live:
+                enabled_external_skills, legacy_skills = await disk_call(self.external_skill_state)
                 gone = await disk_call(self._gone_materials, prior)
                 context = SessionContext(language, tuple(skill.id for skill in skills), web_text, gone,
                                          marks(me) if me is not None else None, me,
@@ -1257,9 +1261,9 @@ class ChatService:
                                          base=BASE_INSTRUCTIONS,
                                          graph_epoch=projection.epoch if projection is not None else None,
                                          graph_stamp=projection.stamp if projection is not None else None)
-            entries = await self._plan_session(run, chat, prior, context)
-            if run.decision is not None:
-                run.context = context
+            entries = await self._plan_session(
+                run, chat, prior, context, enabled_external_skills, legacy_skills,
+            )
             reseeded = False
             heated = False
             while True:
@@ -1276,8 +1280,9 @@ class ChatService:
                         run.graph_epoch, run.graph_sensitive = None, False
                         if context is not None:
                             context = replace(context, graph_epoch=None, graph_stamp=None)
-                            entries = await self._plan_session(run, chat, prior, context)
-                            run.context = context
+                            entries = await self._plan_session(
+                                run, chat, prior, context, enabled_external_skills, legacy_skills,
+                            )
                         continue
                 if run.stopping:
                     terminal = Failed(run.run_id, "cancelled", STOPPED)
@@ -1343,6 +1348,7 @@ class ChatService:
                 if await disk_call(self.sessions.drop, chat.id):
                     self._kick_deletions()
                 run.decision, run.session, run.bound = SessionDecision(START), None, None
+                run.context = context
                 run.seeded = tuple(keys(entries))
             await self._apply(run, parser.finish(), resolver)
         except asyncio.CancelledError:
@@ -1362,7 +1368,8 @@ class ChatService:
     # -- the live agent session (N6) ---------------------------------------------------
 
     async def _plan_session(self, run: _Run, chat: Chat, prior: Sequence[Message],
-                            now: SessionContext | None = None) -> list[tuple[str, TurnMessage]]:
+                            now: SessionContext | None, enabled_external_skills: frozenset[str],
+                            legacy_skills: bool) -> list[tuple[str, TurnMessage]]:
         """Decide how this answer uses the chat's agent session (``chats.live.plan_session``); an old
         session that can't be used is dropped here and queued for deletion. Returns the history a live
         session must hold (with message ids)."""
@@ -1374,12 +1381,23 @@ class ChatService:
             return []
         entries = live_entries(prior)
         history_keys = keys(entries)
-        decision = plan_session(session, run.engine.id, support, history_keys, now)
+        proposed = now
+        held = session.context if session is not None else None
+        if (
+            now is not None and now.tools is not None and held is not None and held.tools is not None
+            and SKILL_READER not in held.tools and not enabled_external_skills and not legacy_skills
+            and not any(skill_id.startswith("ext-") for skill_id in held.skills)
+        ):
+            # A legacy conversation with no observed exposure keeps its existing tool definitions.
+            proposed = replace(now, tools=tuple(tool for tool in now.tools if tool != SKILL_READER))
+        decision = plan_session(session, run.engine.id, support, history_keys, proposed,
+                                enabled_external_skills=enabled_external_skills)
         assert decision is not None
         if decision.replace and await disk_call(self.sessions.drop, chat.id):
             self._kick_deletions()
         run.decision = decision
         run.session = None if decision.replace else session
+        run.context = now if decision.plan.mode == "start" else proposed
         run.seeded = tuple(history_keys) if decision.plan.mode == "start" else ()
         return entries
 
@@ -1400,7 +1418,7 @@ class ChatService:
 
     async def _turn(self, run: _Run, chat: Chat, prior: Sequence[Message],
                     entries: Sequence[tuple[str, TurnMessage]], request: str, told: str,
-                    gate: ChatWebGate | None, skills: Sequence[Any]) -> AgentTurn:
+                    gate: ChatWebGate | None, skills: Sequence[SkazSkill]) -> AgentTurn:
         decision = run.decision
         summary: str | None = None
         if decision is None or decision.plan.mode == "start":
@@ -1414,8 +1432,10 @@ class ChatService:
             before = run.session.context if run.session is not None else None
             note = context_note(before, run.context, skills) if run.context is not None else ""
             messages = (TurnMessage("user", f"{note}\n\n{request}" if note else request),)
-        return AgentTurn(run_id=run.run_id, messages=messages, instructions=told,
-                         tools=self._tools_for(chat, skaz_web=run.skaz_web),
+        tools = self._tools_for(chat, skaz_web=run.skaz_web)
+        if run.context is not None and run.context.tools is not None:
+            tools = tuple(tool for tool in tools if tool.name in run.context.tools)
+        return AgentTurn(run_id=run.run_id, messages=messages, instructions=told, tools=tools,
                          web=gate, model=chat.model, effort=chat.effort, history_summary=summary,
                          session=decision.plan if decision is not None else None,
                          visuals=run.visuals)
@@ -1423,11 +1443,38 @@ class ChatService:
     async def _bound(self, run: _Run, event: SessionBound) -> None:
         """The agent took this turn into a session: remember it at once (a crash mid-answer then still
         knows the turn to revert, or the session to delete)."""
-        if run.decision is None or run.context is None:
-            return  # a stateless turn: nothing to keep
-        run.bound = event
-        await disk_call(self.sessions.bind, run.chat_id, run.engine.id, event.session_id, run.message.model,
-                        event.turn_id, run.decision.plan, run.context)
+        async with run.session_lock:
+            if run.decision is None or run.context is None:
+                return  # a stateless turn: nothing to keep
+            await disk_call(
+                self.sessions.bind, run.chat_id, run.engine.id, event.session_id, run.message.model,
+                event.turn_id, run.decision.plan, run.context,
+            )
+            run.bound = event
+
+    async def record_external_skill_read(self, ref: RunRef, skill_id: str) -> bool:
+        """Record the read before sending instructions to an agent that can keep a live session."""
+        run = self._runs.get(ref.chat_id)
+        if run is None:
+            return False
+        async with run.session_lock:
+            if self.run_input(ref) is None:
+                return False
+            if run.context is None or run.decision is None:
+                return True
+            if run.context.tools is None or SKILL_READER not in run.context.tools:
+                return False
+            if skill_id not in run.context.external_skill_reads:
+                session_id = run.bound.session_id if run.bound is not None else run.decision.plan.session_id
+                if session_id is not None:
+                    saved = await disk_call(
+                        self.sessions.record_external_skill_read, run.chat_id, session_id, skill_id,
+                    )
+                    if not saved:
+                        return False
+                reads = (*run.context.external_skill_reads, skill_id)
+                run.context = replace(run.context, external_skill_reads=tuple(sorted(reads)))
+            return self.run_input(ref) is not None
 
     async def _compacted(self, run: _Run) -> None:
         """The agent compacted the conversation: a thin "History compressed" line in the chat (once)."""
@@ -1869,7 +1916,7 @@ class ChatService:
 
     def run_input(self, ref: RunRef) -> MessageInput | None:
         run = self._runs.get(ref.chat_id)
-        if run and run.run_id == ref.run_id and not run.stopping and run.question:
+        if run and run.run_id == ref.run_id and not run.stopping and not run.closing and run.question:
             return run.question.input
         return None
 
