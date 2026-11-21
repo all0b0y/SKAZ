@@ -118,10 +118,10 @@ class PermissionBroker:
             return Verdict("allowed", record)
         future: asyncio.Future[PermissionRecord] = asyncio.get_running_loop().create_future()
         self._futures[base.id] = future
-        await disk_call(self.store.add_permission, base)
-        log.info("Permission %s (%s, %s) waits for the user", base.id, kind, run.engine)
         self.waits.begin(run.run_id)
         try:
+            await disk_call(self.store.add_permission, base)
+            log.info("Permission %s (%s, %s) waits for the user", base.id, kind, run.engine)
             self._notify(base)
             decided = await future
         except asyncio.CancelledError:

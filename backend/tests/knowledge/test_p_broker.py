@@ -37,7 +37,7 @@ from skaz.knowledge.permissions.broker import (
     PermissionInvalid,
 )
 from skaz.knowledge.permissions.refusals import OUTSIDE
-from skaz.knowledge.permissions.store import ControlStore, RunRef
+from skaz.knowledge.permissions.store import ControlStore, PermissionRecord, RunRef
 from skaz.knowledge.permissions.waits import RunWaits
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.store.database import KnowledgeDatabase
@@ -203,6 +203,27 @@ async def test_an_abandoned_wait_is_recorded_as_cancelled(broker: PermissionBrok
     with pytest.raises(asyncio.CancelledError):
         await task
     assert broker.store.permission(record.id).status == "cancelled"  # type: ignore[union-attr]
+
+
+async def test_cancelling_an_mcp_request_as_it_is_saved_settles_the_card(
+    broker: PermissionBroker, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = asyncio.get_running_loop()
+    saved: list[str] = []
+    insert = broker.store.add_permission
+
+    def stop_after_insert(record: PermissionRecord) -> None:
+        insert(record)
+        saved.append(record.id)
+        loop.call_soon_threadsafe(task.cancel)
+
+    monkeypatch.setattr(broker.store, "add_permission", stop_after_insert)
+    task = asyncio.create_task(broker.request(RUN, "mcp_call", page_id=None, title="Send", preview={}))
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    record = broker.store.permission(saved[0])
+    assert record is not None and record.status == "cancelled"
+    assert not broker.waiting_chats() and not broker.waits.waiting(RUN.run_id)
 
 
 def test_requests_left_pending_by_an_earlier_start_become_cancelled(db: KnowledgeDatabase) -> None:
