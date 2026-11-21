@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from html import escape
 from typing import Any
 
 from . import BUILTINS, MeSkill, builtin
@@ -80,19 +81,19 @@ def _digest(*pieces: str) -> str:
 
 
 def _safe(text: str) -> str:
-    return text.replace("</skaz-me", "</skaz_me").replace("<skaz-me", "<skaz_me")
+    return escape(text, quote=False)
 
 
 def _element(skill: MeSkill) -> str:
     used = f' used="{skill.chars}/{skill.limit}"' if skill.limit is not None else ""
     body = _safe(skill.text.strip()) if skill.text.strip() else "(empty)"
-    return f'<skaz-me id="{skill.id}" title="{skill.title}"{used}>\n{body}\n</skaz-me>'
+    return f'<skaz-me id="{escape(skill.id)}" title="{escape(skill.title)}"{used}>\n{body}\n</skaz-me>'
 
 
 def _index_line(skill: MeSkill) -> str:
     about = _safe(skill.description) or "(no description)"
     empty = " (empty)" if not skill.text.strip() else ""
-    return f"- {skill.id} — {_safe(skill.title)}: {about}{empty}"
+    return f"- {_safe(skill.id)} — {_safe(skill.title)}: {about}{empty}"
 
 
 def index_text(snap: MeSnapshot) -> str:
@@ -103,8 +104,10 @@ def me_block(snap: MeSnapshot) -> str:
     """The «Я» part of a chat agent's instructions; empty when «Я» is off."""
     if not snap.on:
         return ""
-    parts = [ME_RULES, *(_element(skill) for skill in snap.always),
-             "Other Me skills (title and one line each):\n" + index_text(snap)]
+    parts = [f"<me_profile_rules>\n{ME_RULES}\n</me_profile_rules>",
+             *(_element(skill) for skill in snap.always),
+             "<me_skill_index>\nOther Me skills (title and one line each):\n"
+             + index_text(snap) + "\n</me_skill_index>"]
     return "\n\n".join(parts)
 
 
@@ -202,10 +205,11 @@ def me_notes(before: MeMarks | None, snap: MeSnapshot) -> list[str]:
     for skill in snap.always:
         if current.get(skill.id) == held.get(skill.id):
             continue
+        title = _safe(skill.title)
         if skill.id in current:
-            lines.append(f"{CONTEXT_MARK} Me was updated. “{skill.title}” now reads:\n{_element(skill)}")
+            lines.append(f"{CONTEXT_MARK} Me was updated. “{title}” now reads:\n{_element(skill)}")
         else:
-            lines.append(f"{CONTEXT_MARK} “{skill.title}” in Me is empty now: stop applying what it said.")
+            lines.append(f"{CONTEXT_MARK} “{title}” in Me is empty now: stop applying what it said.")
     for skill_id in held:
         if skill_id not in enabled:
             lines.append(f"{CONTEXT_MARK} The user switched off the Me skill “{_title(skill_id)}”: "

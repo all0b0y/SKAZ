@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from skaz.knowledge.me import MeConflict, MeNotFound
-from skaz.knowledge.me.graph import GraphUnavailable, MeGraphStore
+from skaz.knowledge.me.graph import GraphEntry, GraphUnavailable, MeGraphStore
 from skaz.knowledge.me.policy import ProjectionReader, TurnContext
 from skaz.knowledge.me.store import MeStore
 from skaz.knowledge.me.vault import MeVault
@@ -121,3 +121,56 @@ def test_cold_rule_applies_after_unrelated_turns_and_checks_the_local_exception(
     assert exception in narrowed.block and rule not in narrowed.block
     elsewhere = TurnContext("chat_two", "Define momentum.", "introduce_term", False)
     assert rule in cold.read(reopened.open(), elsewhere, frozenset()).block
+
+
+def test_revocation_survives_vault_outage_and_rejects_late_source(tmp_path: Path) -> None:
+    graph = MeGraphStore(tmp_path)
+    epoch = graph.open().controls.epoch
+    graph.remember(text="Always answer briefly.", area="chat", chat_id="one",
+                   source_id="first", answer_id="a", epoch=epoch)
+    key = graph.vault.key_path.read_bytes()
+    graph.vault.key_path.unlink()
+    graph.revoke_sources({"first", "late"}, scope="one")
+    with pytest.raises(GraphUnavailable):
+        graph.open()
+    graph.vault.key_path.write_bytes(key)
+    restarted = MeGraphStore(tmp_path)
+    state = restarted.open()
+    assert not state.entries and len(state.removed_sources) == 2
+    with pytest.raises(MeNotFound):
+        restarted.remember(text="Always answer briefly.", area="chat", chat_id="one",
+                           source_id="late", answer_id="a", epoch=state.controls.epoch)
+
+
+def test_revoke_before_first_contribution(tmp_path: Path) -> None:
+    graph = MeGraphStore(tmp_path)
+    graph.revoke_sources({"late"}, scope="gone")
+    state = MeGraphStore(tmp_path).open()
+    assert len(state.removed_sources) == 1
+
+
+def test_observation_revision_reuses_declared_index(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from skaz.knowledge.me import policy
+
+    store = MeGraphStore(tmp_path)
+    item = store.create(text="Always answer briefly.", area="chat")
+    reader = ProjectionReader()
+    ctx = TurnContext("one", "Help", "unknown", False)
+    state = store.open()
+    assert item.text in reader.read(state, ctx, frozenset()).block
+    calls = []
+    original = policy.classify
+
+    def count(entry: GraphEntry) -> tuple[str, str] | None:
+        calls.append(entry.id)
+        return original(entry)
+
+    monkeypatch.setattr(policy, "classify", count)
+    other = TurnContext("one", "Use my plan", "unknown", False)
+    reader.read(state, other, frozenset())
+    normal = len(calls)
+    calls.clear()
+    reader.read(state.model_copy(update={"revision": state.revision + 1}), other, frozenset())
+    assert len(calls) == normal
+    store.forget(item.id, item.revision)
+    assert not reader.read(store.open(), ctx, frozenset()).block

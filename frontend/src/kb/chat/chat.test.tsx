@@ -312,7 +312,13 @@ describe('Chats in the side panel', () => {
     await user.click(more);
     await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
     const confirm = await screen.findByRole('dialog', { name: 'Delete this chat?' });
+    const keep = within(confirm).getByRole('checkbox', { name: /learning counts in Me/ });
+    expect(keep).toBeChecked();
+    await user.click(keep);
     await user.click(within(confirm).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({
+      method: 'DELETE', path: '/kb/chats/c1', query: expect.objectContaining({ keep_experience: false }),
+    })));
     await waitFor(() => expect(within(side()).queryByRole('button', { name: /Why is there a logarithm/ })).not.toBeInTheDocument());
   });
 
@@ -644,6 +650,7 @@ describe('Selecting several chats in the side panel (0.3.1 F4)', () => {
     within(rowOf('Why is there a logarithm')).getByRole('button').focus();
     await user.keyboard('{Meta>}{Backspace}{/Meta}');
     const dialog = await screen.findByRole('dialog', { name: 'Delete 2 chats?' });
+    expect(within(dialog).getByRole('checkbox', { name: /learning counts in Me/ })).toBeChecked();
     expect(dialog).toHaveTextContent('Wiki pages saved from them stay');
     expect(dialog).toHaveTextContent('still answering');
     await user.click(await within(dialog).findByRole('button', { name: 'Delete 2' }));

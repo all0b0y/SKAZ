@@ -160,6 +160,7 @@ def sent_text(turn: AgentTurn) -> str:
     return "\n".join(message.content for message in turn.messages)
 
 
+@pytest.mark.parametrize("kb_config", ["legacy_me"], indirect=True)
 async def test_undo_of_the_agents_first_profile_write_drops_the_session_that_holds_it(me_live: Env) -> None:
     chat = await me_live.chat()
     _profile_write(me_live)
@@ -176,6 +177,7 @@ async def test_undo_of_the_agents_first_profile_write_drops_the_session_that_hol
     assert "Lives in Kazan" not in turn.instructions + sent_text(turn)
 
 
+@pytest.mark.parametrize("kb_config", ["legacy_me"], indirect=True)
 async def test_undo_of_an_agents_profile_line_is_a_note_in_the_live_session(me_live: Env) -> None:
     await me_live.client.put("/kb/me/skills/profile", json={"text": PROFILE_TEXT})
     chat = await me_live.chat()
@@ -192,6 +194,7 @@ async def test_undo_of_an_agents_profile_line_is_a_note_in_the_live_session(me_l
     assert PROFILE_TEXT in note and "Lives in Kazan" not in note
 
 
+@pytest.mark.parametrize("kb_config", ["legacy_me"], indirect=True)
 async def test_profile_off_after_the_agents_first_profile_write_reseeds(me_live: Env) -> None:
     chat = await me_live.chat()
     _profile_write(me_live)
@@ -206,6 +209,7 @@ async def test_profile_off_after_the_agents_first_profile_write_reseeds(me_live:
 # -- 5. switched off / cleared → every session holding it goes at once ---------------------------------
 
 
+@pytest.mark.parametrize("kb_config", ["legacy_me"], indirect=True)
 @pytest.mark.parametrize(("path", "body"), [
     ("/kb/me/skills/how-to-work", {"text": ""}),
     ("/kb/me/skills/how-to-work", {"enabled": False}),
@@ -227,6 +231,7 @@ async def test_switching_off_or_clearing_what_a_session_holds_drops_it_at_once(
     assert turn.session == SessionPlan("start") and "Первый вопрос" in sent_text(turn)
 
 
+@pytest.mark.parametrize("kb_config", ["legacy_me"], indirect=True)
 async def test_a_change_the_session_can_take_as_a_note_keeps_it(me_live: Env) -> None:
     await me_live.client.put("/kb/me/skills/how-to-work", json={"text": HOW_TEXT})
     chat = await me_live.chat()
@@ -240,6 +245,7 @@ async def test_a_change_the_session_can_take_as_a_note_keeps_it(me_live: Env) ->
 # -- 7. no «Я» text in the chat database, for any skill ------------------------------------------------
 
 
+@pytest.mark.parametrize("kb_config", ["legacy_me"], indirect=True)
 async def test_memory_parts_carry_no_me_text_for_any_skill_but_show_it(me_live: Env) -> None:
     secrets = ("Prefers short answers QX-HOW", "arXiv first QX-SEARCH", "ten questions QX-DRILL",
                "Exam drill QX-TITLE")

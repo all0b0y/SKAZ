@@ -2001,9 +2001,9 @@ async def test_study_instructions_and_source_only_sets_preserve_source_basis_acr
     from skaz.knowledge.chats.context import instructions
 
     rules = instructions("ru")
-    study_paragraph = next(
-        p for p in rules.split("\n\n") if p.startswith("Flashcards and tests:")
-    )
+    _, study = rules.split("<study>\n", 1)
+    study_paragraph, _ = study.split("\n</study>", 1)
+    assert study_paragraph.startswith("Flashcards and tests:")
     assert "read the sources first" in study_paragraph
     assert "never invent a citation or fall back to your own knowledge" in study_paragraph
     assert 'Every source-backed answer (basis "source", the default) rests on a citation' in study_paragraph

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import suppress
 from typing import Any, cast
 
 import httpx
@@ -22,6 +23,7 @@ from .knowledge.agents.hub import build_agents_hub
 from .knowledge.agents.tools import ToolRegistry
 from .knowledge.agents.web_runner import CodexSearch, EngineSearch, WebSearchRunner
 from .knowledge.chats import ChatService
+from .knowledge.chats.store import ChatRepository
 from .knowledge.chats.wiki_fix import WikiFixes
 from .knowledge.decisions.service import DecisionService
 from .knowledge.extensions.service import Extensions
@@ -30,8 +32,10 @@ from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
 from .knowledge.me.access import SECRETS_DIR, bind_graph, legacy_retired
 from .knowledge.me.adapters import study_observer
-from .knowledge.me.graph import MeGraphStore
+from .knowledge.me.graph import GraphUnavailable, MeGraphStore
+from .knowledge.me.observations import FAMILIES
 from .knowledge.me.tools import attach as attach_me_tools
+from .knowledge.me.tools import graph_search_tool
 from .knowledge.me.tools import graph_tool as me_graph_tool
 from .knowledge.permissions.ask_tool import ask_tool
 from .knowledge.permissions.broker import PermissionBroker
@@ -80,6 +84,7 @@ class Runtime:
         adopt_legacy_database(config)
         self.config = config
         self.activity_log = ActivityLog(config.activity_log_capacity)
+        new_profile = not config.db_path.exists()
         self.db = Database(config.db_path)
         #: The Codex app-server sign-in/connection the knowledge agents run on (areas A1/A2).
         self.codex_connection = CodexConnection(config.data_dir / "codex" / "account")
@@ -90,10 +95,16 @@ class Runtime:
             config.data_dir, documents_dir=config.documents_dir,
             documents_sandbox=config.documents_sandbox,
         )
-        self.kb_me_graph = MeGraphStore(config.data_dir / SECRETS_DIR) if config.me_graph_isolated else None
+        self.kb_me_graph = None if config.use_legacy_me else MeGraphStore(
+            config.data_dir / SECRETS_DIR, new_profile=new_profile, admitted=frozenset(FAMILIES),
+            source_committed=ChatRepository(self.kb.db).source_change_committed,
+        )
         self.kb_me_migration: asyncio.Task[bool] | None = None
         if self.kb_me_graph is not None:
             bind_graph(self.kb, self.kb_me_graph)
+            if new_profile and not self.kb_me_graph.needs_migration():
+                with suppress(GraphUnavailable):
+                    self.kb_me_graph.open()
         #: Ingest (W1); its detector/decisions/engines are connected by ``wire_knowledge`` below.
         self.kb_ingest = IngestService(self.kb)
         #: Read-only SKAZ agent tools: listed by the MCP server and given to Codex as dynamicTools.
@@ -154,7 +165,8 @@ class Runtime:
         if self.kb_me_graph is None and not legacy_retired(self.kb):
             attach_me_tools(self.kb_chats)
         elif self.kb_me_graph is not None:
-            self.kb_tools.add((me_graph_tool(self.kb_chats, self.kb_me_graph),))
+            self.kb_tools.add((me_graph_tool(self.kb_chats, self.kb_me_graph),
+                               graph_search_tool(self.kb_chats, self.kb_me_graph)))
             self.kb_study.capture_activity = study_observer(self.kb_me_graph)
         #: N6: an agent being installed / repaired / updated keeps its queued session deletions (no attempt).
         self.kb_chats.hold_deletions = lambda engine: (

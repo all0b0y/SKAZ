@@ -25,7 +25,7 @@ from skaz.knowledge.answer_blocks.registry import BLOCKS
 from skaz.knowledge.chats.model import Message, TextPart
 from skaz.knowledge.chats.service import ChatService
 from skaz.knowledge.markdown.page import Heading, parse_page, render_page
-from skaz.knowledge.me.prompt import ME_TOOL_NAMES
+from skaz.knowledge.me.prompt import EDIT_TOOL
 from skaz.knowledge.permissions.search_rules import ChatRules
 from skaz.knowledge.permissions.wiki_tools import WIKI_TOOL_NAMES
 from skaz.knowledge.study.tools import STUDY_TOOL_NAMES
@@ -598,14 +598,12 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
     turn = env.agents.engines["codex"].turns[-1]
     # 0.3.1 P: the read tools, the four wiki tools that ask the user first and SKAZ's question tool;
     # W-3b: Codex searches the web only through SKAZ's tool (each query asked first);
-    # N6 «Я»: the Me tools are in every chat turn (refused at call time when Me is off). Since batch B5 the
-    # runtime registers them right after the chat service is built (no lazy attach on the first turn), so
-    # they come before the study, ask and web tools. P2: the «Fix in wiki» proposal (shown to the user,
-    # written only on their click) comes next.
+    # Me Graph offers a scoped edit and a read-only search for abstract response formats.
     assert turn.tools is not None
-    assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, *ME_TOOL_NAMES,
-                                                       "skaz_skill_install", "skaz_mcp_list",
-                                                       "skaz_mcp_propose", "skaz_mcp_call", "skaz_skill_read",
+    assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, EDIT_TOOL,
+                                                       "skaz_me_search", "skaz_skill_install",
+                                                       "skaz_mcp_list", "skaz_mcp_propose", "skaz_mcp_call",
+                                                       "skaz_skill_read",
                                                        *STUDY_TOOL_NAMES, "skaz_ask_user", "skaz_web_search",
                                                        "skaz_web_read",
                                                        "skaz_wiki_propose_fix")

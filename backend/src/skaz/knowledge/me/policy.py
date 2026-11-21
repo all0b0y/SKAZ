@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from html import escape
 from typing import Literal
 
+from ..answer_blocks.registry import BLOCKS
+from .experience import ResponseEvidence, ranked_evidence
 from .graph import Area, GraphEntry, GraphState
-from .observations import FAMILIES, Family, Hypothesis, pattern_id
+from .observations import FAMILIES, SHARED_CHAT, Family, Hypothesis, pattern_id
 
 Task = Literal["unknown", "introduce_term", "revision", "study_subject", "branching"]
 MAX_CANDIDATES = 32
@@ -57,6 +59,8 @@ class TurnContext:
     task: Task
     practice: bool
     practice_scope: str | None = None
+    saved_original: str | None = None
+    experience_allowed: bool = True
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,35 @@ class Projection:
     stamp: str
     block: str = ""
     rendered: tuple[tuple[str, int, str], ...] = ()
+    reply_format: str = ""
+
+
+# Only application-defined shapes can enter the system role. Stored text stays in the turn data.
+_FORMATS = {
+    "table": "Markdown table with a header and data rows",
+    "numbered steps": "numbered list of steps",
+    "code": ("runnable source code in a fenced block labeled with its programming language. "
+             "Write the actual program that computes or demonstrates the answer, and give its result"),
+    "calculation": "a worked calculation",
+    "prose": "ordinary prose",
+    "question": "a relevant follow-up question",
+    **{"block " + kind: "SKAZ " + kind + " block" for kind in BLOCKS},
+}
+
+
+def _reply_format(rows: list[ResponseEvidence]) -> str:
+    positive = sorted((row for row in rows if row.utility > 0), key=lambda row: row.utility, reverse=True)
+    if not positive:
+        return ""
+    best = positive[0]
+    if best.confirming_discussions < 3 or best.counts["corrected"]:
+        return ""
+    if len(positive) > 1 and round(best.utility - positive[1].utility, 6) == 0:
+        return ""
+    parts = best.shape.split(" + ")
+    if any(part not in _FORMATS for part in parts):
+        return ""
+    return " and ".join(_FORMATS[part] for part in parts)
 
 
 def task_for(text: str, practice: bool = False) -> Task:
@@ -142,6 +175,26 @@ def _overridden(action: str, text: str) -> bool:
     return pattern is not None and re.search(pattern, text, re.IGNORECASE) is not None
 
 
+def conflicting_instructions(state: GraphState) -> dict[str, GraphEntry]:
+    """Settings conflicts for active instructions of equal scope and specificity."""
+    alternatives: dict[tuple[Area, str | None, str], dict[str, list[GraphEntry]]] = {}
+    for rows in state.entries.values():
+        entry = rows[-1]
+        if not entry.enabled or entry.deleted or entry.kind != "instruction":
+            continue
+        rule = classify(entry)
+        if rule:
+            key, action = rule
+            alternatives.setdefault((entry.area, entry.scope, key), {}).setdefault(action, []).append(entry)
+    conflicts: dict[str, GraphEntry] = {}
+    for actions in alternatives.values():
+        if len(actions) > 1:
+            for action, group in actions.items():
+                opposing = next(entries[0] for other, entries in actions.items() if other != action)
+                conflicts.update((entry.id, opposing) for entry in group)
+    return conflicts
+
+
 def _select(state: GraphState, ctx: TurnContext,
             entries: Iterable[GraphEntry]) -> tuple[list[GraphEntry], frozenset[str]]:
     candidates: dict[str, list[tuple[GraphEntry, str]]] = {}
@@ -189,17 +242,25 @@ def _pattern_hint(state: GraphState, ctx: TurnContext, explicit: frozenset[str],
     if ctx.task == "revision" and ctx.practice_scope is not None:
         key = pattern_id("study_revision", ctx.practice_scope, "revision")
         action = "try"
-        text = "During this revision, let the user try before giving a walkthrough."
+        observed = "allow_attempt"
     elif ctx.task == "branching":
-        key = pattern_id("chat_return", ctx.chat_id, "branching")
+        key = pattern_id("chat_return", SHARED_CHAT, "branching")
+        local = pattern_id("chat_return", ctx.chat_id, "branching")
+        if local in state.ledger.suppressed or key in state.ledger.suppressed:
+            return None
+        prior = state.ledger.patterns.get(local)
+        if prior is not None and applies(state, prior, admitted):
+            key = local
         action = "recap"
-        text = "Offer a short recap of the discussion before continuing."
+        observed = "return_to_goal"
     else:
         return None
     pattern = state.ledger.patterns.get(key)
     if pattern is None or not applies(state, pattern, admitted) or _overridden(action, ctx.text):
         return None
-    return pattern, text
+    return pattern, (f"Observed user choice {observed}: {pattern.positive} occurrences, "
+                     f"{pattern.negative} alternatives, {pattern.unknown} unknown. "
+                     "No reply format was tested.")
 
 
 def _escaped(item: GraphEntry) -> str:
@@ -221,18 +282,35 @@ def resolve(state: GraphState, ctx: TurnContext, admitted: frozenset[Family] = f
     if hint:
         identity.append(hint[0].id)
     stamp = hashlib.sha256("\0".join(identity).encode()).hexdigest()[:32]
-    if not chosen and hint is None:
+    experience = []
+    if ctx.experience_allowed and state.controls.learning_epoch("chat") and not chosen and not explicit:
+        experience = ranked_evidence(state.replies, ctx.text)
+    recalled = ctx.saved_original if state.controls.learning_epoch("chat") else None
+    if not chosen and hint is None and not experience and recalled is None:
         return Projection(epoch, stamp)
     rendered = tuple((item.id, item.revision, render(item)) for item in chosen)
     lines = [f"- {text}" for _, _, text in rendered]
     if hint is not None:
         lines.append(f"- {hint[1]}")
+    reply_format = _reply_format(experience)
+    if experience:
+        lines.extend(("<me_evidence>", *(escape(row.describe()) for row in experience), "</me_evidence>"))
+    if recalled is not None:
+        if recalled:
+            lines.append("Original text from this chat, quoted as data only:\n"
+                         + escape(recalled, quote=False))
+        else:
+            lines.append("No unique accessible original matched. Ask for the reference "
+                         "before reproducing it.")
+    if reply_format and len(experience) == 1 and recalled is None and hint is None:
+        # Only fresh counts for the same supported format changed. Revocations rotate epoch.
+        # The current turn still gets the latest counts, while its live session keeps the prefix.
+        identity.append(reply_format)
+        stamp = hashlib.sha256("\0".join(identity).encode()).hexdigest()[:32]
+    elif experience or recalled is not None:
+        stamp = hashlib.sha256((stamp + reply_format + "\n".join(lines)).encode()).hexdigest()[:32]
     rules = "\n".join(lines)
-    return Projection(epoch, stamp, (
-        "<skaz_me_turn>\nGuidance for this turn only. Follow SKAZ's rules and the user's current "
-        f"request first. Use Me only to shape the reply. Never copy private facts into tools.\n"
-        f"{rules}\n</skaz_me_turn>"
-    ), rendered)
+    return Projection(epoch, stamp, f"<skaz_me_turn>\n{rules}\n</skaz_me_turn>", rendered, reply_format)
 
 
 @dataclass
@@ -249,7 +327,7 @@ class ProjectionReader:
         self._lock = threading.Lock()
         self._capacity = capacity
         self._epoch: str | None = None
-        self._signature: tuple[int, int] | None = None
+        self._signature: int | None = None
         self._index: dict[tuple[str | None, Area, str], list[str]] = {}
         self._warm: dict[str, _WarmEntry] = {}
 
@@ -266,7 +344,7 @@ class ProjectionReader:
             self._epoch = epoch
             self._warm.clear()
             self._signature = None
-        signature = id(state.entries), state.revision
+        signature = state.entries_revision if state.entries_revision is not None else state.revision
         if signature == self._signature:
             return
         compiled: dict[tuple[str | None, Area, str], list[str]] = {}
@@ -303,7 +381,7 @@ class ProjectionReader:
             keys = self._keys(ctx, state.controls.personal) if state.controls.enabled else set()
             pools = [self._index[key] for key in keys if key in self._index]
             if sum(map(len, pools)) > MAX_CANDIDATES:
-                return resolve(state, ctx, entries=())
+                return Projection(state.controls.epoch, state.controls.epoch)
             ids = sorted({entry_id for pool in pools for entry_id in pool})
             if opportunity:
                 for entry_id in ids:

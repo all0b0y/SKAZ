@@ -65,6 +65,7 @@ class MeVault:
             else:
                 try:
                     os.write(descriptor, key)
+                    os.fsync(descriptor)
                 finally:
                     os.close(descriptor)
         try:

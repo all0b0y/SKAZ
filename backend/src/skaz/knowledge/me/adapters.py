@@ -10,8 +10,9 @@ from typing import TYPE_CHECKING
 from ...native_io import disk_call
 from ..study.activity import CaptureStudyActivity, StudyActivity, StudyObserver
 from . import MeError
+from .experience import feedback, target
 from .graph import MeGraphStore
-from .observations import Action, Offer, TrustedEvent
+from .observations import SHARED_CHAT, Action, Offer, TrustedEvent
 
 if TYPE_CHECKING:
     from ..chats.model import Message
@@ -75,6 +76,11 @@ def accept_chat(graph: MeGraphStore, question: Message, prior: Sequence[Message]
     state = graph.open()
     if state.controls.learning_epoch("chat") != epoch:
         return
+    attempt = target(state.replies, question, prior, epoch)
+    if attempt is not None:
+        reactions = feedback(attempt, given)
+        if reactions:
+            graph.react(attempt.answer, epoch, question.id, question.seq, reactions)
     previous = next((item for item in reversed(prior) if item.role == "user"), None)
     episode = state.ledger.episodes.get(previous.id) if previous is not None else None
     if previous is not None and episode is not None and episode.eligible and episode.kind == "opportunity":
@@ -86,7 +92,7 @@ def accept_chat(graph: MeGraphStore, question: Message, prior: Sequence[Message]
         graph.observe(TrustedEvent(
             producer="chat", family="chat_return", event_id=f"{question.id}:outcome",
             source_ref=question.id, episode_id=episode.id, session_id=episode.session_id,
-            scope=scope, context_key=episode.context_key, epoch=epoch, sequence=episode.sequence + 1,
+            scope=episode.scope, context_key=episode.context_key, epoch=epoch, sequence=episode.sequence + 1,
             occurred_at=stamp, actor="user", kind="choice" if label else "close", selected=label,
             uncued=label is not None,
         ))
@@ -102,7 +108,8 @@ def accept_chat(graph: MeGraphStore, question: Message, prior: Sequence[Message]
     offers = (Offer(action="return_to_goal"), Offer(action="continue_branch"))
     graph.observe(TrustedEvent(
         producer="chat", family="chat_return", event_id=f"{question.id}:context",
-        source_ref=question.id, episode_id=question.id, session_id=scope, scope=scope, epoch=epoch,
+        source_ref=question.id, episode_id=question.id, session_id=scope,
+        scope=SHARED_CHAT if has_other_pivot else scope, epoch=epoch,
         context_key="branching" if has_other_pivot else anchor, sequence=0, occurred_at=stamp,
         kind="opportunity" if has_other_pivot else "branch", actor="system" if has_other_pivot else "user",
         offered_set=offers if has_other_pivot else (),

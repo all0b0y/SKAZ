@@ -158,10 +158,30 @@ class ChatRepository:
         with self.db.write() as connection:
             self._set_chat(connection, chat_id, values)
 
-    def delete(self, chat_id: str) -> bool:
+    # One random receipt per profile, with no event, chat ID or personalization payload.
+    # The Me writer lock resolves any previous pending operation before staging the next.
+    def source_change_committed(self, receipt: str) -> bool:
+        with self.db.read() as connection:
+            return connection.execute(
+                "SELECT 1 FROM settings WHERE key = 'chat.last_transaction' AND value = ?",
+                (json.dumps(receipt),),
+            ).fetchone() is not None
+
+    @staticmethod
+    def _record_change(connection: sqlite3.Connection, receipt: str | None) -> None:
+        if receipt is not None:
+            connection.execute(
+                "INSERT INTO settings(key, value) VALUES ('chat.last_transaction', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (json.dumps(receipt),),
+            )
+
+    def delete(self, chat_id: str, receipt: str | None = None) -> bool:
         with self.db.write() as connection:
             connection.execute("DELETE FROM chat_fts WHERE chat_id = ?", (chat_id,))
-            return connection.execute("DELETE FROM chat_threads WHERE id = ?", (chat_id,)).rowcount > 0
+            deleted = connection.execute("DELETE FROM chat_threads WHERE id = ?", (chat_id,)).rowcount > 0
+            if deleted:
+                self._record_change(connection, receipt)
+            return deleted
 
     @classmethod
     def _set_chat(cls, connection: sqlite3.Connection, chat_id: str, values: Mapping[str, Any]) -> None:
@@ -203,7 +223,7 @@ class ChatRepository:
         return added
 
     def rewrite_from(self, question: Message, answer: Message,
-                     chat_update: Mapping[str, Any]) -> tuple[list[str], Message]:
+                     chat_update: Mapping[str, Any], receipt: str | None = None) -> tuple[list[str], Message]:
         """An edited question (2026-10-21): every later message goes, its new input is stored and its
         new answer follows it — one transaction. Returns the removed ids and the answer as stored."""
         with self.db.write() as connection:
@@ -222,6 +242,7 @@ class ChatRepository:
             stored = replace(answer, seq=question.seq + 1)
             self._insert(connection, stored)
             self._set_chat(connection, question.chat_id, chat_update)
+            self._record_change(connection, receipt)
         return removed, stored
 
     def replace_answer(self, old: Message, answer: Message, chat_update: Mapping[str, Any]) -> Message:

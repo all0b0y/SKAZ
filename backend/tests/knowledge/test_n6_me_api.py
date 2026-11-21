@@ -4,8 +4,11 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+import pytest
 
 from skaz.knowledge.me import HOW_TO_WORK_LIMIT, PROFILE_LIMIT
+
+pytestmark = pytest.mark.parametrize("kb_config", ["legacy_me"], indirect=True)
 
 SKILL_KEYS = {"id", "kind", "builtin", "title", "description", "enabled", "always_on", "chars", "limit",
               "version", "updated_at"}

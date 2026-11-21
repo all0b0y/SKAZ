@@ -48,9 +48,10 @@ def legacy_pdf_intake(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def kb_config(tmp_path: Path, documents: Path) -> AppConfig:
+def kb_config(tmp_path: Path, documents: Path, request: pytest.FixtureRequest) -> AppConfig:
     return AppConfig(token=TOKEN, data_dir=tmp_path / "data", request_timeout_s=5.0,
-                     documents_dir=documents, documents_sandbox=documents)
+                     documents_dir=documents, documents_sandbox=documents,
+                     use_legacy_me=getattr(request, "param", None) == "legacy_me")
 
 
 @pytest.fixture

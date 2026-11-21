@@ -51,8 +51,8 @@ def base_instructions() -> str:
     from ..agents import codex  # the engine's base text (a late import: codex is heavy)
     from ..me import prompt as me_prompt
     from . import context
-    fixed = (context.instructions(None), me_prompt.ME_RULES, codex.BASE_INSTRUCTIONS, codex.WITH_TOOLS,
-             codex.WITHOUT_TOOLS)
+    fixed = (context.instructions(None), context.ANSWER_DELIVERY, me_prompt.ME_RULES, codex.BASE_INSTRUCTIONS,
+             codex.WITH_TOOLS, codex.WITHOUT_TOOLS)
     return hashlib.sha256("\0".join(fixed).encode()).hexdigest()[:16]
 
 

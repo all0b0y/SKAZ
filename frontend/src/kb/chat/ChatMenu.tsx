@@ -26,6 +26,7 @@ export function ChatMenu({ chat, onNotice, onRename, onCloseTab, size = 'md' }: 
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [keepExperience, setKeepExperience] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const exportChat = async () => {
@@ -57,7 +58,7 @@ export function ChatMenu({ chat, onNotice, onRename, onCloseTab, size = 'md' }: 
         { id: 'export', label: 'Export as .md', icon: 'export', onSelect: () => void exportChat() },
         { id: 'save', label: 'Save to wiki as analysis', icon: 'saveWiki', onSelect: () => void saveToWiki() },
         ...(onCloseTab ? [{ id: 'close-tab', label: 'Close tab', icon: 'close' as const, onSelect: onCloseTab }] : []),
-        { id: 'delete', label: 'Delete', icon: 'trash', danger: true, onSelect: () => setConfirm(true) },
+        { id: 'delete', label: 'Delete', icon: 'trash', danger: true, onSelect: () => { setKeepExperience(true); setConfirm(true); } },
       ]} />
       {!onRename && (
         <Popover open={renaming} onClose={() => setRenaming(false)} anchorRef={anchor} label="Rename chat" placement="bottom-end" width={280}>
@@ -72,12 +73,15 @@ export function ChatMenu({ chat, onNotice, onRename, onCloseTab, size = 'md' }: 
       <Modal open={confirm} onClose={() => setConfirm(false)} title="Delete this chat?" className="kb-confirm" testId="confirm-delete-chat">
         <div className="kb-confirm__body">
           <p>“{chat.title}” and its answers will be deleted. Pages you saved to the wiki stay.</p>
+          <label><input type="checkbox" checked={keepExperience}
+            onChange={(e) => setKeepExperience(e.currentTarget.checked)} /> Keep anonymous learning counts in Me</label>
+          <p>Clear this to also remove this chat’s contribution to patterns.</p>
         </div>
         <footer className="kb-confirm__foot">
           <Button onClick={() => setConfirm(false)}>Cancel</Button>
           <Button variant="danger" busy={busy} onClick={async () => {
             setBusy(true);
-            const r = await chats.getState().remove(chat.id);
+            const r = await chats.getState().remove(chat.id, keepExperience);
             setBusy(false);
             setConfirm(false);
             onNotice(r.ok ? 'Chat deleted.' : `Couldn’t delete: ${r.error}`);

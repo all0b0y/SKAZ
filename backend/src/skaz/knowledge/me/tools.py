@@ -20,6 +20,7 @@ from ..agents.tools import SkazTool, ToolContext, ToolInputError, ToolRegistry, 
 from ..chats.model import MemoryPart
 from . import DESCRIPTION_MAX, ID_PATTERN, PROFILE, SKILL_CAP, TITLE_MAX, MeEdit, MeError, builtin
 from .access import me_store
+from .experience import ranked
 from .graph import MeGraphStore
 from .policy import declaration
 from .prompt import EDIT_TOOL, SKILL_TOOL
@@ -181,6 +182,34 @@ def graph_tool(chats: ChatService, store: MeGraphStore) -> SkazTool:
         "Supply only the character span in that message. SKAZ verifies it and shows Undo.",
         DeclaredSpan, run=edit,
     )
+
+
+class SearchExperienceArgs(_Args):
+    query: str = Field(min_length=1, max_length=360, description="A short restatement of the present task.")
+
+
+def graph_search_tool(chats: ChatService, store: MeGraphStore) -> SkazTool:
+    async def search(context: ToolContext | None, args: SearchExperienceArgs) -> dict[str, Any]:
+        current = chats.mark_me_search(context.run_id) if context is not None else None
+        if current is None:
+            raise ToolInputError(NOT_IN_CHAT)
+        _, epoch = current
+
+        def lookup() -> list[str]:
+            state = store.open()
+            if not state.controls.learning_epoch("chat") or state.controls.epoch != epoch:
+                raise ToolInputError(ME_OFF)
+            result = ranked(state.replies, args.query)
+            if store.current_epoch() != epoch:
+                raise ToolInputError(ME_OFF)
+            return result
+
+        return {"observations": await disk_call(lookup)}
+
+    return SkazTool("skaz_me_search",
+                    "Find observed response formats for a paraphrase of this chat task. Read only. "
+                    "Returns abstract counts and counterexamples. Use only when the context is insufficient.",
+                    SearchExperienceArgs, run=search)
 
 
 def graph_memory_part(edit_id: str, *, undone: bool = False) -> MemoryPart:

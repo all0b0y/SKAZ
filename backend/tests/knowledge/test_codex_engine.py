@@ -114,6 +114,8 @@ async def test_streams_answer_text_only_and_reports_usage(engine: CodexEngine, c
     assert started["config"]["web_search"] == "disabled"
     assert all(started["config"][f"features.{name}"] is False for name in KB_DISABLED_FEATURES)
     assert started["baseInstructions"].startswith(BASE_INSTRUCTIONS)
+    assert "<agent_role>" in BASE_INSTRUCTIONS
+    assert "\n<agent_tools>\n" in started["baseInstructions"]
     assert started["baseInstructions"].endswith("Answer briefly.")
     turn = connection.received("turn/start")[0]["params"]
     assert turn["input"][0]["text"] == "case:stream"

@@ -1,0 +1,374 @@
+[
+  {
+    "id": "unit_tag",
+    "split": "qualification",
+    "level": "simple",
+    "request": "На накладной указан код «dQ-309». Верни код дословно и без кавычек.",
+    "checks": {
+      "exact": "dQ-309"
+    }
+  },
+  {
+    "id": "reverse_tag",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Reverse the four characters inside the quotes: \"p2Q7\". Return only those four characters.",
+    "checks": {
+      "exact": "7Q2p"
+    }
+  },
+  {
+    "id": "amount",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Из 31 гостя вышли 8. Сколько осталось? Только число.",
+    "checks": {
+      "exact": "23"
+    }
+  },
+  {
+    "id": "hour",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Преобразуй «пять часов утра» в формат HH:MM. Только время.",
+    "checks": {
+      "exact": "05:00"
+    }
+  },
+  {
+    "id": "unit_name",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Quel est le symbole chimique du cuivre ? Donne uniquement le symbole.",
+    "checks": {
+      "exact": "Cu",
+      "marker": "first"
+    }
+  },
+  {
+    "id": "bool",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Flags: trace=false; log=true. Return only the JSON boolean value of trace.",
+    "checks": {
+      "json": false
+    }
+  },
+  {
+    "id": "between",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Из «первый/второй/третий» извлеки среднее слово. Напиши только его.",
+    "checks": {
+      "exact": "второй"
+    }
+  },
+  {
+    "id": "two_numbers",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Запиши числа «семь и одиннадцать» как JSON-массив в исходном порядке, без пояснений.",
+    "checks": {
+      "json": [
+        7,
+        11
+      ]
+    }
+  },
+  {
+    "id": "pair_order",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Лена идёт после Оли. Кто идёт первым? В ответе только имя.",
+    "checks": {
+      "exact": "Оля"
+    }
+  },
+  {
+    "id": "language",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Как по-испански «понедельник»? Напиши только слово со строчной буквы.",
+    "checks": {
+      "exact": "lunes"
+    }
+  },
+  {
+    "id": "parallel",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Сборка и печать стартуют одновременно и длятся 19 и 24 минуты. Затем контроль занимает 7 минут. Верни только JSON с числом минут до окончания под ключом total.",
+    "checks": {
+      "json": {
+        "total": 31
+      }
+    }
+  },
+  {
+    "id": "refund",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Было 5 билетов по 8 монет. Один билет вернули с полным возвратом, ещё один купили за 6 монет. Выдай только JSON с итоговой суммой расходов в paid и текущим числом билетов в tickets.",
+    "checks": {
+      "json": {
+        "paid": 38,
+        "tickets": 5
+      }
+    }
+  },
+  {
+    "id": "queue_order",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Очередь пуста. Пришли Ира, Ян, Ника. Первый ушёл, в конец пришёл Олег. Только массив JSON с именами в оставшейся очереди.",
+    "checks": {
+      "json": [
+        "Ян",
+        "Ника",
+        "Олег"
+      ]
+    }
+  },
+  {
+    "id": "consensus",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Свет выставки включили в 11:00. По двум приложенным записям укажи сначала первоначальный, затем окончательный зал. Подкрепи оба названия ссылками на соответствующие фрагменты.",
+    "checks": {
+      "source": [
+        1,
+        2
+      ],
+      "patterns": [
+        "янтар",
+        "лазур"
+      ]
+    },
+    "fragments": [
+      "Первоначально выставку запланировали в Янтарном зале.",
+      "После согласования выставку перенесли в Лазурный зал."
+    ]
+  },
+  {
+    "id": "no_price",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Только по приложенному документу укажи стоимость пробного занятия. Если стоимость отсутствует, скажи об этом.",
+    "checks": {
+      "gap": true,
+      "patterns": [
+        "цен|стоим|оплат"
+      ],
+      "forbid": [
+        "бесплатн|\\d+\\s*(?:₽|руб)"
+      ]
+    },
+    "fragments": [
+      "Пробное занятие длится сорок пять минут.",
+      "Место проведения — помещение на втором этаже."
+    ]
+  },
+  {
+    "id": "bus_window",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Отправления 09:05, 09:20, 09:45. Дорога до остановки занимает 12 минут от 09:08. Посадка возможна в момент отправления. Когда уеду первым подходящим автобусом? Ответь только временем.",
+    "checks": {
+      "exact": "09:20"
+    }
+  },
+  {
+    "id": "mixture",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Смешали 100 г раствора с 10 г соли и 200 г раствора с 20 г соли. Верни только JSON с числом граммов соли в salt и процентом соли от массы смеси в percent.",
+    "checks": {
+      "json": {
+        "salt": 30,
+        "percent": 10
+      }
+    }
+  },
+  {
+    "id": "after_midnight",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Начало 23:55, длительность 18 минут. Нужен только JSON с временем конца в end и сдвигом дня в целых сутках в day_offset.",
+    "checks": {
+      "json": {
+        "end": "00:13",
+        "day_offset": 1
+      }
+    }
+  },
+  {
+    "id": "group_latest",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Journal, oldest first: L=4, M=6, L=3, N=8, M=2. Return only a JSON object with the final value of each letter.",
+    "checks": {
+      "json": {
+        "L": 3,
+        "M": 2,
+        "N": 8
+      }
+    }
+  },
+  {
+    "id": "carton",
+    "split": "qualification",
+    "level": "complex",
+    "request": "На поддоне 41 пачка. В ящик входят ровно 6, последний может быть неполным. Верни JSON с числом нужных ящиков в boxes и числом пачек в последнем в last.",
+    "checks": {
+      "json": {
+        "boxes": 7,
+        "last": 5
+      }
+    }
+  },
+  {
+    "id": "band",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Группа А выпустила за 4 часа 20 деталей, Б за 3 часа 21 деталь. Сравни в таблице Markdown: столбцы «Группа» и «Деталей в час», строки А и Б.",
+    "checks": {
+      "table_rows": [
+        [
+          "^[АA]$",
+          "^5$"
+        ],
+        [
+          "^[БB]$",
+          "^7$"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "source_code",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Какой код указан на итоговой накладной? Используй только нужный фрагмент приложения и дай на него ссылку SKAZ.",
+    "checks": {
+      "source": [
+        2
+      ],
+      "patterns": [
+        "V-814"
+      ]
+    },
+    "fragments": [
+      "Предварительная накладная имела код P-118 и была отозвана.",
+      "Для итоговой накладной указан новый код V-814."
+    ]
+  },
+  {
+    "id": "action_state",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Я собираюсь закрыть заявку, но пока лишь набросал черновик. Подтверждения в системе нет. Можем ли мы утверждать, что заявка закрыта? В одном абзаце.",
+    "checks": {
+      "paragraph": true,
+      "patterns": [
+        "нельз|\\bне\\b|\\bнет\\b|недостат|невозмож",
+        "заявк|закры"
+      ],
+      "forbid": [
+        "заявка успешно закрыта"
+      ]
+    }
+  },
+  {
+    "id": "draft",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Write a one-sentence message to Pat asking to move Tuesday’s review from 10:00 to 12:00. Give just the message.",
+    "checks": {
+      "one_sentence": true,
+      "patterns": [
+        "Pat",
+        "Tuesday",
+        "10:00",
+        "12:00"
+      ],
+      "forbid": [
+        "here is|draft:|sent the"
+      ]
+    }
+  },
+  {
+    "id": "procedure_alt",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Условие: промывка разрешена после отключения, включение — после промывки. Перечисли ровно три действия нумерованным списком.",
+    "checks": {
+      "list_n": 3,
+      "ordered": [
+        "отключ|отсоедин|обесточ",
+        "пром",
+        "включ"
+      ]
+    }
+  },
+  {
+    "id": "one_number_each",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Отметки были [+2, −4, +2, 0, −1]. Выведи только JSON с числом положительных, отрицательных и нулевых значений под ключами pos, neg и zero.",
+    "checks": {
+      "json": {
+        "pos": 2,
+        "neg": 2,
+        "zero": 1
+      }
+    }
+  },
+  {
+    "id": "on_hold",
+    "split": "qualification",
+    "level": "complex",
+    "request": "На круг нужно 12 минут. После каждого полного круга, кроме последнего, перерыв 3 минуты. Сколько минут займут 4 круга? Ответь только целым числом.",
+    "checks": {
+      "exact": "57"
+    }
+  },
+  {
+    "id": "gloss",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Одним абзацем объясни, как называется переход из газообразного состояния в жидкое, и приведи пример.",
+    "checks": {
+      "marker": "first",
+      "paragraph": true,
+      "patterns": [
+        "конденсац",
+        "рос|капл|окон|стекл|пар|облак|зеркал"
+      ]
+    }
+  },
+  {
+    "id": "lex_order",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Отсортируй не как строки, а по числовой части по убыванию: A2, A12, A1, A9. Только массив JSON из исходных обозначений.",
+    "checks": {
+      "json": [
+        "A12",
+        "A9",
+        "A2",
+        "A1"
+      ]
+    }
+  },
+  {
+    "id": "permissions",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Допуск выдаётся, если балл не меньше 12 и анкета подписана. У Риты 12, подпись есть; у Вани 14, подписи нет; у Миры 11, подпись есть. Верни только массив JSON из имён допущенных.",
+    "checks": {
+      "json": [
+        "Рита"
+      ]
+    }
+  }
+]

@@ -33,12 +33,17 @@ export function useChatSelection({ chats: list, onOpen, variant = 'compact', res
   const exp = useExportItems();
   const exportMd = exp.run ? (picked: KbChatSummary[]) => { exp.run!(picked.map((c) => ({ type: 'chat' as const, id: c.id }))); } : null;
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
+  const [keepExperience, setKeepExperience] = useState(true);
+  const confirmDelete = (ids: string[]) => {
+    setKeepExperience(true);
+    setDeleteIds(ids);
+  };
   const byId = new Map(list.map((c) => [c.id, c]));
   const pick = (ids: readonly string[]) => ids.map((id) => byId.get(id)).filter((c): c is KbChatSummary => Boolean(c));
   const sel = useListSelection({
     ids: list.map((c) => c.id),
     onOpen,
-    onDelete: (ids) => setDeleteIds(ids),
+    onDelete: confirmDelete,
     onExport: exportMd ? (ids) => exportMd(pick(ids)) : undefined,
     resetKey,
   });
@@ -83,7 +88,7 @@ export function useChatSelection({ chats: list, onOpen, variant = 'compact', res
       id: 'export', label: 'Export .md', icon: 'export', shortcut: '⌘⇧E', disabled: !exportMd,
       onSelect: () => exportMd?.(pick(ids())),
     },
-    { id: 'delete', label: 'Delete', icon: 'trash', shortcut: '⌘⌫', danger: true, onSelect: () => setDeleteIds(ids()) },
+    { id: 'delete', label: 'Delete', icon: 'trash', shortcut: '⌘⌫', danger: true, onSelect: () => confirmDelete(ids()) },
   ];
   const more: SelectionAction[] = [
     { id: 'unpin', label: 'Unpin', icon: 'unpin', onSelect: () => void setPinned(ids(), false) },
@@ -118,11 +123,13 @@ export function useChatSelection({ chats: list, onOpen, variant = 'compact', res
               : 'A chat that is still answering is skipped — it says so'}</li>
           </ul>
         )}
+        options={<label><input type="checkbox" checked={keepExperience}
+          onChange={(event) => setKeepExperience(event.currentTarget.checked)} /> Keep anonymous learning counts in Me</label>}
         onDelete={async () => {
           const res: BatchResult = { done: [], skipped: [] };
           for (const c of doomed) {
             if (c.state === 'answering') { res.skipped.push({ id: c.id, reason: `“${c.title}” is still answering` }); continue; }
-            const r = await chats.getState().remove(c.id);
+            const r = await chats.getState().remove(c.id, keepExperience);
             if (r.ok) { res.done.push(c.id); } else res.skipped.push({ id: c.id, reason: r.error });
           }
           setDeleteIds(null);

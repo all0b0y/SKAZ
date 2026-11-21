@@ -12,14 +12,16 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..ids import utc_now
 from . import ID_PATTERN, MAX_VERSIONS, PROFILE, SKILL_CAP, MeConflict, MeError, MeNotFound
+from .experience import Attempt, Outcome, ReplyExperience, updated, withdraw
 from .observations import (
+    SHARED_CHAT,
     Family,
     Hypothesis,
     Ledger,
@@ -29,8 +31,12 @@ from .observations import (
     forget,
     reduce_event,
     retract,
+    revocation_key,
+    revoked,
 )
 from .vault import MeVault, MeVaultUnreadable
+
+_T = TypeVar("_T")
 
 Area = Literal["chat", "practice", "personal"]
 EntryKind = Literal["instruction", "fact", "procedure", "legacy_import"]
@@ -95,17 +101,47 @@ class GraphEdit(_Record):
     undone: bool = False
 
 
+class SourceChange(_Record):
+    receipt: str = Field(default_factory=lambda: uuid4().hex)
+    sources: frozenset[str]
+    scope: str | None = None
+    keep_experience: bool = False
+
+
+class PendingRevocations(_Record):
+    sources: frozenset[str] = frozenset()
+    scopes: frozenset[str] = frozenset()
+    discard_sources: frozenset[str] = frozenset()
+    preserve: frozenset[str] = frozenset()
+    staged: SourceChange | None = None
+
+    def add(self, sources: frozenset[str], scope: str | None, keep_experience: bool) -> PendingRevocations:
+        scopes = self.scopes | {scope} if scope is not None else self.scopes
+        preserve = self.preserve
+        if scope is not None:
+            if not keep_experience:
+                preserve = preserve - {scope}
+            elif scope not in self.scopes:
+                preserve = preserve | {scope}
+        discard = self.discard_sources if keep_experience and scope else self.discard_sources | sources
+        return PendingRevocations(sources=self.sources | sources, scopes=scopes,
+                                  preserve=preserve, discard_sources=discard)
+
+
 class GraphState(_Record):
     schema_version: Literal[2] = 2
     phase: Phase = "graph"
     revision: int = 0
+    entries_revision: int | None = None
     migration_revision: int = 0
     legacy_digest: str | None = None
     controls: GraphControls = Field(default_factory=GraphControls)
     entries: dict[str, list[GraphEntry]] = Field(default_factory=dict)
     edits: dict[str, GraphEdit] = Field(default_factory=dict)
     removed_sources: frozenset[str] = frozenset()
+    removed_scopes: frozenset[str] = frozenset()
     ledger: Ledger = Field(default_factory=Ledger)
+    replies: ReplyExperience = Field(default_factory=ReplyExperience)
 
 
 class _LegacyVersion(BaseModel):
@@ -202,17 +238,25 @@ def _candidate(data: dict[str, Any]) -> GraphState:
 def _advance(state: GraphState, *, revoke: bool = False, **change: Any) -> GraphState:
     if revoke:
         change["controls"] = change.get("controls", state.controls).model_copy(update={"epoch": uuid4().hex})
-    return state.model_copy(update={"revision": state.revision + 1, **change})
+    entries_revision = state.entries_revision if state.entries_revision is not None else state.revision
+    if "entries" in change:
+        entries_revision = state.revision + 1
+    return state.model_copy(update={
+        "revision": state.revision + 1, "entries_revision": entries_revision, **change,
+    })
 
 
 class MeGraphStore:
     def __init__(self, directory: Path, *, clock: Callable[[], str] = utc_now,
-                 admitted: frozenset[Family] = frozenset()) -> None:
+                 admitted: frozenset[Family] = frozenset(), new_profile: bool = False,
+                 source_committed: Callable[[str], bool] | None = None) -> None:
         self.directory = directory
-        # Runtime starts with no admissions. Only isolated replay may exercise the active path.
+        self._new_profile = new_profile
+        self._source_committed = source_committed
         self.admitted = admitted
         self.vault = MeVault(directory, name="me-graph.enc", key="me-graph.key")
         self._legacy = MeVault(directory)
+        self._revocations = MeVault(directory, name="me-revocations.enc", key="me-revocations.key")
         self._ready = directory / GRAPH_ACTIVE
         self._erasing = directory / "me-graph.erasing"
         self._clock = clock
@@ -268,7 +312,8 @@ class MeGraphStore:
         if legacy is None:
             if pending is not None or self._ready.exists():
                 raise GraphUnavailable()
-            return self._write(GraphState())
+            controls = GraphControls(study=self._new_profile, chat=self._new_profile)
+            return self._write(GraphState(controls=controls))
         candidate = _candidate(legacy)
         if pending is None:
             pending = self._write(candidate)
@@ -311,7 +356,7 @@ class MeGraphStore:
         # The v1 copy is available for recovery up to the first graph write.
         if state.legacy_digest and state.revision > state.migration_revision:
             self._purge_legacy()
-        return state
+        return self._apply_revocations(state) if self._revocations.path.exists() else state
 
     def open(self) -> GraphState:
         with self._locked():
@@ -325,9 +370,7 @@ class MeGraphStore:
             if self.needs_migration() and self.vault.path.exists():
                 pending = GraphState.model_validate(self.vault.read(strict=True))
                 if pending.phase != "graph":
-                    state = self._cutover(None)
-                    self._mark(self._ready)
-                    return state
+                    self._cutover(None)
             return self._open_locked()
 
     def current_epoch(self) -> str:
@@ -340,13 +383,68 @@ class MeGraphStore:
         with self._locked():
             state = self._open_locked()
             if (state.controls.learning_epoch(event.producer) != event.epoch
-                    or event.source_ref in state.removed_sources):
+                    or revoked(event.source_ref, state.removed_sources)
+                    or revoked(event.scope, state.removed_scopes)
+                    or (event.scope == SHARED_CHAT and revoked(event.session_id, state.removed_scopes))):
                 return "ignored"
             result, ledger = reduce_event(state.ledger, event, datetime.fromisoformat(self._clock()),
                                           state.revision + 1)
             if result == "accepted":
                 self._commit(state, ledger=ledger)
             return result
+
+    def record_reply(self, item: Attempt) -> None:
+        with self._locked():
+            state = self._open_locked()
+            if (item.epoch != state.controls.learning_epoch("chat")
+                    or revoked(item.chat, state.removed_scopes)
+                    or any(revoked(key, state.removed_sources) for key in (item.answer, item.question))
+                    or item.answer in state.replies.attempts):
+                return
+            attempts = {**state.replies.attempts, item.answer: item}
+            replies = state.replies.model_copy(update={"attempts": attempts})
+            self._commit(state, replies=replies)
+
+    def react(self, answer: str, epoch: str, source: str, seq: int, reactions: dict[str, Outcome]) -> None:
+        with self._locked():
+            state = self._open_locked()
+            item = state.replies.attempts.get(answer)
+            if (item is None or epoch != item.epoch or epoch != state.controls.learning_epoch("chat")
+                    or revoked(source, state.removed_sources)):
+                return
+            revised = updated(item, reactions, source, seq)
+            if revised is not item:
+                attempts = {**state.replies.attempts, answer: revised}
+                replies = state.replies.model_copy(update={"attempts": attempts})
+                self._commit(state, replies=replies)
+
+    def manage_reply(self, name: str, revision: int, *, enabled: bool | None = None,
+                     correction: str | None = None) -> GraphState:
+        with self._locked():
+            state = self._open_locked()
+            self._expect(state.revision, revision)
+            memory = state.replies
+            if name not in memory.counts():
+                raise MeNotFound("This observed response no longer exists.")
+            if enabled is not None or correction is not None:
+                disabled = memory.disabled - {name} if enabled else memory.disabled | {name}
+                change: dict[str, Any] = {}
+                if correction is not None:
+                    new = GraphEntry(id=uuid4().hex, revision=state.revision + 1, text=self._text(correction),
+                                     area="chat", kind="instruction", created_at=self._clock())
+                    self._unique(state, new)
+                    change["entries"] = {**state.entries, new.id: [new]}
+                return self._commit(state, replies=memory.model_copy(update={"disabled": disabled}),
+                                    revoke=True, **change)
+            removed = {key for key, item in memory.attempts.items()
+                       if name in item.outcomes() or name in item.shapes or name == item.shape}
+            replies = memory.model_copy(update={
+                "attempts": {k: v for k, v in memory.attempts.items() if k not in removed},
+                "retained": {k: v for k, v in memory.retained.items() if k != name},
+                "disabled": memory.disabled - {name},
+            })
+            return self._commit(state, replies=replies, revoke=True,
+                                removed_sources=state.removed_sources.union(map(revocation_key, removed)))
 
     def _purge_legacy(self) -> None:
         if any(path.exists() for path in (self._legacy.path, self._legacy.key_path,
@@ -424,7 +522,7 @@ class MeGraphStore:
             state = self._open_locked()
             if not state.controls.enabled or state.controls.epoch != epoch:
                 raise MeConflict("Me access changed during this answer.")
-            if source_id in state.removed_sources:
+            if revoked(source_id, state.removed_sources) or revoked(chat_id, state.removed_scopes):
                 raise MeNotFound("This source is no longer available to Me.")
             if any(item.source_ref == source_id for rows in state.entries.values() for item in rows):
                 raise MeConflict("This message already has a Me edit.")
@@ -440,23 +538,67 @@ class MeGraphStore:
                          edits={**state.edits, edit_id: edit})
             return edit_id
 
-    def revoke_sources(self, source_ids: set[str], *, scope: str | None = None) -> bool:
+    def _pending(self) -> PendingRevocations:
+        pending = PendingRevocations.model_validate(self._revocations.read(strict=True) or {})
+        change = pending.staged
+        if change is None:
+            return pending
+        if self._source_committed is None:
+            raise GraphUnavailable()
+        if self._source_committed(change.receipt):
+            return pending.add(change.sources, change.scope, change.keep_experience)
+        return pending.model_copy(update={"staged": None})
+
+    def _save_pending(self, pending: PendingRevocations) -> None:
+        self._revocations.write(pending.model_dump(mode="json"))
+        self._sync_dir()
+
+    def change_source(self, change: SourceChange, operation: Callable[[str], _T]) -> _T:
+        """Fence the SQLite mutation under the vault lock; recovery checks its actual commit."""
         with self._locked():
-            state = self._open_locked()
-            affected = {
-                entry_id for entry_id, rows in state.entries.items()
-                if any(row.source_ref in source_ids or (scope is not None and row.scope == scope)
-                       for row in rows)
-            }
-            ledger = retract(state.ledger, source_ids, scope, state.revision + 1)
-            if not affected and ledger is state.ledger:
-                return False
-            self._commit(
-                state, entries={k: v for k, v in state.entries.items() if k not in affected},
-                edits={k: v for k, v in state.edits.items() if v.entry_id not in affected},
-                removed_sources=state.removed_sources | source_ids, ledger=ledger, revoke=True,
-            )
+            pending = self._pending()
+            if self._source_committed is None:
+                raise GraphUnavailable()
+            self._save_pending(pending.model_copy(update={"staged": change}))
+            return operation(change.receipt)
+
+    def revoke_sources(self, source_ids: set[str], *, scope: str | None = None,
+                       keep_experience: bool = False) -> bool:
+        """Fence a removal that the authoritative source has already accepted."""
+        if not source_ids and scope is None:
+            return False
+        with self._locked():
+            self._save_pending(self._pending().add(frozenset(source_ids), scope, keep_experience))
             return True
+
+    def _apply_revocations(self, state: GraphState) -> GraphState:
+        pending = self._pending()
+        affected = {
+            key for key, rows in state.entries.items()
+            if any(row.source_ref in pending.sources or row.scope in pending.scopes for row in rows)
+        }
+        affected.update(edit.entry_id for edit in state.edits.values()
+                        if edit.chat_id in pending.scopes or edit.message_id in pending.sources)
+        ledger = retract(state.ledger, pending.sources, pending.scopes, state.revision + 1,
+                         preserve=pending.preserve, discard_sources=pending.discard_sources)
+        sources = frozenset(map(revocation_key, pending.sources))
+        scopes = frozenset(map(revocation_key, pending.scopes))
+        replies = withdraw(state.replies, pending.sources, pending.scopes,
+                          pending.preserve, pending.discard_sources)
+        changed = bool(affected) or ledger is not state.ledger or replies != state.replies
+        if changed or not sources <= state.removed_sources or not scopes <= state.removed_scopes:
+            changes: dict[str, Any] = {}
+            if affected:
+                changes["entries"] = {k: v for k, v in state.entries.items() if k not in affected}
+                changes["edits"] = {k: v for k, v in state.edits.items() if v.entry_id not in affected}
+            state = self._commit(
+                state, removed_sources=state.removed_sources | sources,
+                removed_scopes=state.removed_scopes | scopes,
+                ledger=ledger, replies=replies, revoke=changed, **changes,
+            )
+        self._revocations.path.unlink()
+        self._sync_dir()
+        return state
 
     def update(self, entry_id: str, expected_revision: int, *, text: str | None = None,
                area: Area | None = None, enabled: bool | None = None) -> GraphEntry:
@@ -507,7 +649,7 @@ class MeGraphStore:
             return self._commit(
                 state, entries={k: v for k, v in state.entries.items() if k != entry_id},
                 edits={k: v for k, v in state.edits.items() if v.entry_id != entry_id},
-                removed_sources=state.removed_sources | sources, revoke=True,
+                removed_sources=state.removed_sources.union(map(revocation_key, sources)), revoke=True,
             )
 
     @staticmethod
@@ -553,7 +695,8 @@ class MeGraphStore:
             ledger, _ = self._revise_pattern(state, item, state.ledger.suppressed | {item.id})
             entry = GraphEntry(
                 id=uuid4().hex, revision=state.revision + 1, text=self._text(text), area=area,
-                kind=_kind(area), created_at=self._clock(), scope=item.scope,
+                kind=_kind(area), created_at=self._clock(),
+                scope=None if item.scope == SHARED_CHAT else item.scope,
             )
             self._unique(state, entry)
             self._commit(state, entries={**state.entries, entry.id: [entry]}, ledger=ledger, revoke=True)
@@ -590,6 +733,7 @@ class MeGraphStore:
     def _finish_erase(self, controls: GraphControls, revision: int | None = None) -> GraphState:
         self._snapshot = None
         self._legacy.erase()
+        self._revocations.erase()
         self.vault.erase()
         for path in self.directory.glob(".me-*.tmp"):
             path.unlink(missing_ok=True)

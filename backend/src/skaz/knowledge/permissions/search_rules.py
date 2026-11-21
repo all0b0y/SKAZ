@@ -340,7 +340,7 @@ def rules_instructions(rules: ActiveRules) -> str:
     if rules.prefer:
         lines.append("- Prefer these sites (a hint; you may still search elsewhere): "
                      + ", ".join(rules.prefer) + ".")
-    return "\n".join(lines)
+    return "\n".join(["<search_rules>", *lines, "</search_rules>"])
 
 
 #: N7-5: questions about «what is current / modern approaches» — the agent's part (library dates and

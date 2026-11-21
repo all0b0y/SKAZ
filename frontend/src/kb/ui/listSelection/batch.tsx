@@ -55,12 +55,13 @@ export function namesList(titles: readonly string[], max = 3): ReactNode {
  * what stays, built by the caller from the existing delete previews. Nothing is removed before
  * Delete; the outcome (deleted N, skipped M with the reason) is reported by the caller.
  */
-export function BatchDeleteDialog({ open, title, count, preview, onClose, onDelete, testId }: {
+export function BatchDeleteDialog({ open, title, count, preview, options, onClose, onDelete, testId }: {
   open: boolean;
   title: string;
   count: number;
   /** Builds the list of consequences (reads the previews); null while there is nothing to read. */
   preview: () => Promise<ReactNode>;
+  options?: ReactNode;
   onClose: () => void;
   onDelete: () => Promise<void>;
   testId?: string;
@@ -82,6 +83,7 @@ export function BatchDeleteDialog({ open, title, count, preview, onClose, onDele
         {!body && !loadError && <div className="kb-doc__wait"><Spinner label="Checking what changes" /></div>}
         {loadError && <Banner tone="error" title="Couldn’t check what changes.">{loadError}</Banner>}
         {body}
+        {options}
         <div className="kb-modal__foot">
           <Button variant="quiet" onClick={onClose}>Cancel</Button>
           <Button variant="danger" icon="trash" busy={busy} disabled={!body || busy}

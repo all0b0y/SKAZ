@@ -7,6 +7,7 @@ Route contract: ``.dev/docs/backlog-2026-10-26/N6-ME-API.md``. Errors are the kn
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from collections.abc import Callable, Coroutine
 from typing import Annotated, Any, Literal, cast
@@ -23,8 +24,8 @@ from ..logsafe import error_note
 from ..me import DESCRIPTION_MAX, SKILL_CAP, TITLE_MAX, MeError, MeNotFound, MeSkill, MeVersion
 from ..me.access import legacy_retired, me_store
 from ..me.graph import Area, EntryKind, GraphEntry, GraphState, GraphUnavailable, MeGraphStore, Origin
-from ..me.observations import Family, Hypothesis
-from ..me.policy import applies, classify
+from ..me.observations import SHARED_CHAT, Family, Hypothesis
+from ..me.policy import applies, classify, conflicting_instructions
 from ..me.store import MeStore
 from ..me.tools import mark_undone
 
@@ -122,7 +123,7 @@ class KbGraphEntry(BaseModel):
     origin: Origin | Literal["observed"]
     scoped: bool
     enabled: bool
-    status: Literal["ready", "not_used", "needs_context", "shadow"]
+    status: Literal["ready", "not_used", "needs_context", "shadow", "conflict"]
     created_at: str | None
     why: str
 
@@ -226,8 +227,9 @@ async def _migrate(graph: MeGraphStore) -> bool:
     return True
 
 
-def _graph_entry(state: GraphState, entry: GraphEntry) -> KbGraphEntry:
-    status: Literal["ready", "not_used", "needs_context"] = "ready"
+def _graph_entry(state: GraphState, entry: GraphEntry,
+                 conflicts: dict[str, GraphEntry] | None = None) -> KbGraphEntry:
+    status: Literal["ready", "not_used", "needs_context", "conflict"] = "ready"
     hidden_fact = entry.area == "personal" and not state.controls.personal
     if not state.controls.enabled or not entry.enabled or hidden_fact:
         status = "not_used"
@@ -239,6 +241,11 @@ def _graph_entry(state: GraphState, entry: GraphEntry) -> KbGraphEntry:
         why = "You gave this lasting instruction or fact in a chat."
     else:
         why = "You added this entry in Me."
+    if status == "ready" and entry.kind == "instruction":
+        other = (conflicting_instructions(state) if conflicts is None else conflicts).get(entry.id)
+        if other is not None:
+            status = "conflict"
+            why += f" This conflicts with “{other.text}” in the same situation. Edit or disable either entry."
     if status == "needs_context":
         why += " SKAZ could not match this entry to a supported situation."
     return KbGraphEntry(
@@ -253,7 +260,8 @@ def _graph_pattern(state: GraphState, item: Hypothesis, admitted: frozenset[Fami
     study = item.family == "study_revision"
     enabled = item.id not in state.ledger.suppressed
     allowed = state.controls.enabled and (state.controls.study if study else state.controls.chat)
-    text = "During revision, let me try first." if study else "After a discussion branches, offer a recap."
+    text = ("Choosing an independent attempt during revision." if study
+            else "Returning to a discussion’s original goal.")
     count = item.positive + item.negative
     if not count:
         why = "SKAZ hasn’t observed a comparable choice yet."
@@ -268,10 +276,34 @@ def _graph_pattern(state: GraphState, item: Hypothesis, admitted: frozenset[Fami
         status = "ready" if applies(state, item, admitted) else "shadow"
     return KbGraphEntry(
         id=item.id, text=text, revision=item.revision, area="practice" if study else "chat",
-        kind="observed", origin="observed", scoped=True, enabled=enabled,
+        kind="observed", origin="observed", scoped=item.scope != SHARED_CHAT, enabled=enabled,
         status=status, created_at=None, why=why,
         title=None, description=None,
     )
+
+
+def _reply_patterns(state: GraphState) -> dict[str, tuple[str, KbGraphEntry]]:
+    rows = {}
+    for name, counts in state.replies.counts().items():
+        if not sum(counts[k] for k in ("confirmed", "continued", "corrected")):
+            continue
+        identity = "reply-" + hashlib.sha256(name.encode()).hexdigest()[:32]
+        enabled = name not in state.replies.disabled
+        active = enabled and state.controls.learning_epoch("chat") is not None
+        retained = sum(state.replies.retained.get(name, {}).values())
+        why = (f"Confirmed {counts['confirmed']}, continued without correction {counts['continued']}, "
+               f"corrected {counts['corrected']}, unknown {counts['unknown']}. "
+               "Continuation applies to the response as a whole.")
+        if retained:
+            why += f" {retained} anonymous outcomes from removed chats are included in these totals."
+        searchable = any(name in item.outcomes() for item in state.replies.attempts.values())
+        row = KbGraphEntry(id=identity, revision=state.revision, text=f"Responses using {name}.",
+                           title=None, description=None, area="chat", kind="observed", origin="observed",
+                           scoped=False, enabled=enabled,
+                           status="ready" if active and searchable else "not_used",
+                           created_at=None, why=why)
+        rows[identity] = (name, row)
+    return rows
 
 
 def _skill(skill: MeSkill) -> KbMeSkill:
@@ -401,15 +433,17 @@ async def undo_edit(edit_id: str, request: Request, chats: ChatsDep) -> KbMeSkil
 async def graph_entries(graph: GraphDep, offset: Annotated[int, Query(ge=0)] = 0,
                         limit: Annotated[int, Query(ge=1, le=100)] = 50) -> KbGraphEntries:
     state = await disk_call(graph.open)
-    entries: list[GraphEntry | Hypothesis] = [
+    entries: list[GraphEntry | Hypothesis | KbGraphEntry] = [
         rows[-1] for rows in state.entries.values() if rows[-1].text and not rows[-1].deleted
     ]
     entries.extend(state.ledger.patterns.values())
+    entries.extend(row for _, row in _reply_patterns(state).values())
     window = entries[offset:offset + limit]
     next_offset = offset + limit if offset + limit < len(entries) else None
+    conflicts = conflicting_instructions(state)
     return KbGraphEntries(
-        entries=[_graph_entry(state, item) if isinstance(item, GraphEntry)
-                 else _graph_pattern(state, item, graph.admitted)
+        entries=[_graph_entry(state, item, conflicts) if isinstance(item, GraphEntry)
+                 else _graph_pattern(state, item, graph.admitted) if isinstance(item, Hypothesis) else item
                  for item in window],
         next_offset=next_offset,
     )
@@ -418,6 +452,8 @@ async def graph_entries(graph: GraphDep, offset: Annotated[int, Query(ge=0)] = 0
 @router.get("/entries/{entry_id}")
 async def read_graph_entry(entry_id: str, graph: GraphDep) -> KbGraphEntry:
     state = await disk_call(graph.open)
+    if entry_id.startswith("reply-") and (row := _reply_patterns(state).get(entry_id)):
+        return row[1]
     if entry_id in state.ledger.patterns:
         return _graph_pattern(state, state.ledger.patterns[entry_id], graph.admitted)
     return _graph_entry(state, graph.current(state, entry_id))
@@ -436,6 +472,17 @@ async def update_graph_entry(
     entry_id: str, body: KbGraphUpdate, graph: GraphDep, chats: ChatsDep,
 ) -> KbGraphEntry:
     state = await disk_call(graph.open)
+    if entry_id.startswith("reply-") and (row := _reply_patterns(state).get(entry_id)):
+        correction = body.text is not None and body.area == "chat" and body.enabled is None
+        if not correction and (body.enabled is None or body.text is not None or body.area is not None):
+            raise MeError("Choose a correction or change pattern access.")
+        changed = await disk_call(graph.manage_reply, row[0], body.expected_revision,
+                                  enabled=body.enabled, correction=body.text)
+        await chats.drop_graph_sessions()
+        if correction:
+            return _graph_entry(changed, next(rows[-1] for rows in changed.entries.values()
+                                              if rows[-1].revision == changed.revision))
+        return _reply_patterns(changed)[entry_id][1]
     if entry_id in state.ledger.patterns:
         if body.text is not None and body.area is not None and body.enabled is None:
             item = await disk_call(graph.correct_pattern, entry_id, body.expected_revision,
@@ -457,6 +504,10 @@ async def update_graph_entry(
 async def forget_graph_entry(entry_id: str, expected_revision: Annotated[int, Query(ge=0)],
                              graph: GraphDep, chats: ChatsDep) -> Response:
     state = await disk_call(graph.open)
+    if entry_id.startswith("reply-") and (row := _reply_patterns(state).get(entry_id)):
+        await disk_call(graph.manage_reply, row[0], expected_revision)
+        await chats.drop_graph_sessions()
+        return Response(status_code=204)
     forget = graph.forget_pattern if entry_id in state.ledger.patterns else graph.forget
     await disk_call(forget, entry_id, expected_revision)
     await chats.drop_graph_sessions()
@@ -466,6 +517,8 @@ async def forget_graph_entry(entry_id: str, expected_revision: Annotated[int, Qu
 @router.get("/entries/{entry_id}/history")
 async def graph_history(entry_id: str, graph: GraphDep) -> KbGraphHistory:
     state = await disk_call(graph.open)
+    if entry_id.startswith("reply-") and (row := _reply_patterns(state).get(entry_id)):
+        return KbGraphHistory(versions=[row[1]])
     if entry_id in state.ledger.patterns:
         return KbGraphHistory(versions=[_graph_pattern(state, pattern, graph.admitted)
                                        for pattern in reversed(state.ledger.history.get(entry_id, ()))])

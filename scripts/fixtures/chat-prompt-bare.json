@@ -1,0 +1,436 @@
+[
+  {
+    "id": "suffix_id",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Артикул «qP7-Tz». Напиши только последние два символа артикула, сохранив регистр.",
+    "bare": true,
+    "checks": {
+      "exact": "Tz"
+    },
+    "template": "bare"
+  },
+  {
+    "id": "tea_time",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Прибавь к 10:20 ровно 15 минут. Только время в том же формате.",
+    "bare": true,
+    "checks": {
+      "exact": "10:35"
+    },
+    "template": "bare"
+  },
+  {
+    "id": "solo_symbol",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Only give the chemical symbol for gold.",
+    "bare": true,
+    "checks": {
+      "exact": "Au",
+      "marker": "first"
+    },
+    "template": "bare"
+  },
+  {
+    "id": "empty_array",
+    "split": "qualification",
+    "level": "simple",
+    "request": "В списке «слива, липа, лён» нет слов на букву Б. Верни отсутствующие совпадения в виде пустого JSON-массива.",
+    "bare": true,
+    "checks": {
+      "json": []
+    },
+    "template": "bare"
+  },
+  {
+    "id": "space_count",
+    "split": "qualification",
+    "level": "simple",
+    "request": "В кавычках три слова: «май или июнь». Напиши только количество пробелов между словами.",
+    "bare": true,
+    "checks": {
+      "exact": "2"
+    },
+    "template": "bare"
+  },
+  {
+    "id": "decimals",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Из чисел 0.9 и 0.12 выдай большее, используя точку. Только число.",
+    "bare": true,
+    "checks": {
+      "exact": "0.9"
+    },
+    "template": "bare"
+  },
+  {
+    "id": "toggle",
+    "split": "qualification",
+    "level": "simple",
+    "request": "El registro dice «la luz está apagada». Responde únicamente SÍ o NO: ¿está encendida?",
+    "bare": true,
+    "checks": {
+      "exact": "NO"
+    },
+    "template": "bare"
+  },
+  {
+    "id": "separator",
+    "split": "qualification",
+    "level": "simple",
+    "request": "В строке «milo;den;key» замени разделители на / и верни только получившуюся строку.",
+    "bare": true,
+    "checks": {
+      "exact": "milo/den/key"
+    },
+    "template": "bare"
+  },
+  {
+    "id": "months",
+    "split": "qualification",
+    "level": "simple",
+    "request": "В каком месяце начинается календарный год? Ответь одним словом в именительном падеже на русском.",
+    "bare": true,
+    "checks": {
+      "patterns": [
+        "^(?:Январь|январь)[.!]?$"
+      ],
+      "marker": "first"
+    },
+    "template": "bare"
+  },
+  {
+    "id": "map_pair",
+    "split": "qualification",
+    "level": "simple",
+    "request": "Перенеси одну пару «size = 4» в JSON с числовым значением. В ответе только объект.",
+    "bare": true,
+    "checks": {
+      "json": {
+        "size": 4
+      }
+    },
+    "template": "bare"
+  },
+  {
+    "id": "teams_total",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Четыре команды по 5 человек и две по 3. Пятеро ушли. Выдай только JSON с исходным количеством людей под ключом before и оставшимся под ключом after.",
+    "bare": true,
+    "checks": {
+      "json": {
+        "before": 26,
+        "after": 21
+      }
+    },
+    "template": "bare"
+  },
+  {
+    "id": "half_open",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Занятие идёт с 10:00 включительно до 10:30 исключительно. Из записей 09:59, 10:00, 10:15, 10:30 оставь попавшие внутрь в исходном порядке. Ответь массивом JSON со строками времени.",
+    "bare": true,
+    "checks": {
+      "json": [
+        "10:00",
+        "10:15"
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "two_tanks",
+    "split": "qualification",
+    "level": "complex",
+    "request": "В баке A 16 л, в баке B 4 л. Сначала четверть содержимого A перелили в B, затем половину получившегося B вернули в A. Сколько в каждом баке? Только JSON с ключами A и B.",
+    "bare": true,
+    "checks": {
+      "json": {
+        "A": 16,
+        "B": 4
+      }
+    },
+    "template": "bare"
+  },
+  {
+    "id": "nday",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Экспресс выехал в 23:15 и был в пути 85 минут. Верни только JSON с временем прибытия в arrival и признаком следующих суток в tomorrow.",
+    "bare": true,
+    "checks": {
+      "json": {
+        "arrival": "00:40",
+        "tomorrow": true
+      }
+    },
+    "template": "bare"
+  },
+  {
+    "id": "order_by_cost",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Варианты: К=15 монет за 3 штуки; М=22 за 4; Т=12 за 3. Перечисли обозначения по возрастанию цены за штуку. Только JSON-массив исходных кириллических букв.",
+    "bare": true,
+    "checks": {
+      "json": [
+        "Т",
+        "К",
+        "М"
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "rename_cols",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Есть строки (A,2),(B,3),(A,5). Сложи значения по группе и верни две строки как массив объектов с ключами group и total в порядке первого появления группы. Нужен только JSON.",
+    "bare": true,
+    "checks": {
+      "json": [
+        {
+          "group": "A",
+          "total": 7
+        },
+        {
+          "group": "B",
+          "total": 3
+        }
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "filter_codes",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Билеты: P-3 использован, P-2 действует, P-8 действует, P-5 погашен. Ответь только JSON-массивом действующих билетов, сохрани порядок.",
+    "bare": true,
+    "checks": {
+      "json": [
+        "P-2",
+        "P-8"
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "budget_choice",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Есть 60 минут и 500 ₽. Поездка A — 45 минут и 520 ₽. B — 60 минут и 490 ₽. C — 65 минут и 400 ₽. Обе границы включены. Напиши подходящую букву и объясни в одном абзаце, почему другие не подходят.",
+    "bare": true,
+    "checks": {
+      "paragraph": true,
+      "patterns": [
+        "\\bB\\b",
+        "\\bA\\b",
+        "\\bC\\b",
+        "520",
+        "65"
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "credits",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Сначала на счету 10 баллов. Пополнения +4 и +8, два списания по 3. Представь поступления, расходы и остаток только в JSON под ключами income, spent и balance.",
+    "bare": true,
+    "checks": {
+      "json": {
+        "income": 12,
+        "spent": 6,
+        "balance": 16
+      }
+    },
+    "template": "bare"
+  },
+  {
+    "id": "matrix_choice",
+    "split": "qualification",
+    "level": "complex",
+    "request": "A открыл 2 из 4 заявок, B — 2 из 5. Посчитай проценты. Нужна таблица Markdown со строками A, B и процентом каждой группы.",
+    "bare": true,
+    "checks": {
+      "table_rows": [
+        [
+          "^A$",
+          "50"
+        ],
+        [
+          "^B$",
+          "40"
+        ]
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "deliverable",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Rédige une seule phrase en français pour prévenir Léa que le rendez-vous passe de 14:00 à 15:00. Donne juste le message.",
+    "bare": true,
+    "checks": {
+      "one_sentence": true,
+      "patterns": [
+        "L[ée]a",
+        "14\\s*(?::|h)\\s*(?:00)?",
+        "15\\s*(?::|h)\\s*(?:00)?"
+      ],
+      "forbid": [
+        "here is|черновик|voici un"
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "known_gap",
+    "split": "qualification",
+    "level": "complex",
+    "request": "В моей заявке записано только число мест, адрес я не указывал. Известно ли из этих данных, куда придёт курьер? Коротко ответь, каких сведений хватает или недостаёт.",
+    "bare": true,
+    "checks": {
+      "gap": true,
+      "patterns": [
+        "адрес|мест[оау] доставк"
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "specific_source_only",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Только по тексту «пачку опечатали утром» ответь: указан ли точный час опечатывания? Один короткий абзац.",
+    "bare": true,
+    "checks": {
+      "gap": true,
+      "paragraph": true,
+      "patterns": [
+        "час|врем"
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "causality",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Прибор X и прибор Y одновременно показали рост. Доказывает ли это само по себе, что X вызвал рост Y? Объясни одним абзацем.",
+    "bare": true,
+    "checks": {
+      "paragraph": true,
+      "patterns": [
+        "причин|связ",
+        "нельзя|\\bне\\b|\\bнет\\b|недостат"
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "stages_c",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Выдача разрешена только после сверки, а сверка только после регистрации. Перечисли эти три действия по порядку нумерованным списком.",
+    "bare": true,
+    "checks": {
+      "list_n": 3,
+      "ordered": [
+        "регистр",
+        "свер|сравн",
+        "выд"
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "lcm",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Два сигнала сработали одновременно в 12:00. Один повторяется каждые 6 минут, другой каждые 8. Когда они впервые совпадут снова? Нужен только ответ в формате HH:MM.",
+    "bare": true,
+    "checks": {
+      "exact": "12:24"
+    },
+    "template": "bare"
+  },
+  {
+    "id": "stretch",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Объясни одним абзацем разницу между испарением и кипением, указав, где в жидкости идёт каждый процесс.",
+    "bare": true,
+    "checks": {
+      "paragraph": true,
+      "marker": "first",
+      "patterns": [
+        "испар",
+        "кипен",
+        "поверхност",
+        "объ[её]м|толщ|всей жидк"
+      ]
+    },
+    "template": "bare"
+  },
+  {
+    "id": "lists",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Из A=[2,4,6,8] и B=[4,7,8] сделай два списка: общие значения в common и уникальные для A в only_a. Порядок как в A. Верни только JSON-объект.",
+    "bare": true,
+    "checks": {
+      "json": {
+        "common": [
+          4,
+          8
+        ],
+        "only_a": [
+          2,
+          6
+        ]
+      }
+    },
+    "template": "bare"
+  },
+  {
+    "id": "nights",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Гость заселился вечером 4 мая и выехал утром 7 мая. Ночь стоит 18 монет. Выдай JSON только с количеством оплачиваемых ночей в nights и общей ценой в cost.",
+    "bare": true,
+    "checks": {
+      "json": {
+        "nights": 3,
+        "cost": 54
+      }
+    },
+    "template": "bare"
+  },
+  {
+    "id": "draft_only",
+    "split": "qualification",
+    "level": "complex",
+    "request": "Предложи короткую тему письма про перенесённый на пятницу демопоказ. Я сам отправлю письмо. В ответе только тема в одну строку.",
+    "bare": true,
+    "checks": {
+      "paragraph": true,
+      "patterns": [
+        "демо|показ",
+        "пятниц"
+      ],
+      "forbid": [
+        "я отправ|письмо отправ|вот (?:тема|вариант)"
+      ]
+    },
+    "template": "bare"
+  }
+]

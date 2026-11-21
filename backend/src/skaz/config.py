@@ -27,7 +27,8 @@ class AppConfig:
     local_model_cache_dir: Path | None = None
     documents_dir: Path = field(default_factory=lambda: Path.home() / "Documents")
     documents_sandbox: Path | None = None
-    #: Run Me Graph on a separate, explicitly supplied synthetic profile.
+    use_legacy_me: bool = False
+    #: Require an explicitly isolated profile when exercising the smoke harness.
     me_graph_isolated: bool = False
 
     def validate_me_graph_profile(self) -> None:

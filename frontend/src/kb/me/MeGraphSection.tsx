@@ -9,7 +9,7 @@ const AREA: Record<KbGraphEntry['area'], string> = {
   chat: 'Chat', practice: 'Practice', personal: 'Personal profile',
 };
 const STATUS: Record<KbGraphEntry['status'], string> = {
-  ready: 'In use', not_used: 'Not used', needs_context: 'Not used', shadow: 'Learning · not used',
+  ready: 'In use', not_used: 'Not used', needs_context: 'Not used', shadow: 'Learning · not used', conflict: 'Conflicting instructions',
 };
 type Inline = { id: string; mode: 'why' | 'edit' | 'history' | 'forget' };
 type LearningKey = 'study' | 'chat' | 'personal';

@@ -90,7 +90,7 @@ export interface ChatsActions {
   exportChat: (chatId: string) => Promise<ActionResult<{ file_name: string; markdown: string }>>;
   rename: (chatId: string, title: string) => Promise<ActionResult>;
   setPinned: (chatId: string, pinned: boolean) => Promise<ActionResult>;
-  remove: (chatId: string) => Promise<ActionResult>;
+  remove: (chatId: string, keepExperience?: boolean) => Promise<ActionResult>;
   markRead: (chatId: string) => Promise<void>;
   /** Change agent/model/effort; on an existing chat the backend records it (409 = not available). */
   setAgent: (chatId: string | null, choice: AgentChoice) => Promise<ActionResult>;
@@ -717,8 +717,10 @@ export function createChatsStore(client: KbClient): ChatsStore {
         const s = await client.call('PATCH /kb/chats/{chat_id}', { path: { chat_id: chatId }, body: { pinned } });
         patchSummary(chatId, { pinned: s.pinned });
       }),
-      remove: (chatId) => act(async () => {
-        await client.call('DELETE /kb/chats/{chat_id}', { path: { chat_id: chatId } });
+      remove: (chatId, keepExperience = true) => act(async () => {
+        await client.call('DELETE /kb/chats/{chat_id}', {
+          path: { chat_id: chatId }, query: { keep_experience: keepExperience },
+        });
         const adj = adjacentSelection(get().openTabIds, chatId);
         const wasActive = get().currentId === chatId;
         const nextCurrentId = wasActive ? adj.nextActiveId : get().currentId;

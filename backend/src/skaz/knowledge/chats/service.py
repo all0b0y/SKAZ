@@ -27,6 +27,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -81,7 +82,8 @@ from ..markdown.text import name_key
 from ..me import MeError
 from ..me.access import graph_store, me_store
 from ..me.adapters import accept_chat, is_branching
-from ..me.graph import GraphEdit, GraphUnavailable, MeGraphStore
+from ..me.experience import delivered, original, own_input
+from ..me.graph import GraphEdit, GraphUnavailable, MeGraphStore, SourceChange
 from ..me.policy import Projection, ProjectionReader, TurnContext, review_requested, task_for
 from ..me.prompt import held_after_turn, marks, needs_reseed, snapshot, with_me
 from ..me.tools import graph_memory_part
@@ -110,7 +112,7 @@ from ..study.store import StudyBlock
 from . import shaping
 from .analysis import NOTHING_TO_SAVE, ONLY_UNCITED_DIAGRAMS, AnalysisRefused, AnalysisWriter, Section
 from .blocks import AnswerBlocks, finish_drawing
-from .context import ContextBuilder, history, instructions
+from .context import ANSWER_DELIVERY, ContextBuilder, history, instructions
 from .events import ChatEvent, ChatFeed, ListFeed
 from .export import ChatExport, export_chat
 from .fix_part import WikiFixPart
@@ -746,7 +748,7 @@ class ChatService:
                     return option.label
         return model
 
-    async def delete(self, chat_id: str) -> None:
+    async def delete(self, chat_id: str, *, keep_experience: bool = True) -> None:
         await self._chat(chat_id)
         run = self._runs.get(chat_id)
         if run is not None:
@@ -754,11 +756,15 @@ class ChatService:
             await self._stop_run(run)
         graph = graph_store(self.kb)
         if graph is not None:
-            with contextlib.suppress(GraphUnavailable):
-                sources = {message.id for message in await disk_call(self.repo.messages, chat_id)}
-                if await disk_call(graph.revoke_sources, sources, scope=chat_id):
-                    await self.drop_graph_sessions()
-        await disk_call(self.repo.delete, chat_id)  # its live session is queued for deletion (cascade)
+            sources = frozenset(message.id for message in await disk_call(self.repo.messages, chat_id))
+            change = SourceChange(scope=chat_id, sources=sources, keep_experience=keep_experience)
+            deleted = await disk_call(graph.change_source, change, partial(self.repo.delete, chat_id))
+        else:
+            deleted = await disk_call(self.repo.delete, chat_id)
+        if not deleted:
+            raise NotFound("Chat not found.")
+        if graph is not None:
+            await self.drop_graph_sessions()
         self._frame_pins.drop_chat(chat_id)
         self._feeds.pop(chat_id, None)
         self._list.touch(chat_id)
@@ -1045,21 +1051,19 @@ class ChatService:
             merged = tuple(dict.fromkeys((*chat.folder_ids, *folders)))
             if merged != chat.folder_ids:
                 updates["folder_ids"] = merged
-            removed, answer = await disk_call(
-                self.repo.rewrite_from,
-                question,
-                self._new_answer(chat, question.id, now, text_only=text_only_mode),
-                updates,
-            )
+            replacement = self._new_answer(chat, question.id, now, text_only=text_only_mode)
+            rewrite = partial(self.repo.rewrite_from, question, replacement, updates)
+            graph = graph_store(self.kb)
+            if graph is None:
+                removed, answer = await disk_call(rewrite)
+            else:
+                sources = frozenset(message.id for message in messages if message.seq >= target.seq)
+                change = SourceChange(sources=sources)
+                removed, answer = await disk_call(graph.change_source, change, rewrite)
+                await self.drop_graph_sessions()
         except BaseException:
             self._reserved.discard(chat_id)
             raise
-        graph = graph_store(self.kb)
-        if graph is not None:
-            with contextlib.suppress(GraphUnavailable):
-                changed = await disk_call(graph.revoke_sources, {question.id, *removed})
-                if changed:
-                    await self.drop_graph_sessions()
         feed = self._feed(chat_id)
         for gone in removed:
             feed.emit("removed", gone)
@@ -1160,8 +1164,12 @@ class ChatService:
         task = task_for(text, practice_scope is not None)
         if task == "unknown" and is_branching(question, prior):
             task = "branching"
+        clean = own_input(given) and given.selection is None
+        recall = (original(state.replies, question, prior)
+                  if clean and state.controls.learning_epoch("chat") else None)
         return self._me_reader.read(
-            state, TurnContext(chat_id, text, task, practice_scope is not None, practice_scope),
+            state, TurnContext(chat_id, text, task, practice_scope is not None, practice_scope,
+                               saved_original=recall, experience_allowed=clean),
             graph.admitted, opportunity=fresh_user,
         )
 
@@ -1170,6 +1178,19 @@ class ChatService:
             if (run.run_id == run_id and run.fresh_user and not run.stopping
                     and run.question is not None and run.graph_epoch is not None):
                 return run.question, run.message.id, run.graph_epoch
+        return None
+
+    def mark_me_search(self, run_id: str) -> tuple[str, str] | None:
+        for run in self._runs.values():
+            if (run.run_id == run_id and not run.stopping and run.graph_epoch and run.question
+                    and run.question.input and own_input(run.question.input)
+                    and not run.question.input.selection):
+                run.graph_sensitive = True
+                # A tool can search a different situation than the automatic projection. Its
+                # evidence belongs to this turn, so the live session must reseed on next use.
+                if run.context is not None:
+                    run.context = replace(run.context, graph_stamp=f"search:{run.run_id}")
+                return run.chat_id, run.graph_epoch
         return None
 
     async def _drive(self, run: _Run, chat: Chat, question: Message, prior: list[Message]) -> None:
@@ -1196,6 +1217,7 @@ class ChatService:
                         # need to be sent to the engine, and may be used by this turn's tools.
                         question = replace(question, input=replace(question.input, attachments=remaining))
                         run.question = question
+                        run.observe_epoch = None  # rewritten attachment inputs are not personal experience
             assert question.input is not None
             scope = scope_of(await disk_call(SearchRulesStore(self.kb.db, self.kb.settings).chat, chat.id))
             request = await disk_call(builder.request, chat, question.input, self._other_chat, scope)
@@ -1238,13 +1260,15 @@ class ChatService:
             web_text = web_instructions(web, tool=not native) if self.web is not None else ""
             # N7: the chat's search rules (kept by SKAZ in code) and N7-5's time window — the window in
             # every chat (Q1 n78 M-9), its web sentences only with web.
-            parts = (web_text, rules_instructions(rules) if rules is not None else "",
-                     TIME_WINDOW_RULES, TIME_WINDOW_WEB if web_text else "")
+            time_rules = TIME_WINDOW_RULES + ("\n\n" + TIME_WINDOW_WEB if web_text else "")
+            parts = (f"<web_access>\n{web_text}\n</web_access>" if web_text else "",
+                     rules_instructions(rules) if rules is not None else "",
+                     f"<time_window>\n{time_rules}\n</time_window>")
             web_text = "\n\n".join(part for part in parts if part)
-            if web_text:
-                told = f"{told}\n\n{web_text}"
+            told = f"{told}\n\n{web_text}"
             if me is not None:
                 told = with_me(told, me)  # legacy profiles only
+            told = f"{told}\n\n{ANSWER_DELIVERY}"
             # N6: continue / revert the chat's live session, or start a new seeded one. The context also
             # records the tool set and fixed instructions a session starts with (a change reseeds once).
             context: SessionContext | None = None
@@ -1270,7 +1294,10 @@ class ChatService:
                 payload = request
                 if projection is not None and projection.block:
                     payload = f"{projection.block}\n\n{request}"
-                turn = await self._turn(run, chat, prior, entries, payload, told, gate, skills)
+                turn_instructions = told
+                if projection is not None and projection.reply_format:
+                    turn_instructions += f"\n\n<me_reply_format>{projection.reply_format}</me_reply_format>"
+                turn = await self._turn(run, chat, prior, entries, payload, turn_instructions, gate, skills)
                 if graph is not None and projection is not None:
                     epoch = None
                     with contextlib.suppress(GraphUnavailable):
@@ -1677,10 +1704,13 @@ class ChatService:
             run.stopping = True
         if active:
             await asyncio.gather(*(self._stop_run(run) for run in active))
+        dropped = False
         for chat_id, held in await disk_call(self.sessions.contexts):
-            if held is not None and (held.me is not None or held.graph_epoch != epoch):
-                await disk_call(self.sessions.drop, chat_id)
-        self._kick_deletions()
+            if (held is not None and (held.me is not None or held.graph_epoch != epoch)
+                    and await disk_call(self.sessions.drop, chat_id)):
+                dropped = True
+        if dropped:
+            self._kick_deletions()
 
     async def mark_graph_edit_undone(self, edit_id: str, edit: GraphEdit) -> None:
         await self.update_part(edit.chat_id, edit.message_id, graph_memory_part(edit_id, undone=True))
@@ -1833,6 +1863,14 @@ class ChatService:
                     if message.parts:
                         updates["last_preview"] = preview(message.parts)
                 await disk_call(self.repo.save_message, message, updates)
+                if (state == "done" and run.observe_epoch and run.question and not run.deleted
+                        and run.fresh_user):
+                    graph = graph_store(self.kb)
+                    if graph is not None:
+                        with contextlib.suppress(MeError):
+                            attempt = await disk_call(delivered, run.question, message, run.observe_epoch)
+                            if attempt is not None:
+                                await disk_call(graph.record_reply, attempt)
                 if state == "done" and run.cited_frames and not run.deleted:
                     await disk_call(self._retain_answer_frames, run)
                 # A part changed during the awaits above (e.g. Undo of a «Я» edit, ``update_part``): save

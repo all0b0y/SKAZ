@@ -1135,7 +1135,7 @@ export interface KbGraphEntry {
   origin: "user" | "agent" | "restore" | "observed";
   scoped: boolean;
   enabled: boolean;
-  status: "ready" | "not_used" | "needs_context" | "shadow";
+  status: "ready" | "not_used" | "needs_context" | "shadow" | "conflict";
   created_at: string | null;
   why: string;
 }
@@ -3365,7 +3365,7 @@ export interface KbEndpoints {
   };
   "DELETE /kb/chats/{chat_id}": {
     path: { chat_id: string };
-    query: Record<string, never>;
+    query: { keep_experience?: boolean };
     body: never;
     response: void;
     status: 204;

@@ -521,8 +521,8 @@ async def change_chat(chat_id: str, body: KbChatPatch, chats: ChatsDep) -> KbCha
 
 
 @router.delete("/{chat_id}", status_code=204)
-async def delete_chat(chat_id: str, chats: ChatsDep) -> None:
-    await chats.delete(chat_id)
+async def delete_chat(chat_id: str, chats: ChatsDep, keep_experience: bool = True) -> None:
+    await chats.delete(chat_id, keep_experience=keep_experience)
 
 
 @router.post("/{chat_id}/read", status_code=204)

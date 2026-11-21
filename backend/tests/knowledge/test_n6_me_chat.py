@@ -26,6 +26,8 @@ from tests.knowledge.chat_support import Agents, chips, connect, finished, insta
 from tests.knowledge.test_chats_api import Env
 
 PROFILE_TEXT = "Name: Aglaya Sekretova. Studies physics at MSU; exam in January."
+pytestmark = pytest.mark.parametrize("kb_config", ["legacy_me"], indirect=True)
+
 HOW_TEXT = "Give an example first, then the theory."
 SKILL_TEXT = "Drill: ten questions, then review the misses."
 LIVE = SessionSupport(live=True, revert=True)
